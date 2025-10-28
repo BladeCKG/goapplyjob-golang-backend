@@ -54,6 +54,14 @@ Example screenshot of OTEL tracing captured and shown in Jeager UI:
 
 Type `make install-dependencies` to retrieve Go packages needed by the project.
 
+### Configuration
+
+Open telemetry sampling rate can be configured by setting the `OTEL_SAMPLING_RATE`
+environmental variable from 0.0 to 1.0.
+0.0 means no tracing and 1.0 means include all traces.
+Value is measured in percents.
+Therefore 0.5 means 50% of the samples will be collected.
+
 ### Demoing usage
 
 ```bash
