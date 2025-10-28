@@ -142,6 +142,7 @@ func (o *OtelTracerMetrics) defaultTracerProvider(ctx context.Context) error {
 	}
 
 	samplingRate := getSamplerFromEnv()
+	l.Logger.Info().Msgf("Set OTEL sampling rate to %.2f", samplingRate)
 
 	// Register the trace exporter with a TracerProvider, using a batch
 	// span processor to aggregate spans before export.
