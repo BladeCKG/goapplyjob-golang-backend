@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -121,6 +123,17 @@ func (o *OtelTracerMetrics) Close(ctx context.Context) {
 	})
 }
 
+const defaulSamplingRate float64 = 0.5
+
+func getSamplerFromEnv() float64 {
+	rateStr := os.Getenv("OTEL_SAMPLING_RATE")
+	rate, err := strconv.ParseFloat(rateStr, 64)
+	if err != nil || rate < 0 || rate > 1 {
+		rate = defaulSamplingRate
+	}
+	return rate
+}
+
 func (o *OtelTracerMetrics) defaultTracerProvider(ctx context.Context) error {
 	// Set up a trace exporter
 	traceExporter, err := otlptracegrpc.New(ctx, otlptracegrpc.WithGRPCConn(o.connection))
@@ -128,11 +141,13 @@ func (o *OtelTracerMetrics) defaultTracerProvider(ctx context.Context) error {
 		return fmt.Errorf("trace exporter: %w", err)
 	}
 
+	samplingRate := getSamplerFromEnv()
+
 	// Register the trace exporter with a TracerProvider, using a batch
 	// span processor to aggregate spans before export.
 	bsp := sdktrace.NewBatchSpanProcessor(traceExporter)
 	o.tracer = sdktrace.NewTracerProvider(
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(samplingRate))),
 		sdktrace.WithResource(o.res),
 		sdktrace.WithSpanProcessor(bsp),
 	)
