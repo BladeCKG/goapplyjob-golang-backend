@@ -7,6 +7,7 @@ import (
 	"errors"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -378,9 +379,10 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		}
 		if _, err := s.DB.SQL.ExecContext(
 			ctx,
-			`INSERT INTO parsed_jobs (raw_us_job_id, created_at_source, url, categorized_job_title, categorized_job_function, role_title, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO parsed_jobs (raw_us_job_id, external_job_id, created_at_source, url, categorized_job_title, categorized_job_function, role_title, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(raw_us_job_id) DO UPDATE SET
+			   external_job_id = excluded.external_job_id,
 			   created_at_source = excluded.created_at_source,
 			   url = excluded.url,
 			   categorized_job_title = excluded.categorized_job_title,
@@ -388,6 +390,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			   role_title = excluded.role_title,
 			   updated_at = excluded.updated_at`,
 			row.id,
+			stringFromPayload(payload["id"]),
 			formatNullableTime(sourceCreatedAt),
 			stringFromPayload(payload["url"]),
 			categorizedTitle,
@@ -413,11 +416,21 @@ func formatNullableTime(value *time.Time) any {
 }
 
 func stringFromPayload(value any) any {
-	text, ok := value.(string)
-	if !ok || text == "" {
+	switch item := value.(type) {
+	case string:
+		if strings.TrimSpace(item) == "" {
+			return nil
+		}
+		return strings.TrimSpace(item)
+	case float64:
+		return strings.TrimSpace(strconv.FormatInt(int64(item), 10))
+	case int:
+		return strconv.Itoa(item)
+	case int64:
+		return strconv.FormatInt(item, 10)
+	default:
 		return nil
 	}
-	return text
 }
 
 func stringValue(value any) string {

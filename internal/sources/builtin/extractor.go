@@ -275,13 +275,12 @@ func slugFromURL(rawURL string) any {
 }
 
 func extractExternalJobID(rawURL, identifier string) any {
-	if id, err := strconv.Atoi(identifier); err == nil {
-		return id
+	if strings.TrimSpace(identifier) != "" {
+		return strings.TrimSpace(identifier)
 	}
 	re := regexp.MustCompile(`/(\d+)(?:[/?#]|$)`)
 	if match := re.FindStringSubmatch(rawURL); len(match) == 2 {
-		id, _ := strconv.Atoi(match[1])
-		return id
+		return match[1]
 	}
 	return nil
 }

@@ -75,7 +75,7 @@ func TestExtractJobBuildsBuiltInRawJobShape(t *testing.T) {
 </html>`
 
 	payload := ExtractJob(htmlText, companyHTML)
-	if payload["id"] != 12345 {
+	if payload["id"] != "12345" {
 		t.Fatalf("expected external job id, got %#v", payload["id"])
 	}
 	if payload["url"] != "https://jobs.acme.example/apply/12345" {

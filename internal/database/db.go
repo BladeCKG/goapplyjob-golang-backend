@@ -51,6 +51,7 @@ func (db *DB) Migrate(ctx context.Context) error {
         );`,
 		`CREATE TABLE IF NOT EXISTS parsed_companies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            external_company_id TEXT,
             name TEXT,
             slug TEXT,
             tagline TEXT,
@@ -64,6 +65,7 @@ func (db *DB) Migrate(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS parsed_jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             raw_us_job_id INTEGER NOT NULL UNIQUE,
+            external_job_id TEXT,
             company_id INTEGER,
             created_at_source TEXT,
             url TEXT,
@@ -194,6 +196,12 @@ func (db *DB) Migrate(ctx context.Context) error {
 		return fmt.Errorf("create parsed_jobs salary_max_usd index: %w", err)
 	}
 	if err := db.ensureColumn(ctx, "parsed_jobs", "categorized_job_function", "TEXT"); err != nil {
+		return err
+	}
+	if err := db.ensureColumn(ctx, "parsed_jobs", "external_job_id", "TEXT"); err != nil {
+		return err
+	}
+	if err := db.ensureColumn(ctx, "parsed_companies", "external_company_id", "TEXT"); err != nil {
 		return err
 	}
 	if err := db.ensureColumn(ctx, "raw_us_jobs", "source", "TEXT NOT NULL DEFAULT 'remoterocketship'"); err != nil {

@@ -38,10 +38,9 @@ func ExtractJobListings(htmlText string) []map[string]any {
 			continue
 		}
 		jobURL := stringValue(node["url"])
-		externalJobID := extractExternalJobID(jobURL, "")
 		postDate := ""
-		if externalJobIDInt, ok := externalJobID.(int); ok {
-			postDate = publishedDatesByJobID[externalJobIDInt]
+		if externalJobID := extractNumericExternalJobID(jobURL); externalJobID > 0 {
+			postDate = publishedDatesByJobID[externalJobID]
 		}
 		normalizedPostDate := normalizePostDate(postDate)
 		parsed = append(parsed, map[string]any{
@@ -55,6 +54,15 @@ func ExtractJobListings(htmlText string) []map[string]any {
 		})
 	}
 	return parsed
+}
+
+func extractNumericExternalJobID(rawURL string) int {
+	re := regexp.MustCompile(`/(\d+)(?:[/?#]|$)`)
+	if match := re.FindStringSubmatch(rawURL); len(match) == 2 {
+		id, _ := strconv.Atoi(match[1])
+		return id
+	}
+	return 0
 }
 
 func findItemListLD(htmlText string) (map[string]any, map[string]any) {

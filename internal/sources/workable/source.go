@@ -171,7 +171,7 @@ func buildRawPayload(item map[string]any, urlValue string, postDate time.Time) m
 	}
 	isEntry, isJunior, isMid, isSenior, isLead := inferSeniority(title)
 	return map[string]any{
-		"id":                           nil,
+		"id":                           stringOrNil(item["id"]),
 		"created_at":                   postDate.UTC().Format(time.RFC3339Nano),
 		"validUntilDate":               nil,
 		"dateDeleted":                  nil,
@@ -205,7 +205,7 @@ func buildRawPayload(item map[string]any, urlValue string, postDate time.Time) m
 		"techStack":                                []string{},
 		"salaryRange":                              map[string]any{},
 		"company": map[string]any{
-			"id":              nil,
+			"id":              stringOrNil(company["id"]),
 			"name":            stringOrNil(company["title"]),
 			"slug":            nil,
 			"tagline":         nil,
