@@ -356,6 +356,37 @@ func TestJobsPostDateFilterAndOptions(t *testing.T) {
 	}
 }
 
+func TestJobsEmploymentTypeFilterAndOptions(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertEmploymentTypeJob(t, db, 101, "full-time")
+	insertEmploymentTypeJob(t, db, 102, "contract")
+
+	optionsReq := httptest.NewRequest(http.MethodGet, "/jobs/filter-options", nil)
+	optionsRec := httptest.NewRecorder()
+	router.ServeHTTP(optionsRec, optionsReq)
+	assertStatus(t, optionsRec.Code, http.StatusOK)
+
+	var optionsBody map[string]any
+	decodeBody(t, optionsRec.Body.Bytes(), &optionsBody)
+	if len(optionsBody["employment_types"].([]any)) != 2 {
+		t.Fatalf("unexpected employment type options %#v", optionsBody)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?employment_type=contract", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	items := body["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["employment_type"].(string) != "contract" {
+		t.Fatalf("unexpected employment type filter response %#v", body)
+	}
+}
+
 func TestPricingFlow(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
@@ -725,6 +756,18 @@ func insertDatedJob(t *testing.T, db *database.DB, rawID int, createdAt time.Tim
 		t.Fatal(err)
 	}
 	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, created_at_source, url) VALUES (?, 'Software Engineer', ?, ?)`, rawID+5000, createdAt.Format(time.RFC3339Nano), "https://jobs.example.com/date-"+strconv.Itoa(rawID))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertEmploymentTypeJob(t *testing.T, db *database.DB, rawID int, employmentType string) {
+	t.Helper()
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 1, 0, '{}')`, rawID+6000, "https://example.com/employment-"+strconv.Itoa(rawID), time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, employment_type, created_at_source, url) VALUES (?, 'Software Engineer', ?, ?, ?)`, rawID+6000, employmentType, time.Now().UTC().Format(time.RFC3339Nano), "https://jobs.example.com/employment-"+strconv.Itoa(rawID))
 	if err != nil {
 		t.Fatal(err)
 	}

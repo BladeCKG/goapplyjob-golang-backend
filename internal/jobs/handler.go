@@ -249,6 +249,11 @@ func (h *Handler) filterOptions(c *gin.Context) {
 		techStacks = append(techStacks, value)
 	}
 	sortStrings(techStacks)
+	employmentTypes, err := selectStrings(c, h.db, `SELECT DISTINCT employment_type FROM parsed_jobs WHERE employment_type IS NOT NULL AND employment_type != '' ORDER BY employment_type ASC`)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
+		return
+	}
 
 	salaryRows, err := h.db.SQL.QueryContext(c.Request.Context(), `SELECT `+annualizedSalarySQL(`COALESCE(salary_min_usd, salary_min)`)+` FROM parsed_jobs WHERE salary_min_usd IS NOT NULL OR salary_min IS NOT NULL`)
 	if err != nil {
@@ -274,8 +279,9 @@ func (h *Handler) filterOptions(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"job_categories": categories,
-		"locations":      locations,
+		"job_categories":   categories,
+		"locations":        locations,
+		"employment_types": employmentTypes,
 		"post_date_options": []string{
 			"24_hours",
 			"48_hours",
@@ -353,6 +359,14 @@ func (h *Handler) listJobs(c *gin.Context) {
 			normalizedStack := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(techStack)), `"`, `\"`)
 			parts = append(parts, `lower(COALESCE(p.tech_stack, '')) LIKE ?`)
 			args = append(args, `%`+"\""+normalizedStack+"\""+`%`)
+		}
+		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
+	}
+	if employmentTypes := parseCSVQuery(c.Query("employment_type")); len(employmentTypes) > 0 {
+		parts := make([]string, 0, len(employmentTypes))
+		for _, employmentType := range employmentTypes {
+			parts = append(parts, `p.employment_type LIKE ?`)
+			args = append(args, "%"+employmentType+"%")
 		}
 		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 	}
