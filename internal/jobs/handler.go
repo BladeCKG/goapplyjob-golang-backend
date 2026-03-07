@@ -108,7 +108,28 @@ func (h *Handler) Register(router gin.IRouter) {
 }
 
 func annualizedSalarySQL(expr string) string {
-	return fmt.Sprintf(`(%s) * CASE lower(COALESCE(salary_type, 'yearly')) WHEN 'hourly' THEN 2080.0 WHEN 'hour' THEN 2080.0 WHEN 'hr' THEN 2080.0 WHEN 'daily' THEN 260.0 WHEN 'day' THEN 260.0 WHEN 'weekly' THEN 52.0 WHEN 'week' THEN 52.0 WHEN 'monthly' THEN 12.0 WHEN 'month' THEN 12.0 ELSE 1.0 END`, expr)
+	return fmt.Sprintf(`(%s) * CASE
+		WHEN lower(trim(COALESCE(salary_type, 'yearly'))) IN ('hourly', 'hour', 'hr')
+			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%%hour%%'
+			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%%/hr%%'
+			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%% hr%%'
+		THEN 2080.0
+		WHEN lower(trim(COALESCE(salary_type, 'yearly'))) IN ('daily', 'day')
+			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%%day%%'
+			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%%/day%%'
+		THEN 260.0
+		WHEN lower(trim(COALESCE(salary_type, 'yearly'))) IN ('weekly', 'week')
+			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%%week%%'
+			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%%/wk%%'
+			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%% wk%%'
+		THEN 52.0
+		WHEN lower(trim(COALESCE(salary_type, 'yearly'))) IN ('monthly', 'month')
+			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%%month%%'
+			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%%/mo%%'
+			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%% mo%%'
+		THEN 12.0
+		ELSE 1.0
+	END`, expr)
 }
 
 func parseCSVQuery(value string) []string {

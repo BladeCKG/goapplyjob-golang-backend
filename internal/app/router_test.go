@@ -148,6 +148,7 @@ func TestJobsFilterOptionsAnnualized(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
 	insertJobWithSalaryType(t, db, 1, "Hourly Role", 40, "hourly")
+	insertJobWithSalaryType(t, db, 4, "Hourly Slash Role", 40, "$40/hr")
 	insertJobWithSalaryType(t, db, 2, "Monthly Role", 6000, "monthly")
 	insertJobWithSalaryType(t, db, 3, "Yearly Role", 70000, "yearly")
 	for idx := 0; idx < 12; idx++ {
@@ -163,6 +164,17 @@ func TestJobsFilterOptionsAnnualized(t *testing.T) {
 	minSalaryOptions := body["min_salary_options"].([]any)
 	if len(minSalaryOptions) != 11 {
 		t.Fatalf("unexpected min salary options %#v", body)
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/jobs?sort_criteria=salary", nil)
+	rec2 := httptest.NewRecorder()
+	router.ServeHTTP(rec2, req2)
+	assertStatus(t, rec2.Code, http.StatusOK)
+	var body2 map[string]any
+	decodeBody(t, rec2.Body.Bytes(), &body2)
+	items := body2["items"].([]any)
+	if len(items) == 0 {
+		t.Fatalf("expected salary-sorted jobs")
 	}
 }
 
