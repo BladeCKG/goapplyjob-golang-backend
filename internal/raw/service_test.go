@@ -39,7 +39,7 @@ func TestProcessPendingUsesNormalizedURLForFetchAndKeepsOriginalPayloadURL(t *te
 	defer db.Close()
 
 	jobURL := "https://www.remoterocketship.com/us/company/acme/jobs/dev/"
-	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, '2026-02-12T10:00:00Z', 0, 0, 0, 0, NULL)`, jobURL)
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES ('remoterocketship', ?, '2026-02-12T10:00:00Z', 0, 0, 0, 0, NULL)`, jobURL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,5 +80,20 @@ func TestProcessPendingUsesNormalizedURLForFetchAndKeepsOriginalPayloadURL(t *te
 	}
 	if payload["url"] != jobURL {
 		t.Fatalf("expected payload url %s, got %#v", jobURL, payload["url"])
+	}
+}
+
+func TestToTargetJobURLForSourceBuiltinKeepsURLUnchanged(t *testing.T) {
+	rawURL := "https://builtin.com/job/u-s-senior-staff-product-designer/8511517"
+	if toTargetJobURLForSource("builtin", rawURL) != rawURL {
+		t.Fatalf("expected builtin URL to remain unchanged")
+	}
+}
+
+func TestParseHTMLForSourceBuiltinUsesBuiltinExtractor(t *testing.T) {
+	html := `<html><head><link rel="canonical" href="https://builtin.com/job/platform-engineer/12345"><script type="application/ld+json">{"@type":"JobPosting","title":"Engineer"}</script></head></html>`
+	payload := parseHTMLForSource("builtin", html, "https://builtin.com/job/platform-engineer/12345")
+	if payload["roleTitle"] != "Engineer" {
+		t.Fatalf("expected builtin extractor role title, got %#v", payload["roleTitle"])
 	}
 }

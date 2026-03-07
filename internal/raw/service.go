@@ -10,10 +10,14 @@ import (
 	"strings"
 
 	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/sources/builtin"
 )
 
 const statusNotFound = 404
-const sourceName = "remoterocketship"
+const (
+	sourceRemoteRocketship = "remoterocketship"
+	sourceBuiltin          = "builtin"
+)
 
 type ReadHTMLFunc func(string) (string, int, error)
 type ParseHTMLFunc func(string) (map[string]any, error)
@@ -77,24 +81,46 @@ func toTargetJobURL(rawURL string) string {
 	return parsed.String()
 }
 
+func toTargetJobURLForSource(source, rawURL string) string {
+	if source == sourceBuiltin {
+		return rawURL
+	}
+	return toTargetJobURL(rawURL)
+}
+
+func parseHTMLForSource(source, html, sourceURL string) map[string]any {
+	switch source {
+	case sourceBuiltin:
+		return builtin.ExtractJob(html, "")
+	default:
+		parser := New(nil).ParseHTML
+		payload, _ := parser(html)
+		if payload == nil {
+			return map[string]any{}
+		}
+		return payload
+	}
+}
+
 func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error) {
 	if batchSize <= 0 {
 		batchSize = 100
 	}
-	rows, err := s.DB.SQL.QueryContext(ctx, `SELECT id, url FROM raw_us_jobs WHERE source = ? AND is_ready = 0 AND is_skippable = 0 ORDER BY id DESC LIMIT ?`, sourceName, batchSize)
+	rows, err := s.DB.SQL.QueryContext(ctx, `SELECT id, url, COALESCE(source, '') FROM raw_us_jobs WHERE is_ready = 0 AND is_skippable = 0 ORDER BY post_date DESC, id DESC LIMIT ?`, batchSize)
 	if err != nil {
 		return 0, err
 	}
 	defer rows.Close()
 
 	type rawJob struct {
-		id  int64
-		url string
+		id     int64
+		url    string
+		source string
 	}
 	jobs := make([]rawJob, 0, batchSize)
 	for rows.Next() {
 		var job rawJob
-		if err := rows.Scan(&job.id, &job.url); err != nil {
+		if err := rows.Scan(&job.id, &job.url, &job.source); err != nil {
 			return 0, err
 		}
 		jobs = append(jobs, job)
@@ -105,7 +131,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 
 	processed := 0
 	for _, job := range jobs {
-		targetURL := toTargetJobURL(job.url)
+		targetURL := toTargetJobURLForSource(job.source, job.url)
 		html, statusCode, err := s.ReadHTML(targetURL)
 		if err != nil {
 			return processed, err
@@ -123,6 +149,9 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			payload, err := s.ParseHTML(html)
 			if err != nil {
 				return processed, err
+			}
+			if source := strings.TrimSpace(job.source); source != "" && source != sourceRemoteRocketship {
+				payload = parseHTMLForSource(source, html, job.url)
 			}
 			if payload == nil {
 				payload = map[string]any{}
