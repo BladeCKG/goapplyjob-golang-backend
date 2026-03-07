@@ -22,7 +22,20 @@ const (
 	defaultBatchSize       = 1000
 )
 
-var tableOrder = []string{"parsed_companies", "raw_us_jobs", "parsed_jobs"}
+var preferredTableOrder = []string{
+	"parsed_companies",
+	"raw_us_jobs",
+	"parsed_jobs",
+	"watcher_states",
+	"watcher_payloads",
+	"auth_users",
+	"auth_password_credentials",
+	"auth_verification_codes",
+	"auth_sessions",
+	"pricing_plans",
+	"pricing_payments",
+	"user_subscriptions",
+}
 
 func main() {
 	_ = config.LoadDotEnvIfExists(".env")
@@ -55,8 +68,12 @@ func main() {
 	log.Printf("[filter] post_date >= %s", cutoff.Format(time.RFC3339Nano))
 
 	ctx := context.Background()
+	tableNames, err := commonTableNames(ctx, sourceDB, targetDB)
+	if err != nil {
+		log.Fatal(err)
+	}
 	total := 0
-	for _, tableName := range tableOrder {
+	for _, tableName := range tableNames {
 		copied, err := copyTable(ctx, sourceDB, targetDB, tableName, *batchSize, cutoff)
 		if err != nil {
 			log.Fatalf("copy %s: %v", tableName, err)
@@ -93,7 +110,14 @@ func copyTable(ctx context.Context, sourceDB, targetDB *sql.DB, tableName string
 		args = append(args, cutoff.Format(time.RFC3339Nano))
 	}
 
-	query := fmt.Sprintf("SELECT %s FROM %s %s ORDER BY id ASC", strings.Join(sharedColumns, ", "), tableName, whereSQL)
+	resumeFromID, err := targetMaxID(ctx, targetDB, tableName)
+	if err != nil {
+		return 0, err
+	}
+	query := fmt.Sprintf("SELECT %s FROM %s %s %s ORDER BY id ASC", strings.Join(sharedColumns, ", "), tableName, whereSQL, resumeWhereSQL(resumeFromID, whereSQL == ""))
+	if resumeFromID > 0 {
+		args = append(args, resumeFromID)
+	}
 	rows, err := sourceDB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return 0, err
@@ -159,15 +183,69 @@ func upsertBatch(ctx context.Context, db *sql.DB, tableName string, columns []st
 		}
 		updateCols = append(updateCols, fmt.Sprintf("%s = EXCLUDED.%s", col, col))
 	}
-	sqlText := fmt.Sprintf(
-		"INSERT INTO %s (%s) VALUES %s ON CONFLICT (id) DO UPDATE SET %s",
-		tableName,
-		strings.Join(columns, ", "),
-		strings.Join(valueGroups, ", "),
-		strings.Join(updateCols, ", "),
-	)
+	sqlText := ""
+	switch tableName {
+	case "raw_us_jobs":
+		sqlText = fmt.Sprintf(
+			"INSERT INTO %s (%s) VALUES %s ON CONFLICT (url) DO NOTHING",
+			tableName,
+			strings.Join(columns, ", "),
+			strings.Join(valueGroups, ", "),
+		)
+	case "parsed_jobs":
+		sqlText = fmt.Sprintf(
+			"INSERT INTO %s (%s) VALUES %s ON CONFLICT (raw_us_job_id) DO UPDATE SET %s",
+			tableName,
+			strings.Join(columns, ", "),
+			strings.Join(valueGroups, ", "),
+			strings.Join(filterOut(updateCols, "raw_us_job_id = EXCLUDED.raw_us_job_id"), ", "),
+		)
+	default:
+		sqlText = fmt.Sprintf(
+			"INSERT INTO %s (%s) VALUES %s ON CONFLICT (id) DO UPDATE SET %s",
+			tableName,
+			strings.Join(columns, ", "),
+			strings.Join(valueGroups, ", "),
+			strings.Join(updateCols, ", "),
+		)
+	}
 	_, err := db.ExecContext(ctx, sqlText, args...)
 	return err
+}
+
+func commonTableNames(ctx context.Context, sourceDB, targetDB *sql.DB) ([]string, error) {
+	sourceTables, err := sqliteTableNames(ctx, sourceDB)
+	if err != nil {
+		return nil, err
+	}
+	targetTables, err := postgresTableNames(ctx, targetDB)
+	if err != nil {
+		return nil, err
+	}
+	targetSet := map[string]struct{}{}
+	for _, name := range targetTables {
+		targetSet[name] = struct{}{}
+	}
+	ordered := make([]string, 0, len(preferredTableOrder))
+	used := map[string]struct{}{}
+	for _, name := range preferredTableOrder {
+		if contains(sourceTables, name) {
+			if _, ok := targetSet[name]; ok {
+				ordered = append(ordered, name)
+				used[name] = struct{}{}
+			}
+		}
+	}
+	for _, name := range sourceTables {
+		if _, ok := targetSet[name]; !ok {
+			continue
+		}
+		if _, seen := used[name]; seen {
+			continue
+		}
+		ordered = append(ordered, name)
+	}
+	return ordered, nil
 }
 
 func sharedTableColumns(ctx context.Context, sourceDB, targetDB *sql.DB, tableName string) ([]string, error) {
@@ -221,6 +299,23 @@ func sqliteColumns(ctx context.Context, db *sql.DB, tableName string) ([]string,
 	return out, rows.Err()
 }
 
+func sqliteTableNames(ctx context.Context, db *sql.DB) ([]string, error) {
+	rows, err := db.QueryContext(ctx, `SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out = append(out, name)
+	}
+	return out, rows.Err()
+}
+
 func postgresColumns(ctx context.Context, db *sql.DB, tableName string) ([]string, error) {
 	rows, err := db.QueryContext(ctx, `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position`, tableName)
 	if err != nil {
@@ -238,6 +333,42 @@ func postgresColumns(ctx context.Context, db *sql.DB, tableName string) ([]strin
 	return out, rows.Err()
 }
 
+func postgresTableNames(ctx context.Context, db *sql.DB) ([]string, error) {
+	rows, err := db.QueryContext(ctx, `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		out = append(out, name)
+	}
+	return out, rows.Err()
+}
+
+func targetMaxID(ctx context.Context, db *sql.DB, tableName string) (int64, error) {
+	query := fmt.Sprintf("SELECT COALESCE(MAX(id), 0) FROM %s", tableName)
+	var maxID int64
+	if err := db.QueryRowContext(ctx, query).Scan(&maxID); err != nil {
+		return 0, err
+	}
+	return maxID, nil
+}
+
+func resumeWhereSQL(resumeFromID int64, noWhere bool) string {
+	if resumeFromID <= 0 {
+		return ""
+	}
+	if noWhere {
+		return "WHERE id > ?"
+	}
+	return "AND id > ?"
+}
+
 func normalizeSQLiteValue(value any) any {
 	switch v := value.(type) {
 	case []byte:
@@ -247,12 +378,31 @@ func normalizeSQLiteValue(value any) any {
 	}
 }
 
+func filterOut(values []string, target string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != target {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
 func normalizePostgresURL(raw string) string {
 	value := strings.TrimSpace(strings.Trim(raw, `"'`))
 	if strings.HasPrefix(strings.ToLower(value), "postgres://") {
 		return "postgresql://" + strings.TrimPrefix(value, "postgres://")
 	}
 	return value
+}
+
+func contains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func getenv(key, fallback string) string {
