@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -99,6 +100,32 @@ func Load() Config {
 		NowPaymentsIPNSecret:          getenv("NOWPAYMENTS_IPN_SECRET", ""),
 		SkippableRecheckBatchSize:     getenvInt("SKIPPABLE_RECHECK_BATCH_SIZE", 100),
 	}
+}
+
+func LoadDotEnv(path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, exists := os.LookupEnv(key); exists {
+			continue
+		}
+		_ = os.Setenv(key, strings.TrimSpace(value))
+	}
+	return nil
 }
 
 func getenv(key, fallback string) string {

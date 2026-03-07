@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
 
 	"goapplyjob-golang-backend/internal/app"
 	"goapplyjob-golang-backend/internal/config"
@@ -9,6 +10,9 @@ import (
 )
 
 func main() {
+	if _, err := os.Stat(".env"); err == nil {
+		_ = config.LoadDotEnv(".env")
+	}
 	cfg := config.Load()
 	db, err := database.Open(cfg.DatabaseURL)
 	if err != nil {
