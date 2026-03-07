@@ -13,4 +13,5 @@ if (-not (Test-Path ".env") -and (Test-Path ".env.example")) {
 
 New-Item -ItemType Directory -Force -Path "logs" | Out-Null
 
+docker compose run --rm api /app/migrate
 docker compose --profile workers up -d --build

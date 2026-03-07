@@ -111,6 +111,7 @@ What these scripts do:
 
 * create `.env` from `.env.example` if missing
 * ensure `logs/` exists
+* run `go run ./cmd/migrate`
 * start the Go API and watcher commands in background
 
 ### Docker Bootstrap (Linux + Windows)
@@ -129,6 +130,14 @@ Windows PowerShell:
 cd <backend-directory>
 .\scripts\docker_bootstrap_and_start.ps1
 ```
+
+Run migrations before API or workers:
+
+```bash
+go run ./cmd/migrate
+```
+
+DB health endpoint: `http://127.0.0.1:8080/db/health`.
 
 ### Render Deployment (API + Workers)
 

@@ -16,4 +16,5 @@ fi
 
 mkdir -p logs
 
+docker compose run --rm api /app/migrate
 docker compose --profile workers up -d --build

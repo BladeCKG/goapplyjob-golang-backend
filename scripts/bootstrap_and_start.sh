@@ -16,6 +16,8 @@ fi
 
 mkdir -p logs
 
+go run ./cmd/migrate
+
 run_service() {
   local name="$1"
   local logfile="$2"

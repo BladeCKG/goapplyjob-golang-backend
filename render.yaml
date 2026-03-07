@@ -11,7 +11,7 @@ services:
     plan: starter
     dockerContext: .
     dockerfilePath: ./Dockerfile
-    dockerCommand: /app/api
+    dockerCommand: /bin/sh -lc "/app/migrate && /app/api"
     autoDeploy: true
     healthCheckPath: /health
     envVars:

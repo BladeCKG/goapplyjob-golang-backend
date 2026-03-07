@@ -17,6 +17,8 @@ if (-not (Test-Path ".env") -and (Test-Path ".env.example")) {
 
 New-Item -ItemType Directory -Force -Path "logs" | Out-Null
 
+go run ./cmd/migrate
+
 if ($ForceRebuild) {
     go build ./cmd/api
     go build ./cmd/watcher
