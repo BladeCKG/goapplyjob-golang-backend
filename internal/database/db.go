@@ -48,6 +48,18 @@ func (db *DB) Migrate(ctx context.Context) error {
             retry_count INTEGER NOT NULL DEFAULT 0,
             raw_json TEXT
         );`,
+		`CREATE TABLE IF NOT EXISTS parsed_companies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            slug TEXT,
+            tagline TEXT,
+            profile_pic_url TEXT,
+            home_page_url TEXT,
+            linkedin_url TEXT,
+            employee_range TEXT,
+            founded_year TEXT,
+            sponsors_h1b INTEGER
+        );`,
 		`CREATE TABLE IF NOT EXISTS parsed_jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             raw_us_job_id INTEGER NOT NULL UNIQUE,
@@ -55,9 +67,17 @@ func (db *DB) Migrate(ctx context.Context) error {
             created_at_source TEXT,
             url TEXT,
             categorized_job_title TEXT,
+            role_title TEXT,
+            role_description TEXT,
+            role_requirements TEXT,
+            benefits TEXT,
+            job_description_summary TEXT,
             location TEXT,
             location_city TEXT,
+            location_type TEXT,
             location_us_states TEXT,
+            employment_type TEXT,
+            salary_type TEXT,
             salary_min REAL,
             salary_max REAL,
             salary_min_usd REAL,
@@ -67,7 +87,13 @@ func (db *DB) Migrate(ctx context.Context) error {
             is_mid_level INTEGER,
             is_senior INTEGER,
             is_lead INTEGER,
-            FOREIGN KEY(raw_us_job_id) REFERENCES raw_us_jobs(id)
+            education_requirements_credential_category TEXT,
+            experience_requirements_months INTEGER,
+            experience_in_place_of_education INTEGER,
+            required_languages TEXT,
+            tech_stack TEXT,
+            FOREIGN KEY(raw_us_job_id) REFERENCES raw_us_jobs(id),
+            FOREIGN KEY(company_id) REFERENCES parsed_companies(id)
         );`,
 		`CREATE TABLE IF NOT EXISTS auth_users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

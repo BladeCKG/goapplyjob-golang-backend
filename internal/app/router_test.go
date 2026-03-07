@@ -1,248 +1,329 @@
 package app
 
 import (
-    "bytes"
-    "context"
-    "encoding/json"
-    "net/http"
-    "net/http/httptest"
-    "strconv"
-    "testing"
-    "time"
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"testing"
+	"time"
 
-    "goapplyjob-golang-backend/internal/config"
-    "goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/config"
+	"goapplyjob-golang-backend/internal/database"
 
-    "github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin"
 )
 
 func TestJobsPublicAccess(t *testing.T) {
-    router, db := testRouter(t)
-    defer db.Close()
+	router, db := testRouter(t)
+	defer db.Close()
 
-    req := httptest.NewRequest(http.MethodGet, "/jobs", nil)
-    rec := httptest.NewRecorder()
-    router.ServeHTTP(rec, req)
+	req := httptest.NewRequest(http.MethodGet, "/jobs", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
 
-    assertStatus(t, rec.Code, http.StatusOK)
-    var body map[string]any
-    decodeBody(t, rec.Body.Bytes(), &body)
-    if body["is_preview"] != true {
-        t.Fatalf("expected preview mode, got %#v", body["is_preview"])
-    }
+	assertStatus(t, rec.Code, http.StatusOK)
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	if body["is_preview"] != true {
+		t.Fatalf("expected preview mode, got %#v", body["is_preview"])
+	}
 }
 
 func TestAuthAndJobsFlow(t *testing.T) {
-    router, db := testRouter(t)
-    defer db.Close()
+	router, db := testRouter(t)
+	defer db.Close()
 
-    insertJob(t, db, 1, "https://example.com/a", "Austin", "Texas", 120, 150, true, time.Date(2026, 2, 11, 0, 0, 0, 0, time.UTC))
-    insertJob(t, db, 2, "https://example.com/b", "Seattle", "Washington", 80, 100, false, time.Date(2026, 2, 10, 0, 0, 0, 0, time.UTC))
+	insertJob(t, db, 1, "https://example.com/a", "Austin", "Texas", 120, 150, true, time.Date(2026, 2, 11, 0, 0, 0, 0, time.UTC))
+	insertJob(t, db, 2, "https://example.com/b", "Seattle", "Washington", 80, 100, false, time.Date(2026, 2, 10, 0, 0, 0, 0, time.UTC))
 
-    code := requestLoginCode(t, router, "user@example.com")
-    cookie := verifyLoginCode(t, router, "user@example.com", code)
+	code := requestLoginCode(t, router, "user@example.com")
+	cookie := verifyLoginCode(t, router, "user@example.com", code)
 
-    req := httptest.NewRequest(http.MethodGet, "/jobs?sort_criteria=salary&job_title=Engineer&region=Texas&min_salary=100&seniority=senior&page=1&per_page=10", nil)
-    req.AddCookie(cookie)
-    rec := httptest.NewRecorder()
-    router.ServeHTTP(rec, req)
+	req := httptest.NewRequest(http.MethodGet, "/jobs?sort_criteria=salary&job_title=Engineer&region=Texas&min_salary=100&seniority=senior&page=1&per_page=10", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
 
-    assertStatus(t, rec.Code, http.StatusOK)
-    var body map[string]any
-    decodeBody(t, rec.Body.Bytes(), &body)
-    items := body["items"].([]any)
-    if len(items) != 1 {
-        t.Fatalf("expected one job, got %d", len(items))
-    }
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	items := body["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("expected one job, got %d", len(items))
+	}
+}
 
-    logoutReq := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
-    logoutReq.AddCookie(cookie)
-    logoutRec := httptest.NewRecorder()
-    router.ServeHTTP(logoutRec, logoutReq)
-    assertStatus(t, logoutRec.Code, http.StatusOK)
+func TestJobsPublicPreviewIsLimited(t *testing.T) {
+	cfg := config.Load()
+	cfg.DatabaseURL = "file:test_preview?mode=memory&cache=shared"
+	cfg.AuthDebugReturnCode = true
+	cfg.PublicJobsMaxPerPage = 3
+	cfg.PublicJobsMaxTotal = 5
+	db, err := database.Open(cfg.DatabaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	router := NewRouter(cfg, db)
+
+	for idx := 0; idx < 7; idx++ {
+		insertJob(t, db, idx+1, "https://example.com/"+strconv.Itoa(idx), "City-"+strconv.Itoa(idx), "State", float64(100+idx), float64(110+idx), idx%2 == 0, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC))
+	}
+
+	req1 := httptest.NewRequest(http.MethodGet, "/jobs?per_page=100&page=1", nil)
+	rec1 := httptest.NewRecorder()
+	router.ServeHTTP(rec1, req1)
+	assertStatus(t, rec1.Code, http.StatusOK)
+	var page1 map[string]any
+	decodeBody(t, rec1.Body.Bytes(), &page1)
+	if int(page1["total"].(float64)) != 7 || int(page1["page"].(float64)) != 1 || int(page1["per_page"].(float64)) != 3 || len(page1["items"].([]any)) != 3 {
+		t.Fatalf("unexpected preview page1 %#v", page1)
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/jobs?per_page=100&page=2", nil)
+	rec2 := httptest.NewRecorder()
+	router.ServeHTTP(rec2, req2)
+	assertStatus(t, rec2.Code, http.StatusOK)
+	var page2 map[string]any
+	decodeBody(t, rec2.Body.Bytes(), &page2)
+	if int(page2["page"].(float64)) != 1 || len(page2["items"].([]any)) != 3 {
+		t.Fatalf("unexpected preview page2 %#v", page2)
+	}
+}
+
+func TestJobsFilterOptionsAnnualized(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+	insertJobWithSalaryType(t, db, 1, "Hourly Role", 40, "hourly")
+	insertJobWithSalaryType(t, db, 2, "Monthly Role", 6000, "monthly")
+	insertJobWithSalaryType(t, db, 3, "Yearly Role", 70000, "yearly")
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs/filter-options", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	salaryRange := body["min_salary_range"].(map[string]any)
+	if salaryRange["min"].(float64) != 70000 || salaryRange["max"].(float64) != 83200 {
+		t.Fatalf("unexpected salary range %#v", salaryRange)
+	}
+}
+
+func TestJobDetailEndpoint(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+	companyID := insertCompany(t, db, "Example Co")
+	jobID := insertRichJob(t, db, companyID)
+
+	req := httptest.NewRequest(http.MethodGet, "/job/"+strconv.Itoa(jobID), nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	if body["company_name"].(string) != "Example Co" || body["role_title"].(string) != "Staff Backend Engineer" || body["salary_type"].(string) != "hourly" {
+		t.Fatalf("unexpected detail payload %#v", body)
+	}
+}
+
+func TestJobsListSupportsCSVFilters(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+	insertCSVJob(t, db, 1, "Data Engineer", "United States", true, 100000, "yearly")
+	insertCSVJob(t, db, 2, "Backend Engineer", "Canada", false, 60, "hourly")
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?job_title=Data+Engineer,Backend+Engineer&region=United+States,Canada&seniority=mid,senior&min_salary=90000", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	if int(body["total"].(float64)) != 2 || len(body["items"].([]any)) != 2 {
+		t.Fatalf("unexpected csv filter payload %#v", body)
+	}
 }
 
 func TestPricingFlow(t *testing.T) {
-    router, db := testRouter(t)
-    defer db.Close()
+	router, db := testRouter(t)
+	defer db.Close()
 
-    req := httptest.NewRequest(http.MethodGet, "/pricing/plans", nil)
-    rec := httptest.NewRecorder()
-    router.ServeHTTP(rec, req)
-    assertStatus(t, rec.Code, http.StatusOK)
+	req := httptest.NewRequest(http.MethodGet, "/pricing/plans", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
 
-    code := requestLoginCode(t, router, "price-user@example.com")
-    cookie := verifyLoginCode(t, router, "price-user@example.com", code)
+	code := requestLoginCode(t, router, "price-user@example.com")
+	cookie := verifyLoginCode(t, router, "price-user@example.com", code)
 
-    body, _ := json.Marshal(map[string]any{
-        "plan_code":      "monthly",
-        "provider":       "crypto",
-        "payment_method": "crypto",
-    })
-    subscribeReq := httptest.NewRequest(http.MethodPost, "/pricing/subscribe", bytes.NewReader(body))
-    subscribeReq.Header.Set("Content-Type", "application/json")
-    subscribeReq.AddCookie(cookie)
-    subscribeRec := httptest.NewRecorder()
-    router.ServeHTTP(subscribeRec, subscribeReq)
-    assertStatus(t, subscribeRec.Code, http.StatusOK)
+	body, _ := json.Marshal(map[string]any{"plan_code": "monthly", "provider": "crypto", "payment_method": "crypto"})
+	subscribeReq := httptest.NewRequest(http.MethodPost, "/pricing/subscribe", bytes.NewReader(body))
+	subscribeReq.Header.Set("Content-Type", "application/json")
+	subscribeReq.AddCookie(cookie)
+	subscribeRec := httptest.NewRecorder()
+	router.ServeHTTP(subscribeRec, subscribeReq)
+	assertStatus(t, subscribeRec.Code, http.StatusOK)
 
-    var payload map[string]any
-    decodeBody(t, subscribeRec.Body.Bytes(), &payload)
-    paymentID := int(payload["payment_id"].(float64))
+	var payload map[string]any
+	decodeBody(t, subscribeRec.Body.Bytes(), &payload)
+	paymentID := int(payload["payment_id"].(float64))
 
-    confirmReq := httptest.NewRequest(http.MethodPost, "/pricing/payments/"+strconv.Itoa(paymentID)+"/confirm", nil)
-    confirmReq.AddCookie(cookie)
-    confirmRec := httptest.NewRecorder()
-    router.ServeHTTP(confirmRec, confirmReq)
-    assertStatus(t, confirmRec.Code, http.StatusOK)
+	confirmReq := httptest.NewRequest(http.MethodPost, "/pricing/payments/"+strconv.Itoa(paymentID)+"/confirm", nil)
+	confirmReq.AddCookie(cookie)
+	confirmRec := httptest.NewRecorder()
+	router.ServeHTTP(confirmRec, confirmReq)
+	assertStatus(t, confirmRec.Code, http.StatusOK)
 }
 
 func TestPasswordSignupAndLoginFlow(t *testing.T) {
-    router, db := testRouter(t)
-    defer db.Close()
+	router, db := testRouter(t)
+	defer db.Close()
+	signupBody, _ := json.Marshal(map[string]string{"email": "pw-user@example.com", "password": "StrongPass123"})
+	signupReq := httptest.NewRequest(http.MethodPost, "/auth/password/signup", bytes.NewReader(signupBody))
+	signupReq.Header.Set("Content-Type", "application/json")
+	signupRec := httptest.NewRecorder()
+	router.ServeHTTP(signupRec, signupReq)
+	assertStatus(t, signupRec.Code, http.StatusOK)
+	cookie := signupRec.Result().Cookies()[0]
+	logoutReq := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+	logoutReq.AddCookie(cookie)
+	logoutRec := httptest.NewRecorder()
+	router.ServeHTTP(logoutRec, logoutReq)
+	assertStatus(t, logoutRec.Code, http.StatusOK)
 
-    signupBody, _ := json.Marshal(map[string]string{"email": "pw-user@example.com", "password": "StrongPass123"})
-    signupReq := httptest.NewRequest(http.MethodPost, "/auth/password/signup", bytes.NewReader(signupBody))
-    signupReq.Header.Set("Content-Type", "application/json")
-    signupRec := httptest.NewRecorder()
-    router.ServeHTTP(signupRec, signupReq)
-    assertStatus(t, signupRec.Code, http.StatusOK)
-
-    if countSessions(t, db) != 1 {
-        t.Fatalf("expected 1 session after signup")
-    }
-    cookie := signupRec.Result().Cookies()[0]
-
-    logoutReq := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
-    logoutReq.AddCookie(cookie)
-    logoutRec := httptest.NewRecorder()
-    router.ServeHTTP(logoutRec, logoutReq)
-    assertStatus(t, logoutRec.Code, http.StatusOK)
-    if countSessions(t, db) != 0 {
-        t.Fatalf("expected 0 sessions after logout")
-    }
-
-    loginBody, _ := json.Marshal(map[string]string{"email": "pw-user@example.com", "password": "StrongPass123"})
-    loginReq := httptest.NewRequest(http.MethodPost, "/auth/password/login", bytes.NewReader(loginBody))
-    loginReq.Header.Set("Content-Type", "application/json")
-    loginRec := httptest.NewRecorder()
-    router.ServeHTTP(loginRec, loginReq)
-    assertStatus(t, loginRec.Code, http.StatusOK)
-    if countSessions(t, db) != 1 {
-        t.Fatalf("expected 1 session after login")
-    }
-
-    badBody, _ := json.Marshal(map[string]string{"email": "pw-user@example.com", "password": "WrongPass123"})
-    badReq := httptest.NewRequest(http.MethodPost, "/auth/password/login", bytes.NewReader(badBody))
-    badReq.Header.Set("Content-Type", "application/json")
-    badRec := httptest.NewRecorder()
-    router.ServeHTTP(badRec, badReq)
-    assertStatus(t, badRec.Code, http.StatusUnauthorized)
+	loginBody, _ := json.Marshal(map[string]string{"email": "pw-user@example.com", "password": "StrongPass123"})
+	loginReq := httptest.NewRequest(http.MethodPost, "/auth/password/login", bytes.NewReader(loginBody))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginRec := httptest.NewRecorder()
+	router.ServeHTTP(loginRec, loginReq)
+	assertStatus(t, loginRec.Code, http.StatusOK)
 }
 
 func TestPasswordSignupValidatesPasswordLength(t *testing.T) {
-    router, db := testRouter(t)
-    defer db.Close()
-
-    body, _ := json.Marshal(map[string]string{"email": "short-pass@example.com", "password": "short"})
-    req := httptest.NewRequest(http.MethodPost, "/auth/password/signup", bytes.NewReader(body))
-    req.Header.Set("Content-Type", "application/json")
-    rec := httptest.NewRecorder()
-    router.ServeHTTP(rec, req)
-    assertStatus(t, rec.Code, http.StatusBadRequest)
+	router, db := testRouter(t)
+	defer db.Close()
+	body, _ := json.Marshal(map[string]string{"email": "short-pass@example.com", "password": "short"})
+	req := httptest.NewRequest(http.MethodPost, "/auth/password/signup", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusBadRequest)
 }
 
 func testRouter(t *testing.T) (*gin.Engine, *database.DB) {
-    t.Helper()
-
-    cfg := config.Load()
-    cfg.DatabaseURL = "file:test_page_extract_init?mode=memory&cache=shared"
-    cfg.AuthDebugReturnCode = true
-
-    db, err := database.Open(cfg.DatabaseURL)
-    if err != nil {
-        t.Fatal(err)
-    }
-    return NewRouter(cfg, db), db
+	t.Helper()
+	cfg := config.Load()
+	cfg.DatabaseURL = "file:test_page_extract?mode=memory&cache=shared"
+	cfg.AuthDebugReturnCode = true
+	db, err := database.Open(cfg.DatabaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewRouter(cfg, db), db
 }
 
 func insertJob(t *testing.T, db *database.DB, rawID int, rawURL, city, state string, salaryMin, salaryMax float64, isSenior bool, createdAt time.Time) {
-    t.Helper()
-    _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 1, 0, '{}')`, rawID, rawURL, createdAt.Format(time.RFC3339Nano))
-    if err != nil {
-        t.Fatal(err)
-    }
-    _, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, location, location_city, location_us_states, salary_min_usd, salary_max_usd, is_senior, created_at_source, url) VALUES (?, 'Software Engineer', 'United States', ?, ?, ?, ?, ?, ?, ?)`,
-        rawID,
-        city,
-        `["`+state+`"]`,
-        salaryMin,
-        salaryMax,
-        boolToInt(isSenior),
-        createdAt.Format(time.RFC3339Nano),
-        "https://jobs.example.com/"+strconv.Itoa(rawID),
-    )
-    if err != nil {
-        t.Fatal(err)
-    }
+	t.Helper()
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 1, 0, '{}')`, rawID, rawURL, createdAt.Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, location, location_city, location_us_states, salary_min_usd, salary_max_usd, is_senior, created_at_source, url) VALUES (?, 'Software Engineer', 'United States', ?, ?, ?, ?, ?, ?, ?)`, rawID, city, `["`+state+`"]`, salaryMin, salaryMax, boolToInt(isSenior), createdAt.Format(time.RFC3339Nano), "https://jobs.example.com/"+strconv.Itoa(rawID))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertJobWithSalaryType(t *testing.T, db *database.DB, rawID int, category string, salaryMinUSD float64, salaryType string) {
+	t.Helper()
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 1, 0, '{}')`, rawID, "https://example.com/"+strconv.Itoa(rawID), time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, salary_min_usd, salary_type, url) VALUES (?, ?, ?, ?, ?)`, rawID, category, salaryMinUSD, salaryType, "https://jobs.example.com/"+strconv.Itoa(rawID))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertCompany(t *testing.T, db *database.DB, name string) int64 {
+	t.Helper()
+	result, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_companies (name, slug, tagline, profile_pic_url, home_page_url, linkedin_url, employee_range, founded_year, sponsors_h1b) VALUES (?, 'example-co', 'tagline', 'https://img', 'https://home', 'https://linkedin', '11-50', '2020', 1)`, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := result.LastInsertId()
+	return id
+}
+
+func insertRichJob(t *testing.T, db *database.DB, companyID int64) int {
+	t.Helper()
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (999, 'https://example.com/job-detail', ?, 1, 0, 1, 0, '{}')`, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, company_id, categorized_job_title, role_title, role_description, role_requirements, location, location_city, salary_min_usd, salary_max_usd, salary_type, employment_type, benefits, url) VALUES (999, ?, 'Software Engineer', 'Staff Backend Engineer', 'Build distributed systems.', 'Python\nFastAPI', 'United States', 'Austin', 150, 210, 'hourly', 'full-time', 'Great benefits', 'https://jobs.example.com/detail')`, companyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := result.LastInsertId()
+	return int(id)
+}
+
+func insertCSVJob(t *testing.T, db *database.DB, rawID int, title, region string, isMid bool, salaryMin float64, salaryType string) {
+	t.Helper()
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 1, 0, '{}')`, rawID+2000, "https://example.com/csv-"+strconv.Itoa(rawID), time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, location, is_mid_level, is_senior, salary_min_usd, salary_type, url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, rawID+2000, title, region, boolToInt(isMid), boolToInt(!isMid), salaryMin, salaryType, "https://jobs.example.com/csv-"+strconv.Itoa(rawID))
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func requestLoginCode(t *testing.T, router http.Handler, email string) string {
-    t.Helper()
-    body, _ := json.Marshal(map[string]string{"email": email})
-    req := httptest.NewRequest(http.MethodPost, "/auth/login/request-code", bytes.NewReader(body))
-    req.Header.Set("Content-Type", "application/json")
-    rec := httptest.NewRecorder()
-    router.ServeHTTP(rec, req)
-    assertStatus(t, rec.Code, http.StatusOK)
-
-    var payload map[string]any
-    decodeBody(t, rec.Body.Bytes(), &payload)
-    return payload["debug_code"].(string)
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"email": email})
+	req := httptest.NewRequest(http.MethodPost, "/auth/login/request-code", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+	var payload map[string]any
+	decodeBody(t, rec.Body.Bytes(), &payload)
+	return payload["debug_code"].(string)
 }
 
 func verifyLoginCode(t *testing.T, router http.Handler, email, code string) *http.Cookie {
-    t.Helper()
-    body, _ := json.Marshal(map[string]string{"email": email, "code": code})
-    req := httptest.NewRequest(http.MethodPost, "/auth/login/verify-code", bytes.NewReader(body))
-    req.Header.Set("Content-Type", "application/json")
-    rec := httptest.NewRecorder()
-    router.ServeHTTP(rec, req)
-    assertStatus(t, rec.Code, http.StatusOK)
-
-    cookies := rec.Result().Cookies()
-    if len(cookies) == 0 {
-        t.Fatal("expected auth cookie")
-    }
-    return cookies[0]
-}
-
-func countSessions(t *testing.T, db *database.DB) int {
-    t.Helper()
-    var count int
-    if err := db.SQL.QueryRowContext(context.Background(), `SELECT COUNT(1) FROM auth_sessions`).Scan(&count); err != nil {
-        t.Fatal(err)
-    }
-    return count
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"email": email, "code": code})
+	req := httptest.NewRequest(http.MethodPost, "/auth/login/verify-code", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+	return rec.Result().Cookies()[0]
 }
 
 func decodeBody(t *testing.T, body []byte, dest any) {
-    t.Helper()
-    if err := json.Unmarshal(body, dest); err != nil {
-        t.Fatal(err)
-    }
+	t.Helper()
+	if err := json.Unmarshal(body, dest); err != nil {
+		t.Fatal(err)
+	}
 }
-
 func assertStatus(t *testing.T, got, want int) {
-    t.Helper()
-    if got != want {
-        t.Fatalf("status=%d want=%d", got, want)
-    }
+	t.Helper()
+	if got != want {
+		t.Fatalf("status=%d want=%d", got, want)
+	}
 }
-
 func boolToInt(value bool) int {
-    if value {
-        return 1
-    }
-    return 0
+	if value {
+		return 1
+	}
+	return 0
 }

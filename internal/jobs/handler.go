@@ -3,6 +3,7 @@ package jobs
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -22,23 +23,68 @@ type Handler struct {
 }
 
 type jobItem struct {
-	ID               int64      `json:"id"`
-	RawUSJobID       int64      `json:"raw_us_job_id"`
-	CategorizedTitle *string    `json:"categorized_job_title"`
-	Location         *string    `json:"location"`
-	LocationCity     *string    `json:"location_city"`
-	LocationUSStates []string   `json:"location_us_states"`
-	SalaryMin        *float64   `json:"salary_min"`
-	SalaryMax        *float64   `json:"salary_max"`
-	SalaryMinUSD     *float64   `json:"salary_min_usd"`
-	SalaryMaxUSD     *float64   `json:"salary_max_usd"`
-	IsEntryLevel     *bool      `json:"is_entry_level"`
-	IsJunior         *bool      `json:"is_junior"`
-	IsMidLevel       *bool      `json:"is_mid_level"`
-	IsSenior         *bool      `json:"is_senior"`
-	IsLead           *bool      `json:"is_lead"`
-	CreatedAtSource  *time.Time `json:"created_at_source"`
-	URL              *string    `json:"url"`
+	ID                    int64      `json:"id"`
+	RawUSJobID            int64      `json:"raw_us_job_id"`
+	RoleTitle             *string    `json:"role_title"`
+	JobDescriptionSummary *string    `json:"job_description_summary"`
+	CompanyName           *string    `json:"company_name"`
+	CompanySlug           *string    `json:"company_slug"`
+	CompanyTagline        *string    `json:"company_tagline"`
+	CompanyProfilePicURL  *string    `json:"company_profile_pic_url"`
+	CompanyHomePageURL    *string    `json:"company_home_page_url"`
+	CompanyLinkedInURL    *string    `json:"company_linkedin_url"`
+	CompanyEmployeeRange  *string    `json:"company_employee_range"`
+	CompanyFoundedYear    *string    `json:"company_founded_year"`
+	CompanySponsorsH1B    *bool      `json:"company_sponsors_h1b"`
+	CategorizedTitle      *string    `json:"categorized_job_title"`
+	Location              *string    `json:"location"`
+	LocationCity          *string    `json:"location_city"`
+	LocationType          *string    `json:"location_type"`
+	LocationUSStates      []string   `json:"location_us_states"`
+	EmploymentType        *string    `json:"employment_type"`
+	SalaryMin             *float64   `json:"salary_min"`
+	SalaryMax             *float64   `json:"salary_max"`
+	SalaryMinUSD          *float64   `json:"salary_min_usd"`
+	SalaryMaxUSD          *float64   `json:"salary_max_usd"`
+	SalaryType            *string    `json:"salary_type"`
+	IsEntryLevel          *bool      `json:"is_entry_level"`
+	IsJunior              *bool      `json:"is_junior"`
+	IsMidLevel            *bool      `json:"is_mid_level"`
+	IsSenior              *bool      `json:"is_senior"`
+	IsLead                *bool      `json:"is_lead"`
+	CreatedAtSource       *time.Time `json:"created_at_source"`
+	URL                   *string    `json:"url"`
+}
+
+type jobDetail struct {
+	ID                   int64    `json:"id"`
+	RawUSJobID           int64    `json:"raw_us_job_id"`
+	CompanyName          *string  `json:"company_name"`
+	CompanySlug          *string  `json:"company_slug"`
+	CompanyTagline       *string  `json:"company_tagline"`
+	CompanyProfilePicURL *string  `json:"company_profile_pic_url"`
+	CompanyHomePageURL   *string  `json:"company_home_page_url"`
+	CompanyLinkedInURL   *string  `json:"company_linkedin_url"`
+	CompanyEmployeeRange *string  `json:"company_employee_range"`
+	CompanyFoundedYear   *string  `json:"company_founded_year"`
+	CompanySponsorsH1B   *bool    `json:"company_sponsors_h1b"`
+	CategorizedTitle     *string  `json:"categorized_job_title"`
+	RoleTitle            *string  `json:"role_title"`
+	Location             *string  `json:"location"`
+	LocationCity         *string  `json:"location_city"`
+	LocationType         *string  `json:"location_type"`
+	LocationUSStates     []string `json:"location_us_states"`
+	EmploymentType       *string  `json:"employment_type"`
+	SalaryMin            *float64 `json:"salary_min"`
+	SalaryMax            *float64 `json:"salary_max"`
+	SalaryMinUSD         *float64 `json:"salary_min_usd"`
+	SalaryMaxUSD         *float64 `json:"salary_max_usd"`
+	SalaryType           *string  `json:"salary_type"`
+	CreatedAtSource      *string  `json:"created_at_source"`
+	RoleDescription      *string  `json:"role_description"`
+	RoleRequirements     *string  `json:"role_requirements"`
+	Benefits             *string  `json:"benefits"`
+	URL                  *string  `json:"url"`
 }
 
 func NewHandler(cfg config.Config, db *database.DB, authHandler *auth.Handler) *Handler {
@@ -47,11 +93,31 @@ func NewHandler(cfg config.Config, db *database.DB, authHandler *auth.Handler) *
 
 func (h *Handler) Register(router gin.IRouter) {
 	router.GET("/jobs/filter-options", h.filterOptions)
+	router.GET("/job/:jobID", h.jobDetail)
+	router.GET("/jobs/:jobID", h.jobDetail)
 	router.GET("/jobs", h.listJobs)
 }
 
+func annualizedSalarySQL(expr string) string {
+	return fmt.Sprintf(`(%s) * CASE lower(COALESCE(salary_type, 'yearly')) WHEN 'hourly' THEN 2080.0 WHEN 'hour' THEN 2080.0 WHEN 'hr' THEN 2080.0 WHEN 'daily' THEN 260.0 WHEN 'day' THEN 260.0 WHEN 'weekly' THEN 52.0 WHEN 'week' THEN 52.0 WHEN 'monthly' THEN 12.0 WHEN 'month' THEN 12.0 ELSE 1.0 END`, expr)
+}
+
+func parseCSVQuery(value string) []string {
+	if value == "" {
+		return nil
+	}
+	items := []string{}
+	for _, item := range strings.Split(value, ",") {
+		trimmed := strings.TrimSpace(item)
+		if trimmed != "" {
+			items = append(items, trimmed)
+		}
+	}
+	return items
+}
+
 func (h *Handler) filterOptions(c *gin.Context) {
-	categories, err := selectDistinctStrings(c, h.db, `SELECT DISTINCT categorized_job_title FROM parsed_jobs WHERE categorized_job_title IS NOT NULL AND categorized_job_title != '' ORDER BY categorized_job_title ASC`)
+	categories, err := selectStrings(c, h.db, `SELECT DISTINCT categorized_job_title FROM parsed_jobs WHERE categorized_job_title IS NOT NULL AND categorized_job_title != '' ORDER BY categorized_job_title ASC`)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
 		return
@@ -62,7 +128,7 @@ func (h *Handler) filterOptions(c *gin.Context) {
 		`SELECT DISTINCT location_city FROM parsed_jobs WHERE location_city IS NOT NULL AND location_city != ''`,
 		`SELECT DISTINCT location FROM parsed_jobs WHERE location IS NOT NULL AND location != ''`,
 	} {
-		values, err := selectDistinctStrings(c, h.db, query)
+		values, err := selectStrings(c, h.db, query)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
 			return
@@ -78,27 +144,14 @@ func (h *Handler) filterOptions(c *gin.Context) {
 	sortStrings(locations)
 
 	var salaryMin, salaryMax sql.NullFloat64
-	if err := h.db.SQL.QueryRowContext(
-		c.Request.Context(),
-		`SELECT MIN(COALESCE(salary_min_usd, salary_min)), MAX(COALESCE(salary_max_usd, salary_max, salary_min_usd, salary_min))
-		 FROM parsed_jobs
-		 WHERE COALESCE(salary_min_usd, salary_min) IS NOT NULL`,
-	).Scan(&salaryMin, &salaryMax); err != nil {
+	query := `SELECT MIN(` + annualizedSalarySQL(`salary_min_usd`) + `), MAX(` + annualizedSalarySQL(`salary_min_usd`) + `) FROM parsed_jobs WHERE salary_min_usd IS NOT NULL`
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), query).Scan(&salaryMin, &salaryMax); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
 		return
 	}
 
 	seniorities := []string{}
-	for _, check := range []struct {
-		Name  string
-		Field string
-	}{
-		{"entry", "is_entry_level"},
-		{"junior", "is_junior"},
-		{"mid", "is_mid_level"},
-		{"senior", "is_senior"},
-		{"lead", "is_lead"},
-	} {
+	for _, check := range []struct{ Name, Field string }{{"entry", "is_entry_level"}, {"junior", "is_junior"}, {"mid", "is_mid_level"}, {"senior", "is_senior"}, {"lead", "is_lead"}} {
 		var count int
 		if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT COUNT(id) FROM parsed_jobs WHERE `+check.Field+` = 1`).Scan(&count); err == nil && count > 0 {
 			seniorities = append(seniorities, check.Name)
@@ -109,53 +162,66 @@ func (h *Handler) filterOptions(c *gin.Context) {
 		"job_categories": categories,
 		"locations":      locations,
 		"min_salary_range": gin.H{
-			"min": nullableFloatValue(salaryMin),
-			"max": nullableFloatValue(salaryMax),
+			"min": nullFloatValue(salaryMin),
+			"max": nullFloatValue(salaryMax),
 		},
 		"seniorities": seniorities,
 	})
 }
 
+func (h *Handler) jobDetail(c *gin.Context) {
+	row := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT p.id, p.raw_us_job_id, c.name, c.slug, c.tagline, c.profile_pic_url, c.home_page_url, c.linkedin_url, c.employee_range, c.founded_year, c.sponsors_h1b, p.categorized_job_title, p.role_title, p.location, p.location_city, p.location_type, p.location_us_states, p.employment_type, p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_type, p.created_at_source, p.role_description, p.role_requirements, p.benefits, p.url FROM parsed_jobs p LEFT JOIN parsed_companies c ON c.id = p.company_id WHERE p.id = ? LIMIT 1`, c.Param("jobID"))
+	detail, err := scanJobDetail(row)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "Job not found"})
+		return
+	}
+	c.JSON(http.StatusOK, detail)
+}
+
 func (h *Handler) listJobs(c *gin.Context) {
 	isPreview := h.auth.OptionalCurrentUser(c) == nil
-
 	page := max(parseIntDefault(c.Query("page"), 1), 1)
 	perPage := max(parseIntDefault(c.Query("per_page"), 20), 1)
 	if perPage > 100 {
 		perPage = 100
 	}
-	effectivePerPage := perPage
-	if isPreview && effectivePerPage > max(h.cfg.PublicJobsMaxPerPage, 1) {
-		effectivePerPage = max(h.cfg.PublicJobsMaxPerPage, 1)
-	}
 
 	filters := []string{}
 	args := []any{}
-	if jobTitle := strings.TrimSpace(c.Query("job_title")); jobTitle != "" {
-		filters = append(filters, "categorized_job_title LIKE ?")
-		args = append(args, "%"+jobTitle+"%")
+	if titles := parseCSVQuery(c.Query("job_title")); len(titles) > 0 {
+		parts := make([]string, 0, len(titles))
+		for _, title := range titles {
+			parts = append(parts, `p.categorized_job_title LIKE ?`)
+			args = append(args, "%"+title+"%")
+		}
+		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 	}
-	if region := strings.TrimSpace(c.Query("region")); region != "" {
-		filters = append(filters, "(location LIKE ? OR location_city LIKE ? OR location_us_states LIKE ?)")
-		args = append(args, "%"+region+"%", "%"+region+"%", "%"+region+"%")
+	if regions := parseCSVQuery(c.Query("region")); len(regions) > 0 {
+		parts := make([]string, 0, len(regions))
+		for _, region := range regions {
+			parts = append(parts, `(p.location LIKE ? OR p.location_city LIKE ? OR p.location_us_states LIKE ?)`)
+			args = append(args, "%"+region+"%", "%"+region+"%", "%"+region+"%")
+		}
+		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 	}
 	if minSalary := strings.TrimSpace(c.Query("min_salary")); minSalary != "" {
 		if parsed, err := strconv.ParseFloat(minSalary, 64); err == nil {
-			filters = append(filters, "COALESCE(salary_min_usd, salary_min) >= ?")
+			filters = append(filters, annualizedSalarySQL(`COALESCE(p.salary_min_usd, p.salary_min)`)+` >= ?`)
 			args = append(args, parsed)
 		}
 	}
-	switch c.Query("seniority") {
-	case "entry":
-		filters = append(filters, "is_entry_level = 1")
-	case "junior":
-		filters = append(filters, "is_junior = 1")
-	case "mid":
-		filters = append(filters, "is_mid_level = 1")
-	case "senior":
-		filters = append(filters, "is_senior = 1")
-	case "lead":
-		filters = append(filters, "is_lead = 1")
+	if seniorities := parseCSVQuery(c.Query("seniority")); len(seniorities) > 0 {
+		parts := []string{}
+		fieldMap := map[string]string{"entry": "p.is_entry_level = 1", "junior": "p.is_junior = 1", "mid": "p.is_mid_level = 1", "senior": "p.is_senior = 1", "lead": "p.is_lead = 1"}
+		for _, seniority := range seniorities {
+			if predicate, ok := fieldMap[seniority]; ok {
+				parts = append(parts, predicate)
+			}
+		}
+		if len(parts) > 0 {
+			filters = append(filters, "("+strings.Join(parts, " OR ")+")")
+		}
 	}
 
 	where := ""
@@ -164,49 +230,31 @@ func (h *Handler) listJobs(c *gin.Context) {
 	}
 
 	var rawTotal int
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT COUNT(id) FROM parsed_jobs`+where, args...).Scan(&rawTotal); err != nil {
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT COUNT(p.id) FROM parsed_jobs p`+where, args...).Scan(&rawTotal); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs"})
 		return
 	}
-	total := rawTotal
-	if isPreview && total > max(h.cfg.PublicJobsMaxTotal, 0) {
-		total = max(h.cfg.PublicJobsMaxTotal, 0)
-	}
 
-	offset := (page - 1) * effectivePerPage
-	if isPreview && offset >= total {
-		c.JSON(http.StatusOK, gin.H{
-			"page":           page,
-			"per_page":       effectivePerPage,
-			"total":          total,
-			"is_preview":     true,
-			"requires_login": rawTotal > total,
-			"items":          []any{},
-		})
-		return
-	}
-
-	limit := effectivePerPage
-	if isPreview && total-offset < limit {
-		limit = total - offset
-		if limit < 0 {
-			limit = 0
-		}
-	}
-
-	orderBy := "created_at_source DESC, id DESC"
+	previewPerPage := max(h.cfg.PublicJobsMaxPerPage, 1)
+	orderBy := `p.created_at_source DESC, p.id DESC`
 	if c.DefaultQuery("sort_criteria", "date") == "salary" {
-		orderBy = "COALESCE(salary_max_usd, salary_max, salary_min_usd, salary_min) DESC, id DESC"
+		orderBy = annualizedSalarySQL(`COALESCE(p.salary_max_usd, p.salary_max, p.salary_min_usd, p.salary_min)`) + ` DESC, p.id DESC`
+	}
+
+	pageOut := page
+	perPageOut := perPage
+	offset := (page - 1) * perPage
+	limit := perPage
+	if isPreview {
+		pageOut = 1
+		perPageOut = previewPerPage
+		offset = 0
+		limit = min(rawTotal, previewPerPage)
 	}
 
 	queryArgs := append([]any{}, args...)
 	queryArgs = append(queryArgs, limit, offset)
-	rows, err := h.db.SQL.QueryContext(
-		c.Request.Context(),
-		`SELECT id, raw_us_job_id, categorized_job_title, location, location_city, location_us_states, salary_min, salary_max, salary_min_usd, salary_max_usd, is_entry_level, is_junior, is_mid_level, is_senior, is_lead, created_at_source, url
-		 FROM parsed_jobs`+where+` ORDER BY `+orderBy+` LIMIT ? OFFSET ?`,
-		queryArgs...,
-	)
+	rows, err := h.db.SQL.QueryContext(c.Request.Context(), `SELECT p.id, p.raw_us_job_id, p.role_title, p.job_description_summary, c.name, c.slug, c.tagline, c.profile_pic_url, c.home_page_url, c.linkedin_url, c.employee_range, c.founded_year, c.sponsors_h1b, p.categorized_job_title, p.location, p.location_city, p.location_type, p.location_us_states, p.employment_type, p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_type, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.created_at_source, p.url FROM parsed_jobs p LEFT JOIN parsed_companies c ON c.id = p.company_id`+where+` ORDER BY `+orderBy+` LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs"})
 		return
@@ -222,16 +270,16 @@ func (h *Handler) listJobs(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"page":           page,
-		"per_page":       effectivePerPage,
-		"total":          total,
+		"page":           pageOut,
+		"per_page":       perPageOut,
+		"total":          rawTotal,
 		"is_preview":     isPreview,
-		"requires_login": isPreview && rawTotal > total,
+		"requires_login": isPreview && rawTotal > len(items),
 		"items":          items,
 	})
 }
 
-func selectDistinctStrings(c *gin.Context, db *database.DB, query string) ([]string, error) {
+func selectStrings(c *gin.Context, db *database.DB, query string) ([]string, error) {
 	rows, err := db.SQL.QueryContext(c.Request.Context(), query)
 	if err != nil {
 		return nil, err
@@ -249,54 +297,91 @@ func selectDistinctStrings(c *gin.Context, db *database.DB, query string) ([]str
 
 func scanJob(scanner interface{ Scan(dest ...any) error }) (jobItem, error) {
 	var item jobItem
-	var title, location, city, statesText, url sql.NullString
+	var roleTitle, summary, companyName, companySlug, companyTagline, companyProfilePicURL, companyHomePageURL, companyLinkedInURL, companyEmployeeRange, companyFoundedYear, categorizedTitle, location, locationCity, locationType, locationUSStates, employmentType, salaryType, createdAt, url sql.NullString
+	var companySponsorsH1B, isEntry, isJunior, isMid, isSenior, isLead sql.NullBool
 	var salaryMin, salaryMax, salaryMinUSD, salaryMaxUSD sql.NullFloat64
-	var isEntry, isJunior, isMid, isSenior, isLead sql.NullBool
-	var createdAt sql.NullString
-	err := scanner.Scan(
-		&item.ID,
-		&item.RawUSJobID,
-		&title,
-		&location,
-		&city,
-		&statesText,
-		&salaryMin,
-		&salaryMax,
-		&salaryMinUSD,
-		&salaryMaxUSD,
-		&isEntry,
-		&isJunior,
-		&isMid,
-		&isSenior,
-		&isLead,
-		&createdAt,
-		&url,
-	)
+	err := scanner.Scan(&item.ID, &item.RawUSJobID, &roleTitle, &summary, &companyName, &companySlug, &companyTagline, &companyProfilePicURL, &companyHomePageURL, &companyLinkedInURL, &companyEmployeeRange, &companyFoundedYear, &companySponsorsH1B, &categorizedTitle, &location, &locationCity, &locationType, &locationUSStates, &employmentType, &salaryMin, &salaryMax, &salaryMinUSD, &salaryMaxUSD, &salaryType, &isEntry, &isJunior, &isMid, &isSenior, &isLead, &createdAt, &url)
 	if err != nil {
 		return item, err
 	}
-	item.CategorizedTitle = nullableString(title)
+	item.RoleTitle = nullableString(roleTitle)
+	item.JobDescriptionSummary = nullableString(summary)
+	item.CompanyName = nullableString(companyName)
+	item.CompanySlug = nullableString(companySlug)
+	item.CompanyTagline = nullableString(companyTagline)
+	item.CompanyProfilePicURL = nullableString(companyProfilePicURL)
+	item.CompanyHomePageURL = nullableString(companyHomePageURL)
+	item.CompanyLinkedInURL = nullableString(companyLinkedInURL)
+	item.CompanyEmployeeRange = nullableString(companyEmployeeRange)
+	item.CompanyFoundedYear = nullableString(companyFoundedYear)
+	item.CompanySponsorsH1B = nullableBool(companySponsorsH1B)
+	item.CategorizedTitle = nullableString(categorizedTitle)
 	item.Location = nullableString(location)
-	item.LocationCity = nullableString(city)
-	item.URL = nullableString(url)
+	item.LocationCity = nullableString(locationCity)
+	item.LocationType = nullableString(locationType)
+	item.EmploymentType = nullableString(employmentType)
 	item.SalaryMin = nullableFloatPtr(salaryMin)
 	item.SalaryMax = nullableFloatPtr(salaryMax)
 	item.SalaryMinUSD = nullableFloatPtr(salaryMinUSD)
 	item.SalaryMaxUSD = nullableFloatPtr(salaryMaxUSD)
+	item.SalaryType = nullableString(salaryType)
 	item.IsEntryLevel = nullableBool(isEntry)
 	item.IsJunior = nullableBool(isJunior)
 	item.IsMidLevel = nullableBool(isMid)
 	item.IsSenior = nullableBool(isSenior)
 	item.IsLead = nullableBool(isLead)
+	item.URL = nullableString(url)
 	if createdAt.Valid {
 		if parsed, err := time.Parse(time.RFC3339Nano, createdAt.String); err == nil {
 			item.CreatedAtSource = &parsed
 		}
 	}
-	if statesText.Valid && statesText.String != "" {
-		_ = json.Unmarshal([]byte(statesText.String), &item.LocationUSStates)
+	if locationUSStates.Valid && locationUSStates.String != "" {
+		_ = json.Unmarshal([]byte(locationUSStates.String), &item.LocationUSStates)
 	}
 	return item, nil
+}
+
+func scanJobDetail(scanner interface{ Scan(dest ...any) error }) (jobDetail, error) {
+	var detail jobDetail
+	var companyName, companySlug, companyTagline, companyProfilePicURL, companyHomePageURL, companyLinkedInURL, companyEmployeeRange, companyFoundedYear, categorizedTitle, roleTitle, location, locationCity, locationType, locationUSStates, employmentType, salaryType, createdAt, roleDescription, roleRequirements, benefits, url sql.NullString
+	var companySponsorsH1B sql.NullBool
+	var salaryMin, salaryMax, salaryMinUSD, salaryMaxUSD sql.NullFloat64
+	err := scanner.Scan(&detail.ID, &detail.RawUSJobID, &companyName, &companySlug, &companyTagline, &companyProfilePicURL, &companyHomePageURL, &companyLinkedInURL, &companyEmployeeRange, &companyFoundedYear, &companySponsorsH1B, &categorizedTitle, &roleTitle, &location, &locationCity, &locationType, &locationUSStates, &employmentType, &salaryMin, &salaryMax, &salaryMinUSD, &salaryMaxUSD, &salaryType, &createdAt, &roleDescription, &roleRequirements, &benefits, &url)
+	if err != nil {
+		return detail, err
+	}
+	detail.CompanyName = nullableString(companyName)
+	detail.CompanySlug = nullableString(companySlug)
+	detail.CompanyTagline = nullableString(companyTagline)
+	detail.CompanyProfilePicURL = nullableString(companyProfilePicURL)
+	detail.CompanyHomePageURL = nullableString(companyHomePageURL)
+	detail.CompanyLinkedInURL = nullableString(companyLinkedInURL)
+	detail.CompanyEmployeeRange = nullableString(companyEmployeeRange)
+	detail.CompanyFoundedYear = nullableString(companyFoundedYear)
+	detail.CompanySponsorsH1B = nullableBool(companySponsorsH1B)
+	detail.CategorizedTitle = nullableString(categorizedTitle)
+	detail.RoleTitle = nullableString(roleTitle)
+	detail.Location = nullableString(location)
+	detail.LocationCity = nullableString(locationCity)
+	detail.LocationType = nullableString(locationType)
+	detail.EmploymentType = nullableString(employmentType)
+	detail.SalaryMin = nullableFloatPtr(salaryMin)
+	detail.SalaryMax = nullableFloatPtr(salaryMax)
+	detail.SalaryMinUSD = nullableFloatPtr(salaryMinUSD)
+	detail.SalaryMaxUSD = nullableFloatPtr(salaryMaxUSD)
+	detail.SalaryType = nullableString(salaryType)
+	detail.RoleDescription = nullableString(roleDescription)
+	detail.RoleRequirements = nullableString(roleRequirements)
+	detail.Benefits = nullableString(benefits)
+	detail.URL = nullableString(url)
+	if createdAt.Valid {
+		detail.CreatedAtSource = &createdAt.String
+	}
+	if locationUSStates.Valid && locationUSStates.String != "" {
+		_ = json.Unmarshal([]byte(locationUSStates.String), &detail.LocationUSStates)
+	}
+	return detail, nil
 }
 
 func nullableString(value sql.NullString) *string {
@@ -306,7 +391,6 @@ func nullableString(value sql.NullString) *string {
 	v := value.String
 	return &v
 }
-
 func nullableFloatPtr(value sql.NullFloat64) *float64 {
 	if !value.Valid {
 		return nil
@@ -314,14 +398,6 @@ func nullableFloatPtr(value sql.NullFloat64) *float64 {
 	v := value.Float64
 	return &v
 }
-
-func nullableFloatValue(value sql.NullFloat64) any {
-	if !value.Valid {
-		return nil
-	}
-	return value.Float64
-}
-
 func nullableBool(value sql.NullBool) *bool {
 	if !value.Valid {
 		return nil
@@ -329,7 +405,12 @@ func nullableBool(value sql.NullBool) *bool {
 	v := value.Bool
 	return &v
 }
-
+func nullFloatValue(value sql.NullFloat64) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.Float64
+}
 func parseIntDefault(raw string, fallback int) int {
 	if raw == "" {
 		return fallback
@@ -340,7 +421,6 @@ func parseIntDefault(raw string, fallback int) int {
 	}
 	return parsed
 }
-
 func sortStrings(values []string) {
 	for i := 0; i < len(values); i++ {
 		for j := i + 1; j < len(values); j++ {
@@ -350,10 +430,15 @@ func sortStrings(values []string) {
 		}
 	}
 }
-
-func max(left, right int) int {
-	if left > right {
-		return left
+func max(a, b int) int {
+	if a > b {
+		return a
 	}
-	return right
+	return b
+}
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
