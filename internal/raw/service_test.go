@@ -31,7 +31,7 @@ func TestToTargetJobURLPreservesQueryAndFragment(t *testing.T) {
 	}
 }
 
-func TestProcessPendingUsesNormalizedURLForFetchAndPayload(t *testing.T) {
+func TestProcessPendingUsesNormalizedURLForFetchAndKeepsOriginalPayloadURL(t *testing.T) {
 	db, err := database.Open("file:test_raw_process_pending?mode=memory&cache=shared")
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +78,7 @@ func TestProcessPendingUsesNormalizedURLForFetchAndPayload(t *testing.T) {
 	if err := json.Unmarshal([]byte(rawJSONText), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload["url"] != expectedTargetURL {
-		t.Fatalf("expected payload url %s, got %#v", expectedTargetURL, payload["url"])
+	if payload["url"] != jobURL {
+		t.Fatalf("expected payload url %s, got %#v", jobURL, payload["url"])
 	}
 }

@@ -105,7 +105,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				payload = map[string]any{}
 			}
 			if _, ok := payload["url"]; !ok {
-				payload["url"] = targetURL
+				payload["url"] = job.url
 			}
 			rawJSON, err := json.Marshal(payload)
 			if err != nil {
