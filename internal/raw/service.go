@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"net/url"
+	"regexp"
 	"strings"
 
 	"goapplyjob-golang-backend/internal/database"
-	rr "goapplyjob-golang-backend/internal/sources/remoterocketship"
 )
 
 const statusNotFound = 404
@@ -23,6 +24,8 @@ type Service struct {
 	Status    StatusFunc
 }
 
+var scriptJSONBlockPattern = regexp.MustCompile(`(?is)<script[^>]*type=['"]application/json['"][^>]*>(.*?)</script>`)
+
 func New(db *database.DB) *Service {
 	return &Service{
 		DB: db,
@@ -30,13 +33,47 @@ func New(db *database.DB) *Service {
 			return "", 0, errors.New("read html not configured")
 		},
 		ParseHTML: func(html string) (map[string]any, error) {
-			return rr.ParseHTML(html), nil
+			blocks := scriptJSONBlockPattern.FindAllStringSubmatch(html, -1)
+			if len(blocks) == 0 {
+				return map[string]any{}, nil
+			}
+			lastBlock := strings.TrimSpace(blocks[len(blocks)-1][1])
+			if lastBlock == "" {
+				return map[string]any{}, nil
+			}
+			var data map[string]any
+			if err := json.Unmarshal([]byte(lastBlock), &data); err != nil {
+				return map[string]any{}, nil
+			}
+			props, _ := data["props"].(map[string]any)
+			pageProps, _ := props["pageProps"].(map[string]any)
+			jobData, _ := pageProps["jobOpening"].(map[string]any)
+			if jobData == nil {
+				return map[string]any{}, nil
+			}
+			return jobData, nil
 		},
 	}
 }
 
 func toTargetJobURL(rawURL string) string {
-	return rr.ToTargetJobURL(rawURL)
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	pathParts := strings.FieldsFunc(parsed.Path, func(r rune) bool { return r == '/' })
+	if len(pathParts) >= 2 && pathParts[1] == "company" {
+		pathParts = pathParts[1:]
+	}
+	trailingSlash := ""
+	if strings.HasSuffix(parsed.Path, "/") {
+		trailingSlash = "/"
+	}
+	parsed.Path = "/"
+	if len(pathParts) > 0 {
+		parsed.Path = "/" + strings.Join(pathParts, "/") + trailingSlash
+	}
+	return parsed.String()
 }
 
 func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error) {
