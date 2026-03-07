@@ -123,3 +123,31 @@ func TestRunOnceUsesSampleDeltaWithoutFullFetch(t *testing.T) {
 		t.Fatalf("expected non-zero delta size")
 	}
 }
+
+func TestRunForeverRunOnceExecutesSingleCycle(t *testing.T) {
+	service := buildService(t)
+	sample := []byte(`<urlset><url><loc>https://example.com/a</loc><lastmod>2026-02-12T10:00:00+00:00</lastmod></url></urlset>`)
+	sampleCalls := 0
+	fullCalls := 0
+	service.FetchSample = func() ([]byte, error) {
+		sampleCalls++
+		return sample, nil
+	}
+	service.FetchFull = func() ([]byte, error) {
+		fullCalls++
+		return sample, nil
+	}
+
+	if err := service.RunForever(true); err != nil {
+		t.Fatal(err)
+	}
+	if sampleCalls != 1 {
+		t.Fatalf("expected one sample fetch, got %d", sampleCalls)
+	}
+	if fullCalls != 1 {
+		t.Fatalf("expected one full fetch, got %d", fullCalls)
+	}
+	if service.Status()["running"].(bool) {
+		t.Fatalf("expected watcher not running after run-once")
+	}
+}

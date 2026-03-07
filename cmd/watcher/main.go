@@ -17,11 +17,15 @@ func main() {
 	}
 	defer db.Close()
 
-	_ = watcher.New(watcher.Config{
+	svc := watcher.New(watcher.Config{
 		Enabled:         config.GetenvBool("WATCH_ENABLED", true),
 		URL:             config.Getenv("WATCH_URL", ""),
 		IntervalMinutes: config.GetenvFloat("WATCH_INTERVAL_MINUTES", 1),
 		SampleKB:        config.GetenvInt("WATCH_SAMPLE_KB", 8),
 		TimeoutSeconds:  config.GetenvFloat("WATCH_TIMEOUT_SECONDS", 30),
 	}, db)
+	runOnce := config.GetenvBool("WATCH_RUN_ONCE", false)
+	if err := svc.RunForever(runOnce); err != nil {
+		log.Fatal(err)
+	}
 }

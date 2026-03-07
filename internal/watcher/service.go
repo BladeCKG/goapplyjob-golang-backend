@@ -79,6 +79,34 @@ func (s *Service) setStatus(values map[string]any) {
 	}
 }
 
+func (s *Service) RunForever(runOnce bool) error {
+	if !s.Config.Enabled {
+		s.setStatus(map[string]any{"last_error": nil})
+		return nil
+	}
+	if strings.TrimSpace(s.Config.URL) == "" {
+		s.setStatus(map[string]any{"last_error": "WATCH_URL is not set"})
+		return nil
+	}
+
+	s.setStatus(map[string]any{"running": true})
+	defer s.setStatus(map[string]any{"running": false})
+
+	for {
+		if err := s.RunOnce(); err != nil {
+			return err
+		}
+		if runOnce {
+			return nil
+		}
+		sleepSeconds := s.Config.IntervalMinutes * 60
+		if sleepSeconds < 1 {
+			sleepSeconds = 1
+		}
+		time.Sleep(time.Duration(sleepSeconds * float64(time.Second)))
+	}
+}
+
 func (s *Service) RunOnce() error {
 	sample, err := s.FetchSample()
 	if err != nil {
