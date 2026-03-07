@@ -388,12 +388,12 @@ func (h *Handler) listJobs(c *gin.Context) {
 		}
 		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 	}
-	if regions := parseCSVQuery(c.Query("region")); len(regions) > 0 {
-		regions = uniqueStrings(regions)
-		parts := make([]string, 0, len(regions))
-		for _, region := range regions {
+	if locations := parseCSVQuery(c.Query("location")); len(locations) > 0 {
+		locations = uniqueStrings(locations)
+		parts := make([]string, 0, len(locations))
+		for _, location := range locations {
 			parts = append(parts, `(p.location LIKE ? OR p.location_city LIKE ? OR p.location_us_states LIKE ?)`)
-			args = append(args, "%"+region+"%", "%"+region+"%", "%"+region+"%")
+			args = append(args, "%"+location+"%", "%"+location+"%", "%"+location+"%")
 		}
 		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 	}

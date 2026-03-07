@@ -64,7 +64,7 @@ func TestAuthAndJobsFlow(t *testing.T) {
 		t.Fatalf("unexpected me payload %#v", meBody)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/jobs?sort_criteria=salary&job_title=Engineer&region=Texas&min_salary=100&seniority=senior&page=1&per_page=10", nil)
+	req := httptest.NewRequest(http.MethodGet, "/jobs?sort_criteria=salary&job_title=Engineer&location=Texas&min_salary=100&seniority=senior&page=1&per_page=10", nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -243,7 +243,7 @@ func TestJobsListSupportsCSVFilters(t *testing.T) {
 	insertCSVJob(t, db, 1, "Data Engineer", "United States", true, 100000, "yearly")
 	insertCSVJob(t, db, 2, "Backend Engineer", "Canada", false, 60, "hourly")
 
-	req := httptest.NewRequest(http.MethodGet, "/jobs?job_title=Data+Engineer,Backend+Engineer&region=United+States,Canada&seniority=mid,senior&min_salary=90000", nil)
+	req := httptest.NewRequest(http.MethodGet, "/jobs?job_title=Data+Engineer,Backend+Engineer&location=United+States,Canada&seniority=mid,senior&min_salary=90000", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	assertStatus(t, rec.Code, http.StatusOK)
