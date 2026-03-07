@@ -40,6 +40,7 @@ func (db *DB) Migrate(ctx context.Context) error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS raw_us_jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL DEFAULT 'remoterocketship',
             url TEXT NOT NULL UNIQUE,
             post_date TEXT NOT NULL,
             is_ready INTEGER NOT NULL DEFAULT 0,
@@ -167,13 +168,16 @@ func (db *DB) Migrate(ctx context.Context) error {
         );`,
 		`CREATE TABLE IF NOT EXISTS watcher_states (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            source_url TEXT NOT NULL UNIQUE,
+            source TEXT NOT NULL UNIQUE,
+            source_url TEXT,
             sample_hash TEXT,
             first_lastmod TEXT,
+            state_json TEXT,
             updated_at TEXT NOT NULL
         );`,
 		`CREATE TABLE IF NOT EXISTS watcher_payloads (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL DEFAULT 'remoterocketship',
             source_url TEXT NOT NULL,
             payload_type TEXT NOT NULL,
             body_text TEXT NOT NULL,
@@ -191,6 +195,47 @@ func (db *DB) Migrate(ctx context.Context) error {
 	}
 	if err := db.ensureColumn(ctx, "parsed_jobs", "categorized_job_function", "TEXT"); err != nil {
 		return err
+	}
+	if err := db.ensureColumn(ctx, "raw_us_jobs", "source", "TEXT NOT NULL DEFAULT 'remoterocketship'"); err != nil {
+		return err
+	}
+	if err := db.ensureColumn(ctx, "watcher_payloads", "source", "TEXT NOT NULL DEFAULT 'remoterocketship'"); err != nil {
+		return err
+	}
+	if err := db.ensureColumn(ctx, "watcher_states", "source", "TEXT"); err != nil {
+		return err
+	}
+	if err := db.ensureColumn(ctx, "watcher_states", "source_url", "TEXT"); err != nil {
+		return err
+	}
+	if err := db.ensureColumn(ctx, "watcher_states", "sample_hash", "TEXT"); err != nil {
+		return err
+	}
+	if err := db.ensureColumn(ctx, "watcher_states", "first_lastmod", "TEXT"); err != nil {
+		return err
+	}
+	if err := db.ensureColumn(ctx, "watcher_states", "state_json", "TEXT"); err != nil {
+		return err
+	}
+	if _, err := db.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET source = COALESCE(NULLIF(source, ''), 'remoterocketship')`); err != nil {
+		return fmt.Errorf("backfill raw_us_jobs source: %w", err)
+	}
+	if _, err := db.SQL.ExecContext(ctx, `UPDATE watcher_payloads SET source = COALESCE(NULLIF(source, ''), 'remoterocketship')`); err != nil {
+		return fmt.Errorf("backfill watcher_payloads source: %w", err)
+	}
+	if _, err := db.SQL.ExecContext(ctx, `UPDATE watcher_states SET source = COALESCE(NULLIF(source, ''), 'remoterocketship') WHERE source IS NULL OR source = ''`); err != nil {
+		return fmt.Errorf("backfill watcher_states source: %w", err)
+	}
+	if _, err := db.SQL.ExecContext(ctx, `UPDATE watcher_states
+		SET state_json = COALESCE(
+			state_json,
+			json_object(
+				'source_url', source_url,
+				'sample_hash', sample_hash,
+				'first_lastmod', first_lastmod
+			)
+		)`); err != nil {
+		return fmt.Errorf("backfill watcher_states state_json: %w", err)
 	}
 	return nil
 }

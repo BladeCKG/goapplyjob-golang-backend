@@ -13,6 +13,7 @@ import (
 )
 
 const statusNotFound = 404
+const sourceName = "remoterocketship"
 
 type ReadHTMLFunc func(string) (string, int, error)
 type ParseHTMLFunc func(string) (map[string]any, error)
@@ -80,7 +81,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	if batchSize <= 0 {
 		batchSize = 100
 	}
-	rows, err := s.DB.SQL.QueryContext(ctx, `SELECT id, url FROM raw_us_jobs WHERE is_ready = 0 AND is_skippable = 0 ORDER BY id DESC LIMIT ?`, batchSize)
+	rows, err := s.DB.SQL.QueryContext(ctx, `SELECT id, url FROM raw_us_jobs WHERE source = ? AND is_ready = 0 AND is_skippable = 0 ORDER BY id DESC LIMIT ?`, sourceName, batchSize)
 	if err != nil {
 		return 0, err
 	}

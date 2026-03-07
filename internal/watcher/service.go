@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/url"
 	"regexp"
@@ -14,6 +15,8 @@ import (
 
 	"goapplyjob-golang-backend/internal/database"
 )
+
+const sourceName = "remoterocketship"
 
 var (
 	lastmodPattern     = regexp.MustCompile(`(?is)<lastmod>\s*([^<]+?)\s*</lastmod>`)
@@ -205,19 +208,27 @@ func (s *Service) loadState(ctx context.Context) (string, string, error) {
 		return "", "", nil
 	}
 	var sampleHash, firstLastmod string
+	var stateJSON sql.NullString
 	err := s.DB.SQL.QueryRowContext(
 		ctx,
-		`SELECT COALESCE(sample_hash, ''), COALESCE(first_lastmod, '')
+		`SELECT COALESCE(state_json, '')
 		 FROM watcher_states
-		 WHERE source_url = ?
+		 WHERE source = ?
 		 LIMIT 1`,
-		s.Config.URL,
-	).Scan(&sampleHash, &firstLastmod)
+		sourceName,
+	).Scan(&stateJSON)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", "", nil
 		}
 		return "", "", err
+	}
+	if stateJSON.Valid && strings.TrimSpace(stateJSON.String) != "" {
+		payload := map[string]any{}
+		if err := json.Unmarshal([]byte(stateJSON.String), &payload); err == nil {
+			sampleHash, _ = payload["sample_hash"].(string)
+			firstLastmod, _ = payload["first_lastmod"].(string)
+		}
 	}
 	return sampleHash, firstLastmod, nil
 }
@@ -228,15 +239,17 @@ func (s *Service) saveState(ctx context.Context, sampleHash, firstLastmod string
 	}
 	_, err := s.DB.SQL.ExecContext(
 		ctx,
-		`INSERT INTO watcher_states (source_url, sample_hash, first_lastmod, updated_at)
-		 VALUES (?, ?, ?, ?)
-		 ON CONFLICT(source_url) DO UPDATE SET
-		   sample_hash = excluded.sample_hash,
-		   first_lastmod = excluded.first_lastmod,
+		`INSERT INTO watcher_states (source, state_json, updated_at)
+		 VALUES (?, ?, ?)
+		 ON CONFLICT(source) DO UPDATE SET
+		   state_json = excluded.state_json,
 		   updated_at = excluded.updated_at`,
-		s.Config.URL,
-		sampleHash,
-		emptyToNil(firstLastmod),
+		sourceName,
+		mustMarshalJSON(map[string]any{
+			"source_url":    s.Config.URL,
+			"sample_hash":   sampleHash,
+			"first_lastmod": emptyToNil(firstLastmod),
+		}),
 		utcNowISO(),
 	)
 	return err
@@ -270,6 +283,11 @@ func (s *Service) saveDeltaPayload(ctx context.Context, bodyText string) (int64,
 		return 0, err
 	}
 	return result.LastInsertId()
+}
+
+func mustMarshalJSON(value any) string {
+	data, _ := json.Marshal(value)
+	return string(data)
 }
 
 func (s *Service) ExtractFirstLastmod(data []byte) string {

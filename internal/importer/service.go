@@ -46,6 +46,8 @@ type Service struct {
 	DB *database.DB
 }
 
+const sourceName = "remoterocketship"
+
 func New(db *database.DB) *Service { return &Service{DB: db} }
 
 func extractCompleteURLBlocks(xmlText string) []string {
@@ -210,14 +212,14 @@ func (s *Service) flushBuffer(buffer map[string]time.Time) (int, int, int, map[s
 	for url, postDate := range buffer {
 		var existingID int64
 		var existingPostDate string
-		err := tx.QueryRow(`SELECT id, post_date FROM raw_us_jobs WHERE url = ? LIMIT 1`, url).Scan(&existingID, &existingPostDate)
+		err := tx.QueryRow(`SELECT id, post_date FROM raw_us_jobs WHERE source = ? AND url = ? LIMIT 1`, sourceName, url).Scan(&existingID, &existingPostDate)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			failedDB++
 			failedRows[url] = postDate
 			continue
 		}
 		if errors.Is(err, sql.ErrNoRows) {
-			if _, err := tx.Exec(`INSERT INTO raw_us_jobs (url, post_date, is_ready, is_skippable, retry_count, raw_json) VALUES (?, ?, 0, 0, 0, NULL)`, url, postDate.Format(time.RFC3339)); err != nil {
+			if _, err := tx.Exec(`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, retry_count, raw_json) VALUES (?, ?, ?, 0, 0, 0, NULL)`, sourceName, url, postDate.Format(time.RFC3339)); err != nil {
 				failedDB++
 				failedRows[url] = postDate
 				continue
@@ -240,7 +242,7 @@ func (s *Service) flushBuffer(buffer map[string]time.Time) (int, int, int, map[s
 			failedRows[url] = postDate
 			continue
 		}
-		if _, err := tx.Exec(`INSERT INTO raw_us_jobs (url, post_date, is_ready, is_skippable, retry_count, raw_json) VALUES (?, ?, 0, 0, 0, NULL)`, url, postDate.Format(time.RFC3339)); err != nil {
+		if _, err := tx.Exec(`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, retry_count, raw_json) VALUES (?, ?, ?, 0, 0, 0, NULL)`, sourceName, url, postDate.Format(time.RFC3339)); err != nil {
 			failedDB++
 			failedRows[url] = postDate
 			continue
@@ -327,7 +329,7 @@ func (s *Service) PickUnconsumedPayloads(limit int) ([]struct {
 	if limit <= 0 {
 		limit = 1
 	}
-	rows, err := s.DB.SQL.Query(`SELECT id, body_text FROM watcher_payloads WHERE payload_type = 'delta_xml' AND consumed_at IS NULL ORDER BY created_at DESC, id DESC LIMIT ?`, limit)
+	rows, err := s.DB.SQL.Query(`SELECT id, body_text FROM watcher_payloads WHERE source = ? AND payload_type = 'delta_xml' AND consumed_at IS NULL ORDER BY created_at DESC, id DESC LIMIT ?`, sourceName, limit)
 	if err != nil {
 		return nil, err
 	}
