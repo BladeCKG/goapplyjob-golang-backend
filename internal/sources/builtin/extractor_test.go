@@ -7,6 +7,9 @@ func TestExtractJobBuildsBuiltInRawJobShape(t *testing.T) {
 <html>
   <head>
     <link rel="canonical" href="https://builtin.com/job/platform-engineer/12345">
+    <script>
+      Builtin.jobPostInit({"job":{"howToApply":"https://jobs.acme.example/apply/12345"}});
+    </script>
     <script type="application/ld+json">
       {
         "@type": "JobPosting",
@@ -70,8 +73,11 @@ func TestExtractJobBuildsBuiltInRawJobShape(t *testing.T) {
 	if payload["id"] != 12345 {
 		t.Fatalf("expected external job id, got %#v", payload["id"])
 	}
-	if payload["url"] != "https://builtin.com/job/platform-engineer/12345" {
+	if payload["url"] != "https://jobs.acme.example/apply/12345" {
 		t.Fatalf("expected canonical url, got %#v", payload["url"])
+	}
+	if payload["slug"] != "platform-engineer-12345" {
+		t.Fatalf("expected slug from canonical url, got %#v", payload["slug"])
 	}
 	if payload["employmentType"] != "full-time" {
 		t.Fatalf("expected normalized employment type, got %#v", payload["employmentType"])

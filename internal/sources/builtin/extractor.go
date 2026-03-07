@@ -14,6 +14,7 @@ var (
 	canonicalPattern        = regexp.MustCompile(`(?is)<link[^>]*rel=['"]canonical['"][^>]*href=['"]([^'"]+)['"]`)
 	metaDescriptionPattern  = regexp.MustCompile(`(?is)<meta[^>]*name=['"]description['"][^>]*content=['"]([^'"]+)['"]`)
 	companyProfileInitRegex = regexp.MustCompile(`(?is)Builtin\.companyProfileInit\((\{.*?\})\);`)
+	jobPostInitRegex        = regexp.MustCompile(`(?is)Builtin\.jobPostInit\((\{.*\})\)`)
 	topSkillsRegex          = regexp.MustCompile(`(?is)Top Skills\s*</h[1-6]>.*?<div[^>]*>\s*([^<]*,[^<]*)\s*</div>`)
 	salaryChipRegex         = regexp.MustCompile(`(?is)(\d[\d,]*)\s*K?\s*-\s*(\d[\d,]*)\s*K?\s*(Annually|Yearly|Hourly|Monthly)?`)
 	seniorityRegex          = regexp.MustCompile(`(?is)\b(Entry level|Junior level|Mid level|Senior level|Expert\s*/\s*Leader)\b`)
@@ -27,7 +28,11 @@ func ExtractJob(htmlText, companyHTML string) map[string]any {
 		return map[string]any{}
 	}
 
-	jobURL := extractCanonicalURL(htmlText)
+	jobPostInit := extractJobPostInit(htmlText)
+	jobURL := stringValueFromMap(jobPostInit, "job", "howToApply")
+	if jobURL == "" {
+		jobURL = extractCanonicalURL(htmlText)
+	}
 	identifierValue := ""
 	if identifier, ok := jobPosting["identifier"].(map[string]any); ok {
 		identifierValue = stringValue(identifier["value"])
@@ -92,7 +97,7 @@ func ExtractJob(htmlText, companyHTML string) map[string]any {
 		"isLead":                                   levelFlags["isLead"],
 		"salaryRange":                              salaryRange,
 		"techStack":                                techStack,
-		"slug":                                     slugFromURL(jobURL),
+		"slug":                                     slugFromURL(firstNonEmpty(extractCanonicalURL(htmlText), jobURL)),
 		"isPromoted":                               false,
 		"employmentType":                           normalizeEmploymentType(stringValue(jobPosting["employmentType"])),
 		"location":                                 firstNonEmpty(strings.Join(locationLabels, " | "), applicantCountry),
@@ -146,6 +151,18 @@ func extractCanonicalURL(htmlText string) string {
 		return ""
 	}
 	return html.UnescapeString(strings.TrimSpace(match[1]))
+}
+
+func extractJobPostInit(htmlText string) map[string]any {
+	match := jobPostInitRegex.FindStringSubmatch(htmlText)
+	if len(match) < 2 {
+		return map[string]any{}
+	}
+	payload := map[string]any{}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(match[1])), &payload); err != nil {
+		return map[string]any{}
+	}
+	return payload
 }
 
 func parseISO(value string) any {
