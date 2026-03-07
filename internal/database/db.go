@@ -171,6 +171,9 @@ func (db *DB) Migrate(ctx context.Context) error {
 			return fmt.Errorf("migrate schema: %w", err)
 		}
 	}
+	if _, err := db.SQL.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_parsed_jobs_salary_max_usd ON parsed_jobs (salary_max_usd)`); err != nil {
+		return fmt.Errorf("create parsed_jobs salary_max_usd index: %w", err)
+	}
 	if err := db.ensureColumn(ctx, "parsed_jobs", "categorized_job_function", "TEXT"); err != nil {
 		return err
 	}

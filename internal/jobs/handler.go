@@ -207,6 +207,22 @@ func tokenizeTitleSearchText(value string) []string {
 	return strings.Fields(normalized)
 }
 
+func uniqueStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
 func annualizedMinSalarySQL() string {
 	return `COALESCE(salary_min_usd, ` + annualizedSalarySQL(`salary_min`) + `)`
 }
@@ -337,9 +353,12 @@ func (h *Handler) listJobs(c *gin.Context) {
 	filters := []string{}
 	args := []any{}
 	if titles := parseCSVQuery(c.Query("job_title")); len(titles) > 0 {
+		titles = uniqueStrings(titles)
 		parts := make([]string, 0, len(titles))
+		normalizedTitleSet := map[string]struct{}{}
 		for _, title := range titles {
 			normalizedTitle := strings.ToLower(strings.TrimSpace(title))
+			normalizedTitleSet[normalizedTitle] = struct{}{}
 			titleParts := []string{
 				`lower(trim(COALESCE(p.role_title, ''))) = ?`,
 				`lower(trim(COALESCE(p.categorized_job_function, ''))) = ?`,
@@ -360,9 +379,17 @@ func (h *Handler) listJobs(c *gin.Context) {
 			}
 			parts = append(parts, "("+strings.Join(titleParts, " OR ")+")")
 		}
+		if len(normalizedTitleSet) > 0 {
+			normalizedTitles := make([]string, 0, len(normalizedTitleSet))
+			for normalizedTitle := range normalizedTitleSet {
+				normalizedTitles = append(normalizedTitles, normalizedTitle)
+			}
+			sortStrings(normalizedTitles)
+		}
 		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 	}
 	if regions := parseCSVQuery(c.Query("region")); len(regions) > 0 {
+		regions = uniqueStrings(regions)
 		parts := make([]string, 0, len(regions))
 		for _, region := range regions {
 			parts = append(parts, `(p.location LIKE ? OR p.location_city LIKE ? OR p.location_us_states LIKE ?)`)
@@ -371,6 +398,7 @@ func (h *Handler) listJobs(c *gin.Context) {
 		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 	}
 	if techStacks := parseCSVQuery(c.Query("tech_stack")); len(techStacks) > 0 {
+		techStacks = uniqueStrings(techStacks)
 		parts := make([]string, 0, len(techStacks))
 		for _, techStack := range techStacks {
 			normalizedStack := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(techStack)), `"`, `\"`)
@@ -380,6 +408,7 @@ func (h *Handler) listJobs(c *gin.Context) {
 		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 	}
 	if employmentTypes := parseCSVQuery(c.Query("employment_type")); len(employmentTypes) > 0 {
+		employmentTypes = uniqueStrings(employmentTypes)
 		parts := make([]string, 0, len(employmentTypes))
 		for _, employmentType := range employmentTypes {
 			parts = append(parts, `p.employment_type LIKE ?`)
@@ -401,6 +430,7 @@ func (h *Handler) listJobs(c *gin.Context) {
 		}
 	}
 	if seniorities := parseCSVQuery(c.Query("seniority")); len(seniorities) > 0 {
+		seniorities = uniqueStrings(seniorities)
 		parts := []string{}
 		fieldMap := map[string]string{"entry": "p.is_entry_level = 1", "junior": "p.is_junior = 1", "mid": "p.is_mid_level = 1", "senior": "p.is_senior = 1", "lead": "p.is_lead = 1"}
 		for _, seniority := range seniorities {
