@@ -24,6 +24,7 @@ type Config struct {
 	NowPaymentsAPIBaseURL         string
 	NowPaymentsAPIKey             string
 	NowPaymentsDefaultPayCurrency string
+	NowPaymentsCurrencyCandidates string
 	NowPaymentsIPNSecret          string
 	NowPaymentsIPNCallbackURL     string
 }
@@ -48,6 +49,7 @@ func Load() Config {
 		NowPaymentsAPIBaseURL:         getenv("NOWPAYMENTS_API_BASE_URL", "https://api.nowpayments.io/v1"),
 		NowPaymentsAPIKey:             getenv("NOWPAYMENTS_API_KEY", ""),
 		NowPaymentsDefaultPayCurrency: getenv("NOWPAYMENTS_DEFAULT_PAY_CURRENCY", "usdttrc20"),
+		NowPaymentsCurrencyCandidates: getenv("NOWPAYMENTS_CURRENCY_CANDIDATES", "btc,eth,ltc,usdttrc20,usdterc20,usdtbsc,usdc"),
 		NowPaymentsIPNSecret:          getenv("NOWPAYMENTS_IPN_SECRET", ""),
 		NowPaymentsIPNCallbackURL:     getenv("NOWPAYMENTS_IPN_CALLBACK_URL", "http://localhost:8000/pricing/webhooks/crypto"),
 	}

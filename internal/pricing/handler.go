@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -444,15 +445,48 @@ func (h *Handler) renderPaymentStatus(c *gin.Context, userID int64) {
 }
 
 func (h *Handler) listCryptoCurrencies(c *gin.Context) {
-	items := []string{strings.ToLower(strings.TrimSpace(h.cfg.NowPaymentsDefaultPayCurrency))}
-	for _, item := range fallbackNowPaymentsCurrencies {
-		if item != "" && !slices.Contains(items, item) {
-			items = append(items, item)
+	amountUSD := 0.0
+	hasAmountUSD := false
+	if raw := strings.TrimSpace(c.Query("amount_usd")); raw != "" {
+		var err error
+		amountUSD, err = strconv.ParseFloat(raw, 64)
+		if err == nil {
+			hasAmountUSD = true
 		}
 	}
-	out := make([]gin.H, 0, len(items))
-	for _, item := range items {
-		out = append(out, gin.H{"code": item})
+
+	providerCodes := h.fetchNowPaymentsCurrencies()
+	candidateCodes := h.currencyCandidates()
+	if len(providerCodes) > 0 {
+		filtered := []string{}
+		for _, code := range candidateCodes {
+			if slices.Contains(providerCodes, code) {
+				filtered = append(filtered, code)
+			}
+		}
+		if len(filtered) > 0 {
+			candidateCodes = filtered
+		}
+	}
+
+	out := make([]gin.H, 0, len(candidateCodes))
+	for _, code := range candidateCodes {
+		minUSD := h.fetchCurrencyMinUSD(code)
+		if hasAmountUSD && minUSD != nil && amountUSD < *minUSD {
+			continue
+		}
+		out = append(out, gin.H{"code": code, "min_usd": minUSD})
+	}
+	if len(out) == 0 {
+		items := []string{strings.ToLower(strings.TrimSpace(h.cfg.NowPaymentsDefaultPayCurrency))}
+		for _, item := range fallbackNowPaymentsCurrencies {
+			if item != "" && !slices.Contains(items, item) {
+				items = append(items, item)
+			}
+		}
+		for _, item := range items {
+			out = append(out, gin.H{"code": item, "min_usd": nil})
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"items": out})
 }
@@ -639,4 +673,34 @@ func nullStringValue(value sql.NullString) any {
 		return nil
 	}
 	return value.String
+}
+
+func (h *Handler) currencyCandidates() []string {
+	raw := strings.TrimSpace(h.cfg.NowPaymentsCurrencyCandidates)
+	if raw == "" {
+		raw = "btc,eth,ltc,usdttrc20,usdterc20,usdtbsc,usdc"
+	}
+	values := []string{}
+	for _, item := range strings.Split(raw, ",") {
+		code := strings.ToLower(strings.TrimSpace(item))
+		if code != "" && !slices.Contains(values, code) {
+			values = append(values, code)
+		}
+	}
+	slices.Sort(values)
+	return values
+}
+
+func (h *Handler) fetchNowPaymentsCurrencies() []string {
+	if strings.TrimSpace(h.cfg.NowPaymentsAPIKey) == "" {
+		return nil
+	}
+	return nil
+}
+
+func (h *Handler) fetchCurrencyMinUSD(currencyCode string) *float64 {
+	if strings.TrimSpace(h.cfg.NowPaymentsAPIKey) == "" {
+		return nil
+	}
+	return nil
 }

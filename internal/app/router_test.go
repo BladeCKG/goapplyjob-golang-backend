@@ -315,6 +315,34 @@ func TestCryptoWebhookRequiresSignatureAndActivatesSubscription(t *testing.T) {
 	assertStatus(t, webhookRec.Code, http.StatusOK)
 }
 
+func TestPricingCryptoCurrenciesSupportsAmountFiltering(t *testing.T) {
+	cfg := config.Load()
+	cfg.DatabaseURL = "file:test_currency_filtering?mode=memory&cache=shared"
+	cfg.NowPaymentsCurrencyCandidates = "btc,eth,usdttrc20"
+	db, err := database.Open(cfg.DatabaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	router := NewRouter(cfg, db)
+
+	req := httptest.NewRequest(http.MethodGet, "/pricing/crypto/currencies?amount_usd=10", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	items := body["items"].([]any)
+	if len(items) != 3 {
+		t.Fatalf("unexpected currencies payload %#v", body)
+	}
+	first := items[0].(map[string]any)
+	if _, ok := first["min_usd"]; !ok {
+		t.Fatalf("expected min_usd field in payload %#v", first)
+	}
+}
+
 func TestPasswordSignupAndLoginFlow(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
