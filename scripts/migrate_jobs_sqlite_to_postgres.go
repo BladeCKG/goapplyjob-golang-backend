@@ -20,6 +20,7 @@ import (
 const (
 	defaultSourceSQLiteURL = "file:page_extract.db?_foreign_keys=on"
 	defaultBatchSize       = 1000
+	defaultMigrateSources  = "builtin"
 )
 
 var preferredTableOrder = []string{
@@ -37,11 +38,20 @@ var preferredTableOrder = []string{
 	"user_subscriptions",
 }
 
+var sourceScopedTables = map[string]struct{}{
+	"raw_us_jobs":      {},
+	"parsed_jobs":      {},
+	"parsed_companies": {},
+	"watcher_states":   {},
+	"watcher_payloads": {},
+}
+
 func main() {
 	_ = config.LoadDotEnvIfExists(".env")
 	sourceURL := flag.String("source-sqlite-url", getenv("SOURCE_SQLITE_URL", defaultSourceSQLiteURL), "Source SQLite URL")
 	targetURL := flag.String("target-database-url", getenv("TARGET_DATABASE_URL", getenv("DATABASE_URL", "")), "Target PostgreSQL URL")
 	batchSize := flag.Int("batch-size", getenvInt("MIGRATE_BATCH_SIZE", defaultBatchSize), "Rows per batch")
+	sourcesFlag := flag.String("sources", getenv("MIGRATE_SOURCES", defaultMigrateSources), "Comma-separated sources to migrate")
 	monthsBack := flag.Int("months-back", getenvInt("MIGRATE_MONTHS_BACK", 6), "Only migrate jobs within last N months")
 	timeOnly := flag.Bool("time-only", false, "Sync only datetime/text time-like columns from SQLite to PostgreSQL")
 	flag.Parse()
@@ -66,7 +76,9 @@ func main() {
 	defer targetDB.Close()
 
 	cutoff := time.Now().UTC().AddDate(0, -*monthsBack, 0)
+	sources := parseSources(*sourcesFlag)
 	log.Printf("[filter] post_date >= %s", cutoff.Format(time.RFC3339Nano))
+	log.Printf("[filter] sources=%v", sources)
 
 	ctx := context.Background()
 	tableNames, err := commonTableNames(ctx, sourceDB, targetDB)
@@ -75,7 +87,7 @@ func main() {
 	}
 	total := 0
 	for _, tableName := range tableNames {
-		copied, err := copyTable(ctx, sourceDB, targetDB, tableName, *batchSize, cutoff, *timeOnly)
+		copied, err := copyTable(ctx, sourceDB, targetDB, tableName, *batchSize, cutoff, *timeOnly, sources)
 		if err != nil {
 			log.Fatalf("copy %s: %v", tableName, err)
 		}
@@ -90,9 +102,9 @@ func main() {
 	log.Printf("[complete] migrated rows total=%d", total)
 }
 
-func copyTable(ctx context.Context, sourceDB, targetDB *sql.DB, tableName string, batchSize int, cutoff time.Time, timeOnly bool) (int, error) {
+func copyTable(ctx context.Context, sourceDB, targetDB *sql.DB, tableName string, batchSize int, cutoff time.Time, timeOnly bool, sources []string) (int, error) {
 	if timeOnly {
-		return syncTimeOnlyTable(ctx, sourceDB, targetDB, tableName, batchSize, cutoff)
+		return syncTimeOnlyTable(ctx, sourceDB, targetDB, tableName, batchSize, cutoff, sources)
 	}
 	sharedColumns, err := sharedTableColumns(ctx, sourceDB, targetDB, tableName)
 	if err != nil {
@@ -105,19 +117,7 @@ func copyTable(ctx context.Context, sourceDB, targetDB *sql.DB, tableName string
 		batchSize = 1
 	}
 
-	whereSQL := ""
-	args := []any{}
-	switch tableName {
-	case "raw_us_jobs":
-		whereSQL = "WHERE post_date >= ?"
-		args = append(args, cutoff.Format(time.RFC3339Nano))
-	case "parsed_jobs":
-		whereSQL = "WHERE raw_us_job_id IN (SELECT id FROM raw_us_jobs WHERE post_date >= ?)"
-		args = append(args, cutoff.Format(time.RFC3339Nano))
-	case "parsed_companies":
-		whereSQL = "WHERE id IN (SELECT DISTINCT company_id FROM parsed_jobs WHERE raw_us_job_id IN (SELECT id FROM raw_us_jobs WHERE post_date >= ?) AND company_id IS NOT NULL)"
-		args = append(args, cutoff.Format(time.RFC3339Nano))
-	}
+	whereSQL, args := sourceScopedWhere(tableName, cutoff, sources)
 
 	resumeFromID, err := targetMaxID(ctx, targetDB, tableName)
 	if err != nil {
@@ -181,7 +181,7 @@ func copyTable(ctx context.Context, sourceDB, targetDB *sql.DB, tableName string
 	return total, nil
 }
 
-func syncTimeOnlyTable(ctx context.Context, sourceDB, targetDB *sql.DB, tableName string, batchSize int, cutoff time.Time) (int, error) {
+func syncTimeOnlyTable(ctx context.Context, sourceDB, targetDB *sql.DB, tableName string, batchSize int, cutoff time.Time, sources []string) (int, error) {
 	sharedColumns, err := sharedTableColumns(ctx, sourceDB, targetDB, tableName)
 	if err != nil {
 		return 0, err
@@ -199,19 +199,7 @@ func syncTimeOnlyTable(ctx context.Context, sourceDB, targetDB *sql.DB, tableNam
 		return 0, nil
 	}
 
-	whereSQL := ""
-	args := []any{}
-	switch tableName {
-	case "raw_us_jobs":
-		whereSQL = "WHERE post_date >= ?"
-		args = append(args, cutoff.Format(time.RFC3339Nano))
-	case "parsed_jobs":
-		whereSQL = "WHERE raw_us_job_id IN (SELECT id FROM raw_us_jobs WHERE post_date >= ?)"
-		args = append(args, cutoff.Format(time.RFC3339Nano))
-	case "parsed_companies":
-		whereSQL = "WHERE id IN (SELECT DISTINCT company_id FROM parsed_jobs WHERE raw_us_job_id IN (SELECT id FROM raw_us_jobs WHERE post_date >= ?) AND company_id IS NOT NULL)"
-		args = append(args, cutoff.Format(time.RFC3339Nano))
-	}
+	whereSQL, args := sourceScopedWhere(tableName, cutoff, sources)
 
 	columns := append([]string{"id"}, timeColumns...)
 	query := fmt.Sprintf("SELECT %s FROM %s %s ORDER BY id ASC", strings.Join(columns, ", "), tableName, whereSQL)
@@ -656,6 +644,89 @@ func contains(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func parseSources(raw string) []string {
+	values := []string{}
+	seen := map[string]struct{}{}
+	for _, part := range strings.Split(raw, ",") {
+		value := strings.ToLower(strings.TrimSpace(part))
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		values = append(values, value)
+	}
+	return values
+}
+
+func sourceScopedWhere(tableName string, cutoff time.Time, sources []string) (string, []any) {
+	args := []any{}
+	sourceClause := sourceInClause(sources)
+	switch tableName {
+	case "raw_us_jobs":
+		where := "WHERE post_date >= ?"
+		args = append(args, cutoff.Format(time.RFC3339Nano))
+		if sourceClause != "" {
+			where += " AND source IN (" + sourceClause + ")"
+			args = append(args, stringArgs(sources)...)
+		}
+		return where, args
+	case "parsed_jobs":
+		where := "WHERE raw_us_job_id IN (SELECT id FROM raw_us_jobs WHERE post_date >= ?"
+		args = append(args, cutoff.Format(time.RFC3339Nano))
+		if sourceClause != "" {
+			where += " AND source IN (" + sourceClause + ")"
+			args = append(args, stringArgs(sources)...)
+		}
+		where += ")"
+		return where, args
+	case "parsed_companies":
+		where := "WHERE id IN (SELECT DISTINCT company_id FROM parsed_jobs WHERE raw_us_job_id IN (SELECT id FROM raw_us_jobs WHERE post_date >= ?"
+		args = append(args, cutoff.Format(time.RFC3339Nano))
+		if sourceClause != "" {
+			where += " AND source IN (" + sourceClause + ")"
+			args = append(args, stringArgs(sources)...)
+		}
+		where += ") AND company_id IS NOT NULL)"
+		return where, args
+	case "watcher_states":
+		if sourceClause == "" {
+			return "", args
+		}
+		args = append(args, stringArgs(sources)...)
+		return "WHERE source IN (" + sourceClause + ")", args
+	case "watcher_payloads":
+		if sourceClause == "" {
+			return "", args
+		}
+		args = append(args, stringArgs(sources)...)
+		return "WHERE source IN (" + sourceClause + ")", args
+	default:
+		return "", args
+	}
+}
+
+func sourceInClause(sources []string) string {
+	if len(sources) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(sources))
+	for range sources {
+		parts = append(parts, "?")
+	}
+	return strings.Join(parts, ", ")
+}
+
+func stringArgs(values []string) []any {
+	args := make([]any, 0, len(values))
+	for _, value := range values {
+		args = append(args, value)
+	}
+	return args
 }
 
 func resetPostgresSequence(ctx context.Context, db *sql.DB, tableName string) error {
