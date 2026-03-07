@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -57,7 +58,7 @@ func Load() Config {
 	return Config{
 		HTTPHost:                      getenv("HTTP_HOSTNAME", "0.0.0.0"),
 		HTTPPort:                      getenv("HTTP_PORT", "8080"),
-		DatabaseURL:                   getenv("DATABASE_URL", "file:page_extract.db?_foreign_keys=on"),
+		DatabaseURL:                   normalizeDatabaseURL(getenv("DATABASE_URL", "file:page_extract.db?_foreign_keys=on")),
 		AuthCodeTTLMinutes:            getenvInt("AUTH_CODE_TTL_MINUTES", 10),
 		AuthSessionTTLMin:             getenvInt("AUTH_SESSION_TTL_MINUTES", 60*24*7),
 		AuthMagicLinkBaseURL:          getenv("AUTH_MAGIC_LINK_BASE_URL", "http://localhost:3000/auth/verify"),
@@ -126,6 +127,18 @@ func LoadDotEnv(path string) error {
 		_ = os.Setenv(key, strings.TrimSpace(value))
 	}
 	return nil
+}
+
+func normalizeDatabaseURL(raw string) string {
+	value := strings.TrimSpace(raw)
+	if strings.HasPrefix(value, "postgres://") {
+		if parsed, err := url.Parse(value); err == nil {
+			parsed.Scheme = "postgresql"
+			return parsed.String()
+		}
+		return "postgresql://" + strings.TrimPrefix(value, "postgres://")
+	}
+	return value
 }
 
 func LoadDotEnvIfExists(path string) error {
