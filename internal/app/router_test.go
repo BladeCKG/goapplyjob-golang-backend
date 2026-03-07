@@ -94,6 +94,36 @@ func TestJobsPublicPreviewIsLimited(t *testing.T) {
 	}
 }
 
+func TestJobsDefaultSortUsesUpdatedAt(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (3001, 'https://example.com/old-updated', ?, 1, 0, 1, 0, '{}')`, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (3002, 'https://example.com/new-updated', ?, 1, 0, 1, 0, '{}')`, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, created_at_source, updated_at, url) VALUES (3001, 'Older Updated', ?, ?, 'https://jobs.example.com/old-updated')`, time.Date(2026, 2, 12, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano), time.Date(2026, 2, 10, 12, 0, 0, 0, time.UTC).Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, created_at_source, updated_at, url) VALUES (3002, 'Newer Updated', ?, ?, 'https://jobs.example.com/new-updated')`, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano), time.Date(2026, 2, 11, 12, 0, 0, 0, time.UTC).Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/jobs", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	items := body["items"].([]any)
+	if items[0].(map[string]any)["categorized_job_title"].(string) != "Newer Updated" || items[1].(map[string]any)["categorized_job_title"].(string) != "Older Updated" {
+		t.Fatalf("unexpected order %#v", items)
+	}
+}
 func TestJobsFilterOptionsAnnualized(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()

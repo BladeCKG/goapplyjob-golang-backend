@@ -78,6 +78,7 @@ func (db *DB) Migrate(ctx context.Context) error {
             location_us_states TEXT,
             employment_type TEXT,
             salary_type TEXT,
+            updated_at TEXT,
             salary_min REAL,
             salary_max REAL,
             salary_min_usd REAL,
