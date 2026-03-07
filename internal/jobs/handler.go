@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -22,6 +21,32 @@ type Handler struct {
 	db   *database.DB
 	auth *auth.Handler
 }
+
+const (
+	defaultSalaryType = "yearly"
+	minSalaryStart    = 30000
+	minSalaryEnd      = 300000
+	minSalaryStep     = 10000
+)
+
+var (
+	postDateOptions = []string{"24_hours", "48_hours", "3_days", "week", "month", "3_months"}
+	postDateWindows = map[string]time.Duration{
+		"24_hours": 24 * time.Hour,
+		"48_hours": 48 * time.Hour,
+		"3_days":   72 * time.Hour,
+		"week":     7 * 24 * time.Hour,
+		"month":    30 * 24 * time.Hour,
+		"3_months": 90 * 24 * time.Hour,
+	}
+	validSeniorities = map[string]struct{}{
+		"entry":  {},
+		"junior": {},
+		"mid":    {},
+		"senior": {},
+		"lead":   {},
+	}
+)
 
 type jobItem struct {
 	ID                    int64      `json:"id"`
@@ -108,28 +133,28 @@ func (h *Handler) Register(router gin.IRouter) {
 }
 
 func annualizedSalarySQL(expr string) string {
-	return fmt.Sprintf(`(%s) * CASE
-		WHEN lower(trim(COALESCE(salary_type, 'yearly'))) IN ('hourly', 'hour', 'hr')
-			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%%hour%%'
-			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%%/hr%%'
-			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%% hr%%'
+	return fmt.Sprintf(`(%[1]s) * CASE
+		WHEN lower(trim(COALESCE(salary_type, '%[2]s'))) IN ('hourly', 'hour', 'hr')
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%hour%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%/hr%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%% hr%%'
 		THEN 2080.0
-		WHEN lower(trim(COALESCE(salary_type, 'yearly'))) IN ('daily', 'day')
-			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%%day%%'
-			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%%/day%%'
+		WHEN lower(trim(COALESCE(salary_type, '%[2]s'))) IN ('daily', 'day')
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%day%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%/day%%'
 		THEN 260.0
-		WHEN lower(trim(COALESCE(salary_type, 'yearly'))) IN ('weekly', 'week')
-			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%%week%%'
-			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%%/wk%%'
-			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%% wk%%'
+		WHEN lower(trim(COALESCE(salary_type, '%[2]s'))) IN ('weekly', 'week')
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%week%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%/wk%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%% wk%%'
 		THEN 52.0
-		WHEN lower(trim(COALESCE(salary_type, 'yearly'))) IN ('monthly', 'month')
-			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%%month%%'
-			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%%/mo%%'
-			OR lower(trim(COALESCE(salary_type, 'yearly'))) LIKE '%% mo%%'
+		WHEN lower(trim(COALESCE(salary_type, '%[2]s'))) IN ('monthly', 'month')
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%month%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%/mo%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%% mo%%'
 		THEN 12.0
 		ELSE 1.0
-	END`, expr)
+	END`, expr, defaultSalaryType)
 }
 
 func parseCSVQuery(value string) []string {
@@ -144,75 +169,6 @@ func parseCSVQuery(value string) []string {
 		}
 	}
 	return items
-}
-
-func buildDenseSalaryOptions(values []float64, step int, window int) []int {
-	if len(values) == 0 {
-		return nil
-	}
-	cleaned := make([]float64, 0, len(values))
-	for _, value := range values {
-		if value > 0 {
-			cleaned = append(cleaned, value)
-		}
-	}
-	if len(cleaned) == 0 {
-		return nil
-	}
-	sortFloat64s(cleaned)
-	percentile := func(sortedValues []float64, q float64) float64 {
-		if len(sortedValues) == 1 {
-			return sortedValues[0]
-		}
-		pos := float64(len(sortedValues)-1) * q
-		lo := int(math.Floor(pos))
-		hi := int(math.Ceil(pos))
-		if lo == hi {
-			return sortedValues[lo]
-		}
-		weight := pos - float64(lo)
-		return sortedValues[lo]*(1-weight) + sortedValues[hi]*weight
-	}
-	p05 := percentile(cleaned, 0.05)
-	p95 := percentile(cleaned, 0.95)
-	trimmed := make([]float64, 0, len(cleaned))
-	for _, value := range cleaned {
-		if value >= p05 && value <= p95 {
-			trimmed = append(trimmed, value)
-		}
-	}
-	targetValues := cleaned
-	if len(trimmed) >= 10 {
-		targetValues = trimmed
-	}
-	binCounts := map[int]int{}
-	for _, value := range targetValues {
-		binStart := int(math.Floor(value/float64(step))) * step
-		binCounts[binStart]++
-	}
-	binsPerWindow := max(window/step, 1)
-	sortedStarts := make([]int, 0, len(binCounts))
-	for start := range binCounts {
-		sortedStarts = append(sortedStarts, start)
-	}
-	sortInts(sortedStarts)
-	bestStart := sortedStarts[0]
-	bestCount := -1
-	for _, start := range sortedStarts {
-		windowCount := 0
-		for i := 0; i < binsPerWindow; i++ {
-			windowCount += binCounts[start+(i*step)]
-		}
-		if windowCount > bestCount {
-			bestCount = windowCount
-			bestStart = start
-		}
-	}
-	options := make([]int, 0, binsPerWindow+1)
-	for i := 0; i <= binsPerWindow; i++ {
-		options = append(options, bestStart+(i*step))
-	}
-	return options
 }
 
 func (h *Handler) filterOptions(c *gin.Context) {
@@ -276,20 +232,10 @@ func (h *Handler) filterOptions(c *gin.Context) {
 		return
 	}
 
-	salaryRows, err := h.db.SQL.QueryContext(c.Request.Context(), `SELECT `+annualizedSalarySQL(`COALESCE(salary_min_usd, salary_min)`)+` FROM parsed_jobs WHERE salary_min_usd IS NOT NULL OR salary_min IS NOT NULL`)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
-		return
+	minSalaryOptions := []int{}
+	for salary := minSalaryStart; salary <= minSalaryEnd; salary += minSalaryStep {
+		minSalaryOptions = append(minSalaryOptions, salary)
 	}
-	defer salaryRows.Close()
-	salaryValues := []float64{}
-	for salaryRows.Next() {
-		var value sql.NullFloat64
-		if err := salaryRows.Scan(&value); err == nil && value.Valid {
-			salaryValues = append(salaryValues, value.Float64)
-		}
-	}
-	minSalaryOptions := buildDenseSalaryOptions(salaryValues, 10000, 100000)
 
 	seniorities := []string{}
 	for _, check := range []struct{ Name, Field string }{{"entry", "is_entry_level"}, {"junior", "is_junior"}, {"mid", "is_mid_level"}, {"senior", "is_senior"}, {"lead", "is_lead"}} {
@@ -300,17 +246,10 @@ func (h *Handler) filterOptions(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"job_categories":   categories,
-		"locations":        locations,
-		"employment_types": employmentTypes,
-		"post_date_options": []string{
-			"24_hours",
-			"48_hours",
-			"3_days",
-			"week",
-			"month",
-			"3_months",
-		},
+		"job_categories":     categories,
+		"locations":          locations,
+		"employment_types":   employmentTypes,
+		"post_date_options":  postDateOptions,
 		"tech_stacks":        techStacks,
 		"min_salary_options": minSalaryOptions,
 		"seniorities":        seniorities,
@@ -392,23 +331,8 @@ func (h *Handler) listJobs(c *gin.Context) {
 		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 	}
 	if postDate := strings.ToLower(strings.TrimSpace(c.Query("post_date"))); postDate != "" {
-		now := time.Now().UTC()
-		var cutoff time.Time
-		switch postDate {
-		case "24_hours":
-			cutoff = now.Add(-24 * time.Hour)
-		case "48_hours":
-			cutoff = now.Add(-48 * time.Hour)
-		case "3_days":
-			cutoff = now.Add(-72 * time.Hour)
-		case "week":
-			cutoff = now.Add(-7 * 24 * time.Hour)
-		case "month":
-			cutoff = now.Add(-30 * 24 * time.Hour)
-		case "3_months":
-			cutoff = now.Add(-90 * 24 * time.Hour)
-		}
-		if !cutoff.IsZero() {
+		if window, ok := postDateWindows[postDate]; ok {
+			cutoff := time.Now().UTC().Add(-window)
 			filters = append(filters, `p.created_at_source >= ?`)
 			args = append(args, cutoff.Format(time.RFC3339Nano))
 		}
@@ -423,8 +347,10 @@ func (h *Handler) listJobs(c *gin.Context) {
 		parts := []string{}
 		fieldMap := map[string]string{"entry": "p.is_entry_level = 1", "junior": "p.is_junior = 1", "mid": "p.is_mid_level = 1", "senior": "p.is_senior = 1", "lead": "p.is_lead = 1"}
 		for _, seniority := range seniorities {
-			if predicate, ok := fieldMap[seniority]; ok {
-				parts = append(parts, predicate)
+			if _, valid := validSeniorities[seniority]; valid {
+				if predicate, ok := fieldMap[seniority]; ok {
+					parts = append(parts, predicate)
+				}
 			}
 		}
 		if len(parts) > 0 {
@@ -653,12 +579,6 @@ func nullableBool(value sql.NullBool) *bool {
 	v := value.Bool
 	return &v
 }
-func nullFloatValue(value sql.NullFloat64) any {
-	if !value.Valid {
-		return nil
-	}
-	return value.Float64
-}
 func parseIntDefault(raw string, fallback int) int {
 	if raw == "" {
 		return fallback
@@ -670,24 +590,6 @@ func parseIntDefault(raw string, fallback int) int {
 	return parsed
 }
 func sortStrings(values []string) {
-	for i := 0; i < len(values); i++ {
-		for j := i + 1; j < len(values); j++ {
-			if values[j] < values[i] {
-				values[i], values[j] = values[j], values[i]
-			}
-		}
-	}
-}
-func sortFloat64s(values []float64) {
-	for i := 0; i < len(values); i++ {
-		for j := i + 1; j < len(values); j++ {
-			if values[j] < values[i] {
-				values[i], values[j] = values[j], values[i]
-			}
-		}
-	}
-}
-func sortInts(values []int) {
 	for i := 0; i < len(values); i++ {
 		for j := i + 1; j < len(values); j++ {
 			if values[j] < values[i] {

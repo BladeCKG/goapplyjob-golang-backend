@@ -162,7 +162,7 @@ func TestJobsFilterOptionsAnnualized(t *testing.T) {
 	var body map[string]any
 	decodeBody(t, rec.Body.Bytes(), &body)
 	minSalaryOptions := body["min_salary_options"].([]any)
-	if len(minSalaryOptions) != 11 {
+	if len(minSalaryOptions) != 28 || int(minSalaryOptions[0].(float64)) != 30000 || int(minSalaryOptions[len(minSalaryOptions)-1].(float64)) != 300000 {
 		t.Fatalf("unexpected min salary options %#v", body)
 	}
 
