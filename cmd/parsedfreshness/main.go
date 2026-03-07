@@ -10,6 +10,7 @@ import (
 )
 
 func main() {
+	_ = config.LoadDotEnvIfExists(".env")
 	cfg := config.Load()
 	db, err := database.Open(cfg.DatabaseURL)
 	if err != nil {

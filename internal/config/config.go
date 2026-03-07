@@ -128,14 +128,24 @@ func LoadDotEnv(path string) error {
 	return nil
 }
 
-func getenv(key, fallback string) string {
+func LoadDotEnvIfExists(path string) error {
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	return LoadDotEnv(path)
+}
+
+func Getenv(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
 	}
 	return fallback
 }
 
-func getenvInt(key string, fallback int) int {
+func GetenvInt(key string, fallback int) int {
 	value := os.Getenv(key)
 	if value == "" {
 		return fallback
@@ -147,7 +157,19 @@ func getenvInt(key string, fallback int) int {
 	return parsed
 }
 
-func getenvBool(key string, fallback bool) bool {
+func GetenvFloat(key string, fallback float64) float64 {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func GetenvBool(key string, fallback bool) bool {
 	value := os.Getenv(key)
 	if value == "" {
 		return fallback
@@ -159,3 +181,7 @@ func getenvBool(key string, fallback bool) bool {
 		return false
 	}
 }
+
+func getenv(key, fallback string) string        { return Getenv(key, fallback) }
+func getenvInt(key string, fallback int) int    { return GetenvInt(key, fallback) }
+func getenvBool(key string, fallback bool) bool { return GetenvBool(key, fallback) }
