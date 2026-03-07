@@ -42,7 +42,7 @@ jobs:
         env:
           PARSED_JOB_RUN_ONCE: "true"
           RAW_JOB_RETENTION_DAYS: ${{ secrets.RAW_JOB_RETENTION_DAYS }}
-          PARSED_JOB_WORKER_BATCH_SIZE: "400"
+          PARSED_JOB_WORKER_BATCH_SIZE: "600"
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             go run ./cmd/parsedfreshness
