@@ -106,6 +106,10 @@ func (g *CoinPaymentsGateway) ParseWebhook(payload map[string]any) WebhookParseR
 	}
 }
 
+func (g *CoinPaymentsGateway) VerifyPayment(providerPaymentID string, orderID string) (*VerificationResult, error) {
+	return nil, nil
+}
+
 func (g *CoinPaymentsGateway) mapEventType(eventType string) PaymentStatus {
 	switch eventType {
 	case "invoicepaid", "invoicecompleted":

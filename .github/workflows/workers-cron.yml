@@ -40,6 +40,7 @@ jobs:
       - name: Run every-3-hours workers
         env:
           PARSED_JOB_RUN_ONCE: "true"
+          RAW_JOB_RETENTION_DAYS: ${{ secrets.RAW_JOB_RETENTION_DAYS }}
           PARSED_JOB_WORKER_BATCH_SIZE: "400"
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then

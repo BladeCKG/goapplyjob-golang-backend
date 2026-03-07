@@ -37,9 +37,15 @@ type WebhookParseResult struct {
 	Status            PaymentStatus
 }
 
+type VerificationResult struct {
+	Status          PaymentStatus
+	ProviderPayload map[string]any
+}
+
 type Gateway interface {
 	CreateInvoice(request InvoiceRequest) (InvoiceResult, error)
 	ListCurrencies(amountUSD *float64) []CurrencyOption
 	VerifyWebhookSignature(payload map[string]any, headers map[string]string, rawBody []byte) error
 	ParseWebhook(payload map[string]any) WebhookParseResult
+	VerifyPayment(providerPaymentID string, orderID string) (*VerificationResult, error)
 }

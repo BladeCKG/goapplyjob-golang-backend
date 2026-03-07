@@ -251,7 +251,7 @@ func (h *Handler) confirmPayment(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Not authenticated"})
 		return
 	}
-	if err := h.activateSubscription(c, c.Param("paymentID"), user.ID); err != nil {
+	if err := h.confirmOrActivatePayment(c, c.Param("paymentID"), user.ID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{"detail": "Payment not found"})
 			return
@@ -260,6 +260,68 @@ func (h *Handler) confirmPayment(c *gin.Context) {
 		return
 	}
 	h.renderPaymentStatus(c, user.ID)
+}
+
+func (h *Handler) confirmOrActivatePayment(c *gin.Context, paymentID string, userID int64) error {
+	var (
+		paymentRowID       int64
+		paymentUserID      int64
+		planID             int64
+		paymentStatus      string
+		provider           string
+		providerCheckoutID sql.NullString
+		providerPayloadRaw sql.NullString
+		durationDays       int
+	)
+	err := h.db.SQL.QueryRowContext(
+		c.Request.Context(),
+		`SELECT p.id, p.user_id, p.pricing_plan_id, p.status, p.provider, p.provider_checkout_id, p.provider_payload, plan.duration_days
+		 FROM pricing_payments p
+		 JOIN pricing_plans plan ON plan.id = p.pricing_plan_id
+		 WHERE p.id = ? AND p.user_id = ?
+		 LIMIT 1`,
+		paymentID,
+		userID,
+	).Scan(&paymentRowID, &paymentUserID, &planID, &paymentStatus, &provider, &providerCheckoutID, &providerPayloadRaw, &durationDays)
+	if err != nil {
+		return err
+	}
+	if paymentStatus == "paid" {
+		return nil
+	}
+
+	resolvedStatus := "pending"
+	if provider == "crypto" {
+		gateway, err := paymentcrypto.GetGateway(h.cfg)
+		if err == nil {
+			verification, verifyErr := gateway.VerifyPayment(strings.TrimSpace(providerCheckoutID.String), paymentID)
+			if verifyErr == nil && verification != nil {
+				resolvedStatus = string(verification.Status)
+				if verification.ProviderPayload != nil {
+					mergedPayload, mergeErr := mergeProviderPayload(providerPayloadRaw, verification.ProviderPayload)
+					if mergeErr == nil {
+						mergedPayload["last_verified_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+						payloadBytes, _ := json.Marshal(mergedPayload)
+						_, _ = h.db.SQL.ExecContext(c.Request.Context(), `UPDATE pricing_payments SET provider_payload = ? WHERE id = ?`, string(payloadBytes), paymentRowID)
+					}
+				}
+			} else {
+				resolvedStatus = extractProviderPayloadStatus(providerPayloadRaw)
+			}
+		}
+	} else if provider == "internal" {
+		resolvedStatus = "paid"
+	}
+
+	switch resolvedStatus {
+	case "paid":
+		return h.activatePlan(c, paymentUserID, planID, durationDays, paymentRowID)
+	case "failed":
+		_, err := h.db.SQL.ExecContext(c.Request.Context(), `UPDATE pricing_payments SET status = 'failed' WHERE id = ?`, paymentRowID)
+		return err
+	default:
+		return h.activateSubscription(c, paymentID, userID)
+	}
 }
 
 func (h *Handler) stripeWebhook(c *gin.Context) {
@@ -596,6 +658,52 @@ func appendQueryParam(rawURL, key, value string) string {
 	query.Set(key, value)
 	parsed.RawQuery = query.Encode()
 	return parsed.String()
+}
+
+func mergeProviderPayload(existing sql.NullString, latest map[string]any) (map[string]any, error) {
+	merged := map[string]any{}
+	if existing.Valid && strings.TrimSpace(existing.String) != "" {
+		if err := json.Unmarshal([]byte(existing.String), &merged); err != nil {
+			return nil, err
+		}
+	}
+	for key, value := range latest {
+		merged[key] = value
+	}
+	return merged, nil
+}
+
+func extractProviderPayloadStatus(existing sql.NullString) string {
+	if !existing.Valid || strings.TrimSpace(existing.String) == "" {
+		return "pending"
+	}
+	payload := map[string]any{}
+	if err := json.Unmarshal([]byte(existing.String), &payload); err != nil {
+		return "pending"
+	}
+	if strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", payload["mode"]))) == "local_stub" {
+		return "paid"
+	}
+	candidates := []any{
+		payload["payment_status"],
+		payload["status"],
+	}
+	if nestedData, ok := payload["data"].(map[string]any); ok {
+		candidates = append(candidates, nestedData["payment_status"], nestedData["status"])
+	}
+	if nestedPayment, ok := payload["payment"].(map[string]any); ok {
+		candidates = append(candidates, nestedPayment["status"])
+	}
+	if nestedHotWallet, ok := payload["hotWallet"].(map[string]any); ok {
+		candidates = append(candidates, nestedHotWallet["status"])
+	}
+	for _, candidate := range candidates {
+		mapped := paymentcrypto.ParseGenericPaymentStatus(candidate)
+		if mapped != "pending" {
+			return mapped
+		}
+	}
+	return "pending"
 }
 
 func (h *Handler) planDefinitions() []struct {

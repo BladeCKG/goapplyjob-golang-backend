@@ -5,6 +5,8 @@ import (
 	"crypto/sha512"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -108,6 +110,39 @@ func (g *NowPaymentsGateway) ParseWebhook(payload map[string]any) WebhookParseRe
 		ProviderPaymentID: fmt.Sprintf("%v", firstAny(payload["payment_id"], "")),
 		Status:            status,
 	}
+}
+
+func (g *NowPaymentsGateway) VerifyPayment(providerPaymentID string, orderID string) (*VerificationResult, error) {
+	if strings.TrimSpace(g.cfg.NowPaymentsAPIKey) == "" || strings.TrimSpace(providerPaymentID) == "" {
+		return nil, nil
+	}
+	endpoint := strings.TrimRight(strings.TrimSpace(g.cfg.NowPaymentsAPIBaseURL), "/") + "/payment/" + providerPaymentID
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("x-api-key", g.cfg.NowPaymentsAPIKey)
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusBadRequest {
+		return nil, nil
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, nil
+	}
+	payload := map[string]any{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, nil
+	}
+	return &VerificationResult{
+		Status:          PaymentStatus(ParseGenericPaymentStatus(firstAny(payload["payment_status"], payload["status"], "pending"))),
+		ProviderPayload: payload,
+	}, nil
 }
 
 func contains(values []string, target string) bool {

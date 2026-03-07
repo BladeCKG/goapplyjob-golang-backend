@@ -68,3 +68,7 @@ func (g *MaxelPayGateway) ParseWebhook(payload map[string]any) WebhookParseResul
 		Status:            status,
 	}
 }
+
+func (g *MaxelPayGateway) VerifyPayment(providerPaymentID string, orderID string) (*VerificationResult, error) {
+	return nil, nil
+}

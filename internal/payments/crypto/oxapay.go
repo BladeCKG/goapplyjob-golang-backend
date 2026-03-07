@@ -1,11 +1,15 @@
 package crypto
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha512"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
+	"time"
 
 	"goapplyjob-golang-backend/internal/config"
 )
@@ -82,6 +86,61 @@ func (g *OxaPayGateway) ParseWebhook(payload map[string]any) WebhookParseResult 
 		ProviderPaymentID: fmt.Sprintf("%v", firstAny(payload["trackId"], payload["track_id"], payload["payment_id"], "")),
 		Status:            status,
 	}
+}
+
+func (g *OxaPayGateway) VerifyPayment(providerPaymentID string, orderID string) (*VerificationResult, error) {
+	if strings.TrimSpace(g.cfg.OxaPayMerchantAPIKey) == "" || strings.TrimSpace(providerPaymentID) == "" {
+		return nil, nil
+	}
+	requestPayload := map[string]any{
+		"track_id": providerPaymentID,
+	}
+	if strings.TrimSpace(orderID) != "" {
+		requestPayload["order_id"] = orderID
+	}
+	switch strings.TrimSpace(strings.ToLower(g.cfg.OxaPayEnv)) {
+	case "sandbox":
+		requestPayload["sandbox"] = true
+	case "prod":
+		requestPayload["sandbox"] = false
+	}
+	rawBody, _ := json.Marshal(requestPayload)
+	endpoint := strings.TrimRight(strings.TrimSpace(g.cfg.OxaPayAPIBaseURL), "/") + "/payment/inquiry"
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(rawBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("merchant_api_key", g.cfg.OxaPayMerchantAPIKey)
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusBadRequest {
+		return nil, nil
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, nil
+	}
+	payload := map[string]any{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, nil
+	}
+	nestedData, _ := payload["data"].(map[string]any)
+	statusValue := firstAny(
+		nestedData["status"],
+		nestedData["payment_status"],
+		payload["status"],
+		payload["payment_status"],
+		"pending",
+	)
+	return &VerificationResult{
+		Status:          PaymentStatus(ParseGenericPaymentStatus(statusValue)),
+		ProviderPayload: payload,
+	}, nil
 }
 
 func asString(value any) string {
