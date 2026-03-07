@@ -43,6 +43,7 @@ func main() {
 	targetURL := flag.String("target-database-url", getenv("TARGET_DATABASE_URL", getenv("DATABASE_URL", "")), "Target PostgreSQL URL")
 	batchSize := flag.Int("batch-size", getenvInt("MIGRATE_BATCH_SIZE", defaultBatchSize), "Rows per batch")
 	monthsBack := flag.Int("months-back", getenvInt("MIGRATE_MONTHS_BACK", 6), "Only migrate jobs within last N months")
+	timeOnly := flag.Bool("time-only", false, "Sync only datetime/text time-like columns from SQLite to PostgreSQL")
 	flag.Parse()
 
 	if strings.TrimSpace(*targetURL) == "" {
@@ -74,7 +75,7 @@ func main() {
 	}
 	total := 0
 	for _, tableName := range tableNames {
-		copied, err := copyTable(ctx, sourceDB, targetDB, tableName, *batchSize, cutoff)
+		copied, err := copyTable(ctx, sourceDB, targetDB, tableName, *batchSize, cutoff, *timeOnly)
 		if err != nil {
 			log.Fatalf("copy %s: %v", tableName, err)
 		}
@@ -84,7 +85,10 @@ func main() {
 	log.Printf("[complete] migrated rows total=%d", total)
 }
 
-func copyTable(ctx context.Context, sourceDB, targetDB *sql.DB, tableName string, batchSize int, cutoff time.Time) (int, error) {
+func copyTable(ctx context.Context, sourceDB, targetDB *sql.DB, tableName string, batchSize int, cutoff time.Time, timeOnly bool) (int, error) {
+	if timeOnly {
+		return syncTimeOnlyTable(ctx, sourceDB, targetDB, tableName, batchSize, cutoff)
+	}
 	sharedColumns, err := sharedTableColumns(ctx, sourceDB, targetDB, tableName)
 	if err != nil {
 		return 0, err
@@ -170,6 +174,110 @@ func copyTable(ctx context.Context, sourceDB, targetDB *sql.DB, tableName string
 		total += len(buffer)
 	}
 	return total, nil
+}
+
+func syncTimeOnlyTable(ctx context.Context, sourceDB, targetDB *sql.DB, tableName string, batchSize int, cutoff time.Time) (int, error) {
+	sharedColumns, err := sharedTableColumns(ctx, sourceDB, targetDB, tableName)
+	if err != nil {
+		return 0, err
+	}
+	timeColumns := make([]string, 0, len(sharedColumns))
+	for _, col := range sharedColumns {
+		if col == "id" {
+			continue
+		}
+		if looksLikeTimeColumn(col) {
+			timeColumns = append(timeColumns, col)
+		}
+	}
+	if len(timeColumns) == 0 {
+		return 0, nil
+	}
+
+	whereSQL := ""
+	args := []any{}
+	switch tableName {
+	case "raw_us_jobs":
+		whereSQL = "WHERE post_date >= ?"
+		args = append(args, cutoff.Format(time.RFC3339Nano))
+	case "parsed_jobs":
+		whereSQL = "WHERE raw_us_job_id IN (SELECT id FROM raw_us_jobs WHERE post_date >= ?)"
+		args = append(args, cutoff.Format(time.RFC3339Nano))
+	case "parsed_companies":
+		whereSQL = "WHERE id IN (SELECT DISTINCT company_id FROM parsed_jobs WHERE raw_us_job_id IN (SELECT id FROM raw_us_jobs WHERE post_date >= ?) AND company_id IS NOT NULL)"
+		args = append(args, cutoff.Format(time.RFC3339Nano))
+	}
+
+	columns := append([]string{"id"}, timeColumns...)
+	query := fmt.Sprintf("SELECT %s FROM %s %s ORDER BY id ASC", strings.Join(columns, ", "), tableName, whereSQL)
+	rows, err := sourceDB.QueryContext(ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	total := 0
+	buffer := make([]map[string]any, 0, batchSize)
+	for rows.Next() {
+		values := make([]any, len(columns))
+		ptrs := make([]any, len(columns))
+		for i := range values {
+			ptrs[i] = &values[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return total, err
+		}
+		row := map[string]any{}
+		for i, col := range columns {
+			row[col] = normalizeTimeOnlyValue(values[i])
+		}
+		buffer = append(buffer, row)
+		if len(buffer) >= batchSize {
+			copied, err := updateTimeOnlyBatch(ctx, targetDB, tableName, timeColumns, buffer)
+			if err != nil {
+				return total, err
+			}
+			total += copied
+			buffer = buffer[:0]
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return total, err
+	}
+	if len(buffer) > 0 {
+		copied, err := updateTimeOnlyBatch(ctx, targetDB, tableName, timeColumns, buffer)
+		if err != nil {
+			return total, err
+		}
+		total += copied
+	}
+	return total, nil
+}
+
+func updateTimeOnlyBatch(ctx context.Context, db *sql.DB, tableName string, timeColumns []string, rows []map[string]any) (int, error) {
+	if len(rows) == 0 {
+		return 0, nil
+	}
+	assignments := make([]string, 0, len(timeColumns))
+	for _, col := range timeColumns {
+		assignments = append(assignments, fmt.Sprintf("%s = $%d", col, len(assignments)+2))
+	}
+	sqlText := fmt.Sprintf("UPDATE %s SET %s WHERE id = $1", tableName, strings.Join(assignments, ", "))
+	updated := 0
+	for _, row := range rows {
+		args := make([]any, 0, len(timeColumns)+1)
+		args = append(args, row["id"])
+		for _, col := range timeColumns {
+			args = append(args, row[col])
+		}
+		result, err := db.ExecContext(ctx, sqlText, args...)
+		if err != nil {
+			return updated, err
+		}
+		affected, _ := result.RowsAffected()
+		updated += int(affected)
+	}
+	return updated, nil
 }
 
 func filterParsedJobsForFKs(ctx context.Context, targetDB *sql.DB, rows []map[string]any) ([]map[string]any, error) {
@@ -456,6 +564,51 @@ func normalizeSQLiteValue(value any) any {
 	default:
 		return v
 	}
+}
+
+func normalizeTimeOnlyValue(value any) any {
+	switch v := normalizeSQLiteValue(value).(type) {
+	case string:
+		raw := strings.TrimSpace(v)
+		if raw == "" {
+			return nil
+		}
+		if parsed, err := parseFlexibleTime(raw); err == nil {
+			return parsed.UTC().Format(time.RFC3339Nano)
+		}
+		return raw
+	default:
+		return v
+	}
+}
+
+func parseFlexibleTime(raw string) (time.Time, error) {
+	if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return parsed, nil
+	}
+	if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+		return parsed, nil
+	}
+	if parsed, err := time.Parse("2006-01-02 15:04:05", raw); err == nil {
+		return parsed.UTC(), nil
+	}
+	if parsed, err := time.Parse("2006-01-02 15:04:05.999999", raw); err == nil {
+		return parsed.UTC(), nil
+	}
+	return time.Time{}, fmt.Errorf("unsupported time %q", raw)
+}
+
+func looksLikeTimeColumn(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.Contains(lower, "created_at") ||
+		strings.Contains(lower, "updated_at") ||
+		strings.Contains(lower, "expires_at") ||
+		strings.Contains(lower, "starts_at") ||
+		strings.Contains(lower, "ends_at") ||
+		strings.Contains(lower, "paid_at") ||
+		strings.Contains(lower, "consumed_at") ||
+		strings.Contains(lower, "post_date") ||
+		strings.Contains(lower, "lastmod")
 }
 
 func toInt64(value any) (int64, bool) {
