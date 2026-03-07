@@ -50,7 +50,7 @@ func (g *CoinPaymentsGateway) ListCurrencies(amountUSD *float64) []CurrencyOptio
 	}
 }
 
-func (g *CoinPaymentsGateway) VerifyWebhookSignature(payload map[string]any, headers map[string]string) error {
+func (g *CoinPaymentsGateway) VerifyWebhookSignature(payload map[string]any, headers map[string]string, rawBody []byte) error {
 	clientID := strings.TrimSpace(getHeader(headers, "x-coinpayments-client"))
 	timestamp := strings.TrimSpace(getHeader(headers, "x-coinpayments-timestamp"))
 	signature := strings.TrimSpace(getHeader(headers, "x-coinpayments-signature"))
@@ -65,7 +65,10 @@ func (g *CoinPaymentsGateway) VerifyWebhookSignature(payload map[string]any, hea
 	if webhookURL == "" {
 		webhookURL = strings.TrimSpace(g.cfg.CryptoIPNCallbackURL)
 	}
-	payloadText, _ := json.Marshal(payload)
+	payloadText := rawBody
+	if len(payloadText) == 0 {
+		payloadText, _ = json.Marshal(payload)
+	}
 	message := "\ufeffPOST" + webhookURL + clientID + timestamp + string(payloadText)
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write([]byte(message))

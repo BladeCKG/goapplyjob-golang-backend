@@ -72,7 +72,7 @@ func TestNowPaymentsVerifyWebhookSignatureAcceptsValidSignature(t *testing.T) {
 	mac := hmac.New(sha512.New, []byte("secret-token"))
 	_, _ = mac.Write(raw)
 	signature := fmt.Sprintf("%x", mac.Sum(nil))
-	if err := gateway.VerifyWebhookSignature(payload, map[string]string{"x-nowpayments-sig": signature}); err != nil {
+	if err := gateway.VerifyWebhookSignature(payload, map[string]string{"x-nowpayments-sig": signature}, raw); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -81,7 +81,7 @@ func TestNowPaymentsVerifyWebhookSignatureRejectsInvalidSignature(t *testing.T) 
 	cfg := config.Config{NowPaymentsIPNSecret: "secret-token"}
 	gateway := NewNowPaymentsGateway(cfg)
 	payload := map[string]any{"order_id": "123", "payment_status": "finished"}
-	if err := gateway.VerifyWebhookSignature(payload, map[string]string{"x-nowpayments-sig": "invalid"}); err == nil {
+	if err := gateway.VerifyWebhookSignature(payload, map[string]string{"x-nowpayments-sig": "invalid"}, nil); err == nil {
 		t.Fatal("expected invalid signature error")
 	}
 }
@@ -121,9 +121,59 @@ func TestCoinPaymentsVerifyWebhookSignatureAcceptsValidSignature(t *testing.T) {
 		"X-CoinPayments-Client":    "client-1",
 		"X-CoinPayments-Timestamp": timestamp,
 		"X-CoinPayments-Signature": signature,
-	})
+	}, raw)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOxaPayVerifyWebhookSignatureAcceptsValidHMAC(t *testing.T) {
+	cfg := config.Config{OxaPayMerchantAPIKey: "secret-token"}
+	gateway := NewOxaPayGateway(cfg)
+	payloadText := `{"track_id":"184747701","status":"Paid","order_id":"77"}`
+	signatureMac := hmac.New(sha512.New, []byte("secret-token"))
+	_, _ = signatureMac.Write([]byte(payloadText))
+	signature := fmt.Sprintf("%x", signatureMac.Sum(nil))
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(payloadText), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := gateway.VerifyWebhookSignature(payload, map[string]string{"HMAC": signature}, []byte(payloadText)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOxaPayVerifyWebhookSignatureRejectsInvalidHMAC(t *testing.T) {
+	cfg := config.Config{OxaPayMerchantAPIKey: "secret-token"}
+	gateway := NewOxaPayGateway(cfg)
+	payload := map[string]any{"track_id": "184747701", "status": "Paid", "order_id": "77"}
+	raw, _ := json.Marshal(payload)
+	if err := gateway.VerifyWebhookSignature(payload, map[string]string{"HMAC": "invalid"}, raw); err == nil {
+		t.Fatal("expected invalid hmac error")
+	}
+}
+
+func TestOxaPayParseWebhookMapsStatusAndIdentifiers(t *testing.T) {
+	gateway := NewOxaPayGateway(config.Config{})
+	paid := gateway.ParseWebhook(map[string]any{"status": "Paid", "order_id": "77", "track_id": "184747701"})
+	if paid.OrderID != "77" || paid.ProviderPaymentID != "184747701" || paid.Status != PaymentPaid {
+		t.Fatalf("unexpected paid webhook %#v", paid)
+	}
+	failed := gateway.ParseWebhook(map[string]any{"status": "Expired", "order_id": "78"})
+	if failed.Status != PaymentFailed {
+		t.Fatalf("unexpected failed webhook %#v", failed)
+	}
+	pending := gateway.ParseWebhook(map[string]any{"status": "Confirming", "order_id": "79"})
+	if pending.Status != PaymentPending {
+		t.Fatalf("unexpected pending webhook %#v", pending)
+	}
+}
+
+func TestOxaPayParseWebhookIgnoresNonInvoiceType(t *testing.T) {
+	gateway := NewOxaPayGateway(config.Config{})
+	result := gateway.ParseWebhook(map[string]any{"type": "payout", "status": "paid", "order_id": "77", "track_id": "abc"})
+	if result.OrderID != "" || result.ProviderPaymentID != "" || result.Status != PaymentPending {
+		t.Fatalf("unexpected non-invoice webhook %#v", result)
 	}
 }
 

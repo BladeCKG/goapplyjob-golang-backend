@@ -40,6 +40,6 @@ type WebhookParseResult struct {
 type Gateway interface {
 	CreateInvoice(request InvoiceRequest) (InvoiceResult, error)
 	ListCurrencies(amountUSD *float64) []CurrencyOption
-	VerifyWebhookSignature(payload map[string]any, headers map[string]string) error
+	VerifyWebhookSignature(payload map[string]any, headers map[string]string, rawBody []byte) error
 	ParseWebhook(payload map[string]any) WebhookParseResult
 }

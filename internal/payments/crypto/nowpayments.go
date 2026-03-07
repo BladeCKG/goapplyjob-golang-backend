@@ -73,7 +73,7 @@ func (g *NowPaymentsGateway) ListCurrencies(amountUSD *float64) []CurrencyOption
 	return out
 }
 
-func (g *NowPaymentsGateway) VerifyWebhookSignature(payload map[string]any, headers map[string]string) error {
+func (g *NowPaymentsGateway) VerifyWebhookSignature(payload map[string]any, headers map[string]string, rawBody []byte) error {
 	secret := strings.TrimSpace(g.cfg.NowPaymentsIPNSecret)
 	if secret == "" {
 		return nil
@@ -82,7 +82,10 @@ func (g *NowPaymentsGateway) VerifyWebhookSignature(payload map[string]any, head
 	if signature == "" {
 		return fmt.Errorf("Missing NOWPayments signature")
 	}
-	message, _ := json.Marshal(payload)
+	message := rawBody
+	if len(message) == 0 {
+		message, _ = json.Marshal(payload)
+	}
 	mac := hmac.New(sha512.New, []byte(secret))
 	_, _ = mac.Write(message)
 	expected := fmt.Sprintf("%x", mac.Sum(nil))

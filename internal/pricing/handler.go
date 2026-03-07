@@ -303,7 +303,7 @@ func (h *Handler) cryptoWebhook(c *gin.Context) {
 			headers[strings.ToLower(key)] = values[0]
 		}
 	}
-	if err := gateway.VerifyWebhookSignature(payload, headers); err != nil {
+	if err := gateway.VerifyWebhookSignature(payload, headers, rawBody); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": err.Error()})
 		return
 	}

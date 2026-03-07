@@ -50,7 +50,7 @@ func (g *MaxelPayGateway) ListCurrencies(amountUSD *float64) []CurrencyOption {
 	return []CurrencyOption{{Code: "USD", MinUSD: nil}}
 }
 
-func (g *MaxelPayGateway) VerifyWebhookSignature(payload map[string]any, headers map[string]string) error {
+func (g *MaxelPayGateway) VerifyWebhookSignature(payload map[string]any, headers map[string]string, rawBody []byte) error {
 	return nil
 }
 
