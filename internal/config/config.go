@@ -77,7 +77,7 @@ func Load() Config {
 		PaymentSuccessURL:             getenv("PAYMENT_SUCCESS_URL", "http://localhost:3000/billing/success"),
 		PaymentCancelURL:              getenv("PAYMENT_CANCEL_URL", "http://localhost:3000/billing/cancel"),
 		FreePlanDurationDays:          getenvInt("FREE_PLAN_DURATION_DAYS", 7),
-		CryptoPaymentProvider:         getenv("CRYPTO_PAYMENT_PROVIDER", "nowpayments"),
+		CryptoPaymentProvider:         getenv("CRYPTO_PAYMENT_PROVIDER", "oxapay"),
 		CryptoIPNCallbackURL:          getenv("CRYPTO_IPN_CALLBACK_URL", "http://localhost:8000/pricing/webhooks/crypto"),
 		CoinPaymentsAPIBaseURL:        getenv("COINPAYMENTS_API_BASE_URL", "https://a-api.coinpayments.net/api"),
 		CoinPaymentsClientID:          getenv("COINPAYMENTS_CLIENT_ID", ""),

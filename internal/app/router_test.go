@@ -489,8 +489,8 @@ func TestPricingFlow(t *testing.T) {
 		t.Fatalf("expected crypto payment payload %#v", payload)
 	}
 	cryptoPayment := payload["crypto_payment"].(map[string]any)
-	if cryptoPayment["expiration_estimate_date"] == nil || cryptoPayment["expires_at"] == nil {
-		t.Fatalf("expected normalized crypto expiry metadata %#v", cryptoPayment)
+	if cryptoPayment["invoice_url"] == nil || cryptoPayment["invoice_url"] == "" {
+		t.Fatalf("expected invoice_url in crypto payment payload %#v", cryptoPayment)
 	}
 	paymentID := int(payload["payment_id"].(float64))
 
@@ -628,7 +628,7 @@ func TestPricingCryptoCurrenciesSupportsAmountFiltering(t *testing.T) {
 	var body map[string]any
 	decodeBody(t, rec.Body.Bytes(), &body)
 	items := body["items"].([]any)
-	if len(items) != 3 {
+	if len(items) != 1 {
 		t.Fatalf("unexpected currencies payload %#v", body)
 	}
 	first := items[0].(map[string]any)

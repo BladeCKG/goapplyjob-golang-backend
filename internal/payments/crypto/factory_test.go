@@ -13,14 +13,14 @@ import (
 	"goapplyjob-golang-backend/internal/config"
 )
 
-func TestCryptoGatewayFactoryDefaultsToNowPayments(t *testing.T) {
+func TestCryptoGatewayFactoryDefaultsToOxaPay(t *testing.T) {
 	cfg := config.Config{}
 	gateway, err := GetGateway(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := gateway.(*NowPaymentsGateway); !ok {
-		t.Fatalf("expected NowPaymentsGateway, got %T", gateway)
+	if _, ok := gateway.(*OxaPayGateway); !ok {
+		t.Fatalf("expected OxaPayGateway, got %T", gateway)
 	}
 }
 

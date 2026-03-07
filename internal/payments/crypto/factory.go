@@ -10,14 +10,14 @@ import (
 func GetGateway(cfg config.Config) (Gateway, error) {
 	provider := strings.ToLower(strings.TrimSpace(cfg.CryptoPaymentProvider))
 	switch provider {
-	case "", "nowpayments", "now_payment", "now-payments":
+	case "", "oxapay", "oxa-pay", "oxa_pay":
+		return NewOxaPayGateway(cfg), nil
+	case "nowpayments", "now_payment", "now-payments":
 		return NewNowPaymentsGateway(cfg), nil
 	case "coinpayments", "coinpayment", "coin-payments", "coin_payment":
 		return NewCoinPaymentsGateway(cfg), nil
 	case "maxelpay", "maxel_pay", "maxel-pay":
 		return NewMaxelPayGateway(cfg), nil
-	case "oxapay", "oxa-pay", "oxa_pay":
-		return NewOxaPayGateway(cfg), nil
 	default:
 		return nil, fmt.Errorf("unsupported crypto payment provider: %s", provider)
 	}
