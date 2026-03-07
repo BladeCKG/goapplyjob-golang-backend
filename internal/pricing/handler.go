@@ -488,24 +488,48 @@ func (h *Handler) subscriptionStatus(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Not authenticated"})
 		return
 	}
+	var subscriptionID int64
 	var planCode, planName string
 	var startsAt, endsAt sql.NullString
 	err = h.db.SQL.QueryRowContext(
 		c.Request.Context(),
-		`SELECT p.code, p.name, s.starts_at, s.ends_at
+		`SELECT s.id, p.code, p.name, s.starts_at, s.ends_at
 		 FROM user_subscriptions s
 		 JOIN pricing_plans p ON p.id = s.pricing_plan_id
-		 WHERE s.user_id = ? AND s.is_active = 1 AND s.ends_at > ? AND p.is_active = 1
+		 WHERE s.user_id = ? AND p.is_active = 1
 		 ORDER BY s.ends_at DESC
 		 LIMIT 1`,
 		user.ID,
-		time.Now().UTC().Format(time.RFC3339Nano),
-	).Scan(&planCode, &planName, &startsAt, &endsAt)
+	).Scan(&subscriptionID, &planCode, &planName, &startsAt, &endsAt)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"is_active": false, "plan_code": nil, "plan_name": nil, "starts_at": nil, "ends_at": nil})
+		c.JSON(http.StatusOK, gin.H{"is_active": false, "status": "none", "days_left": nil, "plan_code": nil, "plan_name": nil, "starts_at": nil, "ends_at": nil})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"is_active": true, "plan_code": planCode, "plan_name": planName, "starts_at": nullStringValue(startsAt), "ends_at": nullStringValue(endsAt)})
+	now := time.Now().UTC()
+	isActive := false
+	status := "expired"
+	var daysLeft any
+	if endsAt.Valid {
+		if parsed, err := time.Parse(time.RFC3339Nano, endsAt.String); err == nil {
+			if parsed.After(now) {
+				isActive = true
+				status = "active"
+			}
+			daysLeft = getDaysLeft(parsed, now)
+		}
+	}
+	if !isActive {
+		_, _ = h.db.SQL.ExecContext(c.Request.Context(), `UPDATE user_subscriptions SET is_active = 0 WHERE id = ? AND is_active = 1`, subscriptionID)
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"is_active": isActive,
+		"status":    status,
+		"days_left": daysLeft,
+		"plan_code": planCode,
+		"plan_name": planName,
+		"starts_at": nullStringValue(startsAt),
+		"ends_at":   nullStringValue(endsAt),
+	})
 }
 
 func validateProviderMethod(provider, paymentMethod string) error {
@@ -631,4 +655,13 @@ func firstNonEmpty(values ...any) any {
 		}
 	}
 	return nil
+}
+
+func getDaysLeft(endsAt, now time.Time) int {
+	diffSeconds := endsAt.Sub(now).Seconds()
+	days := int((diffSeconds + 86399) / 86400)
+	if days < 0 {
+		return 0
+	}
+	return days
 }

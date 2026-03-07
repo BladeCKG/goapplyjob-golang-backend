@@ -196,7 +196,7 @@ func (h *Handler) listJobs(c *gin.Context) {
 			`SELECT s.id
 			 FROM user_subscriptions s
 			 JOIN pricing_plans p ON p.id = s.pricing_plan_id
-			 WHERE s.user_id = ? AND s.is_active = 1 AND s.ends_at > ? AND p.is_active = 1
+			 WHERE s.user_id = ? AND s.ends_at > ? AND p.is_active = 1
 			 ORDER BY s.ends_at DESC
 			 LIMIT 1`,
 			currentUser.ID,

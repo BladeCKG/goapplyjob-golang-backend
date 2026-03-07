@@ -424,7 +424,7 @@ func (h *Handler) ensureDefaultFreeSubscription(c *gin.Context, userID int64) er
 		`SELECT COUNT(1)
 		 FROM user_subscriptions s
 		 JOIN pricing_plans p ON p.id = s.pricing_plan_id
-		 WHERE s.user_id = ? AND s.is_active = 1 AND s.ends_at > ? AND p.is_active = 1`,
+		 WHERE s.user_id = ? AND s.ends_at > ? AND p.is_active = 1`,
 		userID,
 		now.Format(time.RFC3339Nano),
 	).Scan(&activeCount); err != nil {

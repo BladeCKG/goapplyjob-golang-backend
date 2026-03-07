@@ -251,7 +251,7 @@ func TestDefaultFreeSubscriptionAndUpgradePreview(t *testing.T) {
 	cookie := verifyLoginCode(t, router, "upgrade-user@example.com", code)
 
 	var activeCount int
-	if err := db.SQL.QueryRowContext(context.Background(), `SELECT COUNT(1) FROM user_subscriptions WHERE is_active = 1`).Scan(&activeCount); err != nil {
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT COUNT(1) FROM user_subscriptions WHERE ends_at > ?`, time.Now().UTC().Format(time.RFC3339Nano)).Scan(&activeCount); err != nil {
 		t.Fatal(err)
 	}
 	if activeCount != 1 {
@@ -272,6 +272,30 @@ func TestDefaultFreeSubscriptionAndUpgradePreview(t *testing.T) {
 	decodeBody(t, rec.Body.Bytes(), &body)
 	if body["is_preview"] != true || body["requires_login"] != false || body["requires_upgrade"] != true {
 		t.Fatalf("unexpected upgrade preview payload %#v", body)
+	}
+}
+
+func TestSubscriptionStatusHandlesExpiredState(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	code := requestLoginCode(t, router, "expired-user@example.com")
+	cookie := verifyLoginCode(t, router, "expired-user@example.com", code)
+
+	_, err := db.SQL.ExecContext(context.Background(), `UPDATE user_subscriptions SET ends_at = ?, is_active = 1`, time.Now().UTC().Add(-2*time.Hour).Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/pricing/subscription", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	if body["is_active"] != false || body["status"] != "expired" || int(body["days_left"].(float64)) != 0 {
+		t.Fatalf("unexpected expired subscription payload %#v", body)
 	}
 }
 
