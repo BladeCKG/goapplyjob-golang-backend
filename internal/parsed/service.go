@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,6 +20,26 @@ const (
 
 var seniorityTokens = map[string]struct{}{
 	"senior": {}, "sr": {}, "junior": {}, "jr": {}, "lead": {}, "principal": {}, "staff": {}, "entry": {}, "mid": {}, "expert": {}, "leader": {}, "level": {},
+}
+
+var genericCategoryMatchTokens = map[string]struct{}{
+	"accountant": {}, "administrator": {}, "engineer": {}, "developer": {}, "manager": {}, "specialist": {}, "consultant": {}, "analyst": {}, "architect": {}, "designer": {}, "director": {}, "producer": {}, "writer": {}, "support": {}, "operations": {}, "web": {}, "remote": {}, "lead": {}, "staff": {},
+}
+
+var normalizationReplacements = []struct {
+	pattern     *regexp.Regexp
+	replacement string
+}{
+	{pattern: regexp.MustCompile(`\bdev[\s\-]*ops\b`), replacement: "devops"},
+	{pattern: regexp.MustCompile(`\bdev\b`), replacement: "developer"},
+	{pattern: regexp.MustCompile(`\bbdr\b`), replacement: "business development representative"},
+	{pattern: regexp.MustCompile(`\bsdr\b`), replacement: "sales development representative"},
+	{pattern: regexp.MustCompile(`\bswe\b`), replacement: "software engineer"},
+	{pattern: regexp.MustCompile(`\bvp\b`), replacement: "vice president"},
+	{pattern: regexp.MustCompile(`\bta\b`), replacement: "talent acquisition"},
+	{pattern: regexp.MustCompile(`\bhr\b`), replacement: "human resources"},
+	{pattern: regexp.MustCompile(`\btalent acquisition\b`), replacement: "recruitment human resources"},
+	{pattern: regexp.MustCompile(`\bcpg\b`), replacement: "consumer packaged goods"},
 }
 
 type Service struct {
@@ -71,8 +92,16 @@ func parseDBDatetime(value string) (*time.Time, error) {
 	return nil, errors.New("invalid datetime")
 }
 
+func normalizeTextForMatching(value string) string {
+	normalized := strings.ToLower(value)
+	for _, replacement := range normalizationReplacements {
+		normalized = replacement.pattern.ReplaceAllString(normalized, replacement.replacement)
+	}
+	return normalized
+}
+
 func tokenizeRoleTitleForSimilarity(roleTitle string) map[string]struct{} {
-	rawTokens := regexp.MustCompile(`[^a-z0-9]+`).Split(strings.ToLower(roleTitle), -1)
+	rawTokens := regexp.MustCompile(`[^a-z0-9]+`).Split(normalizeTextForMatching(roleTitle), -1)
 	out := map[string]struct{}{}
 	for _, token := range rawTokens {
 		if len(token) <= 1 {
@@ -84,6 +113,25 @@ func tokenizeRoleTitleForSimilarity(roleTitle string) map[string]struct{} {
 		out[token] = struct{}{}
 	}
 	return out
+}
+
+func tokenizeTextForSequence(value string) []string {
+	rawTokens := regexp.MustCompile(`[^a-z0-9]+`).Split(normalizeTextForMatching(value), -1)
+	out := make([]string, 0, len(rawTokens))
+	for _, token := range rawTokens {
+		if len(token) <= 1 {
+			continue
+		}
+		if _, ok := seniorityTokens[token]; ok {
+			continue
+		}
+		out = append(out, token)
+	}
+	return out
+}
+
+func normalizeRoleTitleForExactMatch(value string) string {
+	return strings.Join(tokenizeTextForSequence(value), " ")
 }
 
 func jaccardSimilarity(left, right map[string]struct{}) float64 {
@@ -129,7 +177,7 @@ func orderedTokenMatchScore(roleTitle, categoryTitle string) float64 {
 }
 
 func orderedTokens(value string) []string {
-	raw := regexp.MustCompile(`[^a-z0-9]+`).Split(strings.ToLower(value), -1)
+	raw := regexp.MustCompile(`[^a-z0-9]+`).Split(normalizeTextForMatching(value), -1)
 	out := make([]string, 0, len(raw))
 	for _, token := range raw {
 		if len(token) <= 1 {
@@ -148,12 +196,52 @@ func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle str
 	if len(sourceTokens) == 0 {
 		return "", "", nil
 	}
-	rows, err := s.DB.SQL.QueryContext(ctx, `SELECT p.role_title, p.categorized_job_title, p.categorized_job_function
+	sourceSequenceTokens := tokenizeTextForSequence(roleTitle)
+	sourceExactTitle := normalizeRoleTitleForExactMatch(roleTitle)
+	prioritizedTokens := make([]string, 0, len(sourceSequenceTokens))
+	seenTokens := map[string]struct{}{}
+	for _, token := range sourceSequenceTokens {
+		if _, seen := seenTokens[token]; seen {
+			continue
+		}
+		seenTokens[token] = struct{}{}
+		prioritizedTokens = append(prioritizedTokens, token)
+	}
+	sort.SliceStable(prioritizedTokens, func(i, j int) bool {
+		leftGeneric := isGenericCategoryToken(prioritizedTokens[i])
+		rightGeneric := isGenericCategoryToken(prioritizedTokens[j])
+		if leftGeneric != rightGeneric {
+			return !leftGeneric
+		}
+		return len(prioritizedTokens[i]) > len(prioritizedTokens[j])
+	})
+
+	if sourceExactTitle != "" {
+		title, function, err := s.findExactNormalizedCategoryMatch(ctx, sourceExactTitle)
+		if err != nil {
+			return "", "", err
+		}
+		if title != "" {
+			return title, function, nil
+		}
+	}
+
+	query := `SELECT p.role_title, p.categorized_job_title, p.categorized_job_function
 		FROM parsed_jobs p
 		JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
-		WHERE r.source = ? AND p.role_title IS NOT NULL AND p.categorized_job_title IS NOT NULL
-		ORDER BY p.updated_at DESC, p.id DESC
-		LIMIT 1000`, sourceRemoteRocketship)
+		WHERE r.source = ? AND p.role_title IS NOT NULL AND p.categorized_job_title IS NOT NULL`
+	args := []any{sourceRemoteRocketship}
+	if len(prioritizedTokens) > 0 {
+		conditions := make([]string, 0, min(len(prioritizedTokens), 5))
+		for _, token := range prioritizedTokens[:min(len(prioritizedTokens), 5)] {
+			conditions = append(conditions, `(LOWER(p.role_title) LIKE ? OR LOWER(p.categorized_job_title) LIKE ? OR LOWER(COALESCE(p.categorized_job_function, '')) LIKE ?)`)
+			like := "%" + token + "%"
+			args = append(args, like, like, like)
+		}
+		query += " AND (" + strings.Join(conditions, " OR ") + ")"
+	}
+	query += " ORDER BY p.updated_at DESC, p.id DESC LIMIT 1000"
+	rows, err := s.DB.SQL.QueryContext(ctx, query, args...)
 	if err != nil {
 		return "", "", err
 	}
@@ -171,6 +259,9 @@ func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle str
 		titleTokens := orderedTokens(candidateTitle.String)
 		score += orderedTokenMatchScore(roleTitle, candidateTitle.String)
 		score += 0.1 * float64(len(titleTokens))
+		if normalizeRoleTitleForExactMatch(candidateRoleTitle.String) == sourceExactTitle {
+			score += 0.5
+		}
 		if strings.EqualFold(candidateTitle.String, "Engineer") || strings.EqualFold(candidateTitle.String, "Manager") {
 			score -= 0.35
 		}
@@ -187,6 +278,47 @@ func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle str
 		return "", "", nil
 	}
 	return bestTitle, bestFunction, nil
+}
+
+func (s *Service) findExactNormalizedCategoryMatch(ctx context.Context, normalizedRoleTitle string) (string, string, error) {
+	rows, err := s.DB.SQL.QueryContext(ctx, `SELECT p.role_title, p.categorized_job_title, p.categorized_job_function
+		FROM parsed_jobs p
+		JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
+		WHERE r.source = ? AND p.role_title IS NOT NULL AND p.categorized_job_title IS NOT NULL
+		ORDER BY p.updated_at DESC, p.id DESC`, sourceRemoteRocketship)
+	if err != nil {
+		return "", "", err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var roleTitle, title, function sql.NullString
+		if err := rows.Scan(&roleTitle, &title, &function); err != nil {
+			return "", "", err
+		}
+		if roleTitle.String == "" || title.String == "" {
+			continue
+		}
+		if normalizeRoleTitleForExactMatch(roleTitle.String) == normalizedRoleTitle {
+			return title.String, function.String, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", "", err
+	}
+	return "", "", nil
+}
+
+func isGenericCategoryToken(token string) bool {
+	_, ok := genericCategoryMatchTokens[token]
+	return ok
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error) {

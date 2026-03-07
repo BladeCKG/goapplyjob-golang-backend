@@ -201,3 +201,40 @@ func TestFindSimilarRemoteCategoriesAvoidsGenericEngineer(t *testing.T) {
 		t.Fatalf("expected specific category match, got %q / %q", title, function)
 	}
 }
+
+func TestNormalizeRoleTitleForExactMatchHandlesCommonAbbreviations(t *testing.T) {
+	got := normalizeRoleTitleForExactMatch("Senior SWE, Dev Ops")
+	if got != "software engineer devops" {
+		t.Fatalf("unexpected normalized title %q", got)
+	}
+}
+
+func TestFindSimilarRemoteCategoriesPrefersExactNormalizedRoleTitle(t *testing.T) {
+	db, err := database.Open("file:test_parsed_exact_normalized?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES
+		(1, 'remoterocketship', 'https://remote.example/jobs/devops', ?, 1, 0, 1, 0, '{}'),
+		(2, 'remoterocketship', 'https://remote.example/jobs/software-engineer', ?, 1, 0, 1, 0, '{}')`,
+		time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, role_title, categorized_job_title, categorized_job_function, updated_at) VALUES
+		(1, 'Senior SWE DevOps', 'DevOps Engineer', 'Engineering', ?),
+		(2, 'Senior Software Engineer', 'Software Engineer', 'Engineering', ?)`,
+		time.Now().UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(db)
+	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Senior SWE Dev Ops")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if title != "DevOps Engineer" || function != "Engineering" {
+		t.Fatalf("expected exact normalized match, got %q / %q", title, function)
+	}
+}
