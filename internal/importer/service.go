@@ -273,14 +273,14 @@ func (s *Service) ProcessImportFile(xmlPath, importDir, importedPrefix string, b
 	if err != nil {
 		return stats, "", err
 	}
-	var importedPath string
-	if len(succeededRows) > 0 {
-		importedPath = newImportedPath(importDir, importedPrefix)
-		if err := writeRowsFile(importedPath, succeededRows); err != nil {
-			return stats, importedPath, err
-		}
-	}
 	if len(failedRows) > 0 {
+		var importedPath string
+		if len(succeededRows) > 0 {
+			importedPath = newImportedPath(importDir, importedPrefix)
+			if err := writeRowsFile(importedPath, succeededRows); err != nil {
+				return stats, importedPath, err
+			}
+		}
 		if err := writeRowsFile(xmlPath, failedRows); err != nil {
 			return stats, importedPath, err
 		}
@@ -288,7 +288,7 @@ func (s *Service) ProcessImportFile(xmlPath, importDir, importedPrefix string, b
 	}
 	renamed := newImportedPath(importDir, importedPrefix)
 	if err := os.Rename(xmlPath, renamed); err != nil {
-		return stats, importedPath, err
+		return stats, "", err
 	}
 	return stats, renamed, nil
 }

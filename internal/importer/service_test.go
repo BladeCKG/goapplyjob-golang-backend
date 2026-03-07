@@ -90,6 +90,13 @@ func TestProcessImportFileKeepsFailedRowsAndExportsSuccesses(t *testing.T) {
 	if _, err := os.Stat(importFile); !os.IsNotExist(err) {
 		t.Fatalf("expected original file to be renamed")
 	}
+	importedFiles, err := filepath.Glob(filepath.Join(dir, "imported*.xml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(importedFiles) != 1 {
+		t.Fatalf("expected one imported file, got %d: %#v", len(importedFiles), importedFiles)
+	}
 	importedRaw, err := os.ReadFile(importedPath)
 	if err != nil {
 		t.Fatal(err)
