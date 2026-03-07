@@ -76,6 +76,7 @@ func (db *DB) Migrate(ctx context.Context) error {
             role_requirements TEXT,
             benefits TEXT,
             job_description_summary TEXT,
+            description_language TEXT,
             location TEXT,
             location_city TEXT,
             location_type TEXT,
@@ -198,10 +199,19 @@ func (db *DB) Migrate(ctx context.Context) error {
 	if err := db.ensureColumn(ctx, "parsed_jobs", "categorized_job_function", "TEXT"); err != nil {
 		return err
 	}
+	if err := db.ensureColumn(ctx, "parsed_jobs", "location", "TEXT"); err != nil {
+		return err
+	}
+	if err := db.ensureColumn(ctx, "parsed_jobs", "description_language", "TEXT"); err != nil {
+		return err
+	}
 	if err := db.ensureColumn(ctx, "parsed_jobs", "external_job_id", "TEXT"); err != nil {
 		return err
 	}
 	if err := db.ensureColumn(ctx, "parsed_companies", "external_company_id", "TEXT"); err != nil {
+		return err
+	}
+	if err := db.ensureColumn(ctx, "parsed_companies", "founded_year", "TEXT"); err != nil {
 		return err
 	}
 	if err := db.ensureColumn(ctx, "raw_us_jobs", "source", "TEXT NOT NULL DEFAULT 'remoterocketship'"); err != nil {
