@@ -643,19 +643,89 @@ func extractCryptoPayment(providerPayload map[string]any, checkoutURL any) any {
 	if len(providerPayload) == 0 {
 		return nil
 	}
+
+	nestedData := nestedMap(providerPayload["data"])
+	nestedPayment := nestedMap(providerPayload["payment"])
+	nestedHotWallet := nestedMap(providerPayload["hotWallet"])
+	expiresAt := firstNonEmpty(
+		providerPayload["expiration_estimate_date"],
+		providerPayload["expires_at"],
+		providerPayload["expired_at"],
+		nestedData["expiration_estimate_date"],
+		nestedData["expires_at"],
+		nestedData["expired_at"],
+		nestedHotWallet["expiresAt"],
+		nestedHotWallet["expiredAt"],
+		nestedPayment["expiresAt"],
+		nestedPayment["expiredAt"],
+	)
+
 	return gin.H{
-		"payment_id":               firstNonEmpty(providerPayload["payment_id"], providerPayload["id"]),
-		"invoice_id":               firstNonEmpty(providerPayload["invoice_id"], providerPayload["id"]),
-		"pay_currency":             providerPayload["pay_currency"],
-		"pay_amount":               providerPayload["pay_amount"],
-		"pay_address":              providerPayload["pay_address"],
-		"network":                  providerPayload["network"],
-		"invoice_url":              firstNonEmpty(providerPayload["invoice_url"], providerPayload["checkout_url"], checkoutURL),
-		"expiration_estimate_date": providerPayload["expiration_estimate_date"],
-		"created_at":               providerPayload["created_at"],
-		"updated_at":               providerPayload["updated_at"],
-		"payment_status":           providerPayload["payment_status"],
+		"payment_id": firstNonEmpty(
+			providerPayload["payment_id"],
+			providerPayload["id"],
+			nestedData["payment_id"],
+			nestedData["id"],
+			nestedData["track_id"],
+			nestedPayment["id"],
+		),
+		"invoice_id": firstNonEmpty(
+			providerPayload["invoice_id"],
+			providerPayload["id"],
+			nestedData["invoice_id"],
+			nestedData["id"],
+			nestedData["track_id"],
+		),
+		"pay_currency": firstNonEmpty(
+			providerPayload["pay_currency"],
+			nestedData["pay_currency"],
+			nestedHotWallet["currency"],
+			nestedPayment["paymentCurrency"],
+		),
+		"pay_amount": firstNonEmpty(
+			providerPayload["pay_amount"],
+			nestedData["pay_amount"],
+			nestedHotWallet["paymentAmount"],
+			nestedHotWallet["amount"],
+		),
+		"pay_address": firstNonEmpty(
+			providerPayload["pay_address"],
+			nestedData["pay_address"],
+			nestedHotWallet["address"],
+			nestedHotWallet["paymentAddress"],
+		),
+		"network": firstNonEmpty(
+			providerPayload["network"],
+			nestedData["network"],
+			nestedHotWallet["network"],
+		),
+		"invoice_url": firstNonEmpty(
+			providerPayload["invoice_url"],
+			providerPayload["checkout_url"],
+			nestedData["invoice_url"],
+			nestedData["checkout_url"],
+			nestedData["payment_url"],
+			nestedData["link"],
+			checkoutURL,
+		),
+		"expiration_estimate_date": expiresAt,
+		"expires_at":               expiresAt,
+		"created_at":               firstNonEmpty(providerPayload["created_at"], nestedData["created_at"], nestedData["date"]),
+		"updated_at":               firstNonEmpty(providerPayload["updated_at"], nestedData["updated_at"]),
+		"payment_status": firstNonEmpty(
+			providerPayload["payment_status"],
+			providerPayload["status"],
+			nestedData["payment_status"],
+			nestedData["status"],
+		),
 	}
+}
+
+func nestedMap(value any) map[string]any {
+	if result, ok := value.(map[string]any); ok {
+		return result
+	}
+	return map[string]any{}
 }
 
 func nullStringValue(value sql.NullString) any {

@@ -488,6 +488,10 @@ func TestPricingFlow(t *testing.T) {
 	if payload["crypto_payment"] == nil {
 		t.Fatalf("expected crypto payment payload %#v", payload)
 	}
+	cryptoPayment := payload["crypto_payment"].(map[string]any)
+	if cryptoPayment["expiration_estimate_date"] == nil || cryptoPayment["expires_at"] == nil {
+		t.Fatalf("expected normalized crypto expiry metadata %#v", cryptoPayment)
+	}
 	paymentID := int(payload["payment_id"].(float64))
 
 	confirmReq := httptest.NewRequest(http.MethodPost, "/pricing/payments/"+strconv.Itoa(paymentID)+"/confirm", nil)
