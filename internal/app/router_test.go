@@ -287,6 +287,42 @@ func TestJobsTitleFilterMatchesRoleTitleVariants(t *testing.T) {
 	}
 }
 
+func TestJobsTechStackFilterAndOptions(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJobWithTechStack(t, db, 81, "Platform Engineer", []string{"Go", "SQL"})
+	insertJobWithTechStack(t, db, 82, "Frontend Engineer", []string{"TypeScript"})
+
+	optionsReq := httptest.NewRequest(http.MethodGet, "/jobs/filter-options", nil)
+	optionsRec := httptest.NewRecorder()
+	router.ServeHTTP(optionsRec, optionsReq)
+	assertStatus(t, optionsRec.Code, http.StatusOK)
+
+	var optionsBody map[string]any
+	decodeBody(t, optionsRec.Body.Bytes(), &optionsBody)
+	techStacks := optionsBody["tech_stacks"].([]any)
+	if len(techStacks) != 3 {
+		t.Fatalf("unexpected tech stack options %#v", optionsBody)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?tech_stack=go", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	items := body["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("expected one tech stack match, got %#v", body)
+	}
+	firstItem := items[0].(map[string]any)
+	if len(firstItem["tech_stack"].([]any)) != 2 {
+		t.Fatalf("expected tech stack in job item, got %#v", firstItem)
+	}
+}
+
 func TestPricingFlow(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
@@ -628,6 +664,22 @@ func insertJobWithFunction(t *testing.T, db *database.DB, rawID int, categoryTit
 		t.Fatal(err)
 	}
 	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, categorized_job_function, role_title, created_at_source, url) VALUES (?, ?, ?, ?, ?, ?)`, rawID+3000, categoryTitle, categoryFunction, roleTitle, time.Now().UTC().Format(time.RFC3339Nano), "https://jobs.example.com/function-"+strconv.Itoa(rawID))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertJobWithTechStack(t *testing.T, db *database.DB, rawID int, roleTitle string, techStack []string) {
+	t.Helper()
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 1, 0, '{}')`, rawID+4000, "https://example.com/tech-"+strconv.Itoa(rawID), time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	techStackJSON, err := json.Marshal(techStack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, role_title, tech_stack, created_at_source, url) VALUES (?, 'Software Engineer', ?, ?, ?, ?)`, rawID+4000, roleTitle, string(techStackJSON), time.Now().UTC().Format(time.RFC3339Nano), "https://jobs.example.com/tech-"+strconv.Itoa(rawID))
 	if err != nil {
 		t.Fatal(err)
 	}

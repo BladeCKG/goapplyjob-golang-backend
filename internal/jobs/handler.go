@@ -52,6 +52,7 @@ type jobItem struct {
 	IsMidLevel            *bool      `json:"is_mid_level"`
 	IsSenior              *bool      `json:"is_senior"`
 	IsLead                *bool      `json:"is_lead"`
+	TechStack             []string   `json:"tech_stack"`
 	UpdatedAt             *time.Time `json:"updated_at"`
 	CreatedAtSource       *time.Time `json:"created_at_source"`
 	URL                   *string    `json:"url"`
@@ -150,6 +151,35 @@ func (h *Handler) filterOptions(c *gin.Context) {
 	}
 	sortStrings(locations)
 
+	techStackSet := map[string]struct{}{}
+	rows, err := h.db.SQL.QueryContext(c.Request.Context(), `SELECT tech_stack FROM parsed_jobs WHERE tech_stack IS NOT NULL AND tech_stack != ''`)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var rawTechStack sql.NullString
+		if err := rows.Scan(&rawTechStack); err != nil || !rawTechStack.Valid || rawTechStack.String == "" {
+			continue
+		}
+		var values []string
+		if err := json.Unmarshal([]byte(rawTechStack.String), &values); err != nil {
+			continue
+		}
+		for _, value := range values {
+			trimmed := strings.TrimSpace(value)
+			if trimmed != "" {
+				techStackSet[trimmed] = struct{}{}
+			}
+		}
+	}
+	techStacks := make([]string, 0, len(techStackSet))
+	for value := range techStackSet {
+		techStacks = append(techStacks, value)
+	}
+	sortStrings(techStacks)
+
 	var salaryMin, salaryMax sql.NullFloat64
 	query := `SELECT MIN(` + annualizedSalarySQL(`salary_min_usd`) + `), MAX(` + annualizedSalarySQL(`salary_min_usd`) + `) FROM parsed_jobs WHERE salary_min_usd IS NOT NULL`
 	if err := h.db.SQL.QueryRowContext(c.Request.Context(), query).Scan(&salaryMin, &salaryMax); err != nil {
@@ -168,6 +198,7 @@ func (h *Handler) filterOptions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"job_categories": categories,
 		"locations":      locations,
+		"tech_stacks":    techStacks,
 		"min_salary_range": gin.H{
 			"min": nullFloatValue(salaryMin),
 			"max": nullFloatValue(salaryMax),
@@ -233,6 +264,15 @@ func (h *Handler) listJobs(c *gin.Context) {
 		}
 		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 	}
+	if techStacks := parseCSVQuery(c.Query("tech_stack")); len(techStacks) > 0 {
+		parts := make([]string, 0, len(techStacks))
+		for _, techStack := range techStacks {
+			normalizedStack := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(techStack)), `"`, `\"`)
+			parts = append(parts, `lower(COALESCE(p.tech_stack, '')) LIKE ?`)
+			args = append(args, `%`+"\""+normalizedStack+"\""+`%`)
+		}
+		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
+	}
 	if minSalary := strings.TrimSpace(c.Query("min_salary")); minSalary != "" {
 		if parsed, err := strconv.ParseFloat(minSalary, 64); err == nil {
 			filters = append(filters, annualizedSalarySQL(`COALESCE(p.salary_min_usd, p.salary_min)`)+` >= ?`)
@@ -286,7 +326,7 @@ func (h *Handler) listJobs(c *gin.Context) {
 	idArgs = append(idArgs, limit, offset)
 	rows, err := h.db.SQL.QueryContext(
 		c.Request.Context(),
-		`SELECT p.id, p.raw_us_job_id, p.role_title, p.job_description_summary, c.name, c.slug, c.tagline, c.profile_pic_url, c.home_page_url, c.linkedin_url, c.employee_range, c.founded_year, c.sponsors_h1b, p.categorized_job_title, p.location, p.location_city, p.location_type, p.location_us_states, p.employment_type, p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_type, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.updated_at, p.created_at_source, p.url
+		`SELECT p.id, p.raw_us_job_id, p.role_title, p.job_description_summary, c.name, c.slug, c.tagline, c.profile_pic_url, c.home_page_url, c.linkedin_url, c.employee_range, c.founded_year, c.sponsors_h1b, p.categorized_job_title, p.location, p.location_city, p.location_type, p.location_us_states, p.employment_type, p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_type, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.tech_stack, p.updated_at, p.created_at_source, p.url
 		 FROM parsed_jobs p
 		 JOIN (
 		   SELECT id
@@ -341,10 +381,10 @@ func selectStrings(c *gin.Context, db *database.DB, query string) ([]string, err
 
 func scanJob(scanner interface{ Scan(dest ...any) error }) (jobItem, error) {
 	var item jobItem
-	var roleTitle, summary, companyName, companySlug, companyTagline, companyProfilePicURL, companyHomePageURL, companyLinkedInURL, companyEmployeeRange, companyFoundedYear, categorizedTitle, location, locationCity, locationType, locationUSStates, employmentType, salaryType, updatedAt, createdAt, url sql.NullString
+	var roleTitle, summary, companyName, companySlug, companyTagline, companyProfilePicURL, companyHomePageURL, companyLinkedInURL, companyEmployeeRange, companyFoundedYear, categorizedTitle, location, locationCity, locationType, locationUSStates, employmentType, salaryType, techStack, updatedAt, createdAt, url sql.NullString
 	var companySponsorsH1B, isEntry, isJunior, isMid, isSenior, isLead sql.NullBool
 	var salaryMin, salaryMax, salaryMinUSD, salaryMaxUSD sql.NullFloat64
-	err := scanner.Scan(&item.ID, &item.RawUSJobID, &roleTitle, &summary, &companyName, &companySlug, &companyTagline, &companyProfilePicURL, &companyHomePageURL, &companyLinkedInURL, &companyEmployeeRange, &companyFoundedYear, &companySponsorsH1B, &categorizedTitle, &location, &locationCity, &locationType, &locationUSStates, &employmentType, &salaryMin, &salaryMax, &salaryMinUSD, &salaryMaxUSD, &salaryType, &isEntry, &isJunior, &isMid, &isSenior, &isLead, &updatedAt, &createdAt, &url)
+	err := scanner.Scan(&item.ID, &item.RawUSJobID, &roleTitle, &summary, &companyName, &companySlug, &companyTagline, &companyProfilePicURL, &companyHomePageURL, &companyLinkedInURL, &companyEmployeeRange, &companyFoundedYear, &companySponsorsH1B, &categorizedTitle, &location, &locationCity, &locationType, &locationUSStates, &employmentType, &salaryMin, &salaryMax, &salaryMinUSD, &salaryMaxUSD, &salaryType, &isEntry, &isJunior, &isMid, &isSenior, &isLead, &techStack, &updatedAt, &createdAt, &url)
 	if err != nil {
 		return item, err
 	}
@@ -374,6 +414,9 @@ func scanJob(scanner interface{ Scan(dest ...any) error }) (jobItem, error) {
 	item.IsMidLevel = nullableBool(isMid)
 	item.IsSenior = nullableBool(isSenior)
 	item.IsLead = nullableBool(isLead)
+	if techStack.Valid && techStack.String != "" {
+		_ = json.Unmarshal([]byte(techStack.String), &item.TechStack)
+	}
 	if updatedAt.Valid {
 		if parsed, err := time.Parse(time.RFC3339Nano, updatedAt.String); err == nil {
 			item.UpdatedAt = &parsed
