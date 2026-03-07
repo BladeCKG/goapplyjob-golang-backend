@@ -198,7 +198,15 @@ func (h *Handler) filterOptions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"job_categories": categories,
 		"locations":      locations,
-		"tech_stacks":    techStacks,
+		"post_date_options": []string{
+			"24_hours",
+			"48_hours",
+			"3_days",
+			"week",
+			"month",
+			"3_months",
+		},
+		"tech_stacks": techStacks,
 		"min_salary_range": gin.H{
 			"min": nullFloatValue(salaryMin),
 			"max": nullFloatValue(salaryMax),
@@ -272,6 +280,28 @@ func (h *Handler) listJobs(c *gin.Context) {
 			args = append(args, `%`+"\""+normalizedStack+"\""+`%`)
 		}
 		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
+	}
+	if postDate := strings.ToLower(strings.TrimSpace(c.Query("post_date"))); postDate != "" {
+		now := time.Now().UTC()
+		var cutoff time.Time
+		switch postDate {
+		case "24_hours":
+			cutoff = now.Add(-24 * time.Hour)
+		case "48_hours":
+			cutoff = now.Add(-48 * time.Hour)
+		case "3_days":
+			cutoff = now.Add(-72 * time.Hour)
+		case "week":
+			cutoff = now.Add(-7 * 24 * time.Hour)
+		case "month":
+			cutoff = now.Add(-30 * 24 * time.Hour)
+		case "3_months":
+			cutoff = now.Add(-90 * 24 * time.Hour)
+		}
+		if !cutoff.IsZero() {
+			filters = append(filters, `p.created_at_source >= ?`)
+			args = append(args, cutoff.Format(time.RFC3339Nano))
+		}
 	}
 	if minSalary := strings.TrimSpace(c.Query("min_salary")); minSalary != "" {
 		if parsed, err := strconv.ParseFloat(minSalary, 64); err == nil {

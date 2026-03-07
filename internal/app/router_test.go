@@ -323,6 +323,36 @@ func TestJobsTechStackFilterAndOptions(t *testing.T) {
 	}
 }
 
+func TestJobsPostDateFilterAndOptions(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertDatedJob(t, db, 91, time.Now().UTC().Add(-12*time.Hour))
+	insertDatedJob(t, db, 92, time.Now().UTC().Add(-10*24*time.Hour))
+
+	optionsReq := httptest.NewRequest(http.MethodGet, "/jobs/filter-options", nil)
+	optionsRec := httptest.NewRecorder()
+	router.ServeHTTP(optionsRec, optionsReq)
+	assertStatus(t, optionsRec.Code, http.StatusOK)
+
+	var optionsBody map[string]any
+	decodeBody(t, optionsRec.Body.Bytes(), &optionsBody)
+	if len(optionsBody["post_date_options"].([]any)) != 6 {
+		t.Fatalf("unexpected post date options %#v", optionsBody)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?post_date=24_hours", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	if len(body["items"].([]any)) != 1 {
+		t.Fatalf("expected one recent job, got %#v", body)
+	}
+}
+
 func TestPricingFlow(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
@@ -680,6 +710,18 @@ func insertJobWithTechStack(t *testing.T, db *database.DB, rawID int, roleTitle 
 		t.Fatal(err)
 	}
 	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, role_title, tech_stack, created_at_source, url) VALUES (?, 'Software Engineer', ?, ?, ?, ?)`, rawID+4000, roleTitle, string(techStackJSON), time.Now().UTC().Format(time.RFC3339Nano), "https://jobs.example.com/tech-"+strconv.Itoa(rawID))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertDatedJob(t *testing.T, db *database.DB, rawID int, createdAt time.Time) {
+	t.Helper()
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 1, 0, '{}')`, rawID+5000, "https://example.com/date-"+strconv.Itoa(rawID), createdAt.Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, created_at_source, url) VALUES (?, 'Software Engineer', ?, ?)`, rawID+5000, createdAt.Format(time.RFC3339Nano), "https://jobs.example.com/date-"+strconv.Itoa(rawID))
 	if err != nil {
 		t.Fatal(err)
 	}
