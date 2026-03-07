@@ -200,19 +200,32 @@ func parseCSVQuery(value string) []string {
 	return items
 }
 
+func annualizedMinSalarySQL() string {
+	return `COALESCE(salary_min_usd, ` + annualizedSalarySQL(`salary_min`) + `)`
+}
+
+func annualizedMaxSalarySQL() string {
+	return `COALESCE(salary_max_usd, ` + annualizedSalarySQL(`salary_max`) + `, salary_min_usd, ` + annualizedSalarySQL(`salary_min`) + `)`
+}
+
+func minSalaryFilterSQL() string {
+	return `(p.salary_min_usd >= ? OR (p.salary_min_usd IS NULL AND ` + annualizedSalarySQL(`p.salary_min`) + ` >= ?))`
+}
+
+func distinctNonEmptyStrings(c *gin.Context, db *database.DB, column string) ([]string, error) {
+	return selectStrings(c, db, `SELECT DISTINCT `+column+` FROM parsed_jobs WHERE `+column+` IS NOT NULL AND `+column+` != '' ORDER BY `+column+` ASC`)
+}
+
 func (h *Handler) filterOptions(c *gin.Context) {
-	categories, err := selectStrings(c, h.db, `SELECT DISTINCT categorized_job_title FROM parsed_jobs WHERE categorized_job_title IS NOT NULL AND categorized_job_title != '' ORDER BY categorized_job_title ASC`)
+	categories, err := distinctNonEmptyStrings(c, h.db, "categorized_job_title")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
 		return
 	}
 
 	locationSet := map[string]struct{}{}
-	for _, query := range []string{
-		`SELECT DISTINCT location_city FROM parsed_jobs WHERE location_city IS NOT NULL AND location_city != ''`,
-		`SELECT DISTINCT location FROM parsed_jobs WHERE location IS NOT NULL AND location != ''`,
-	} {
-		values, err := selectStrings(c, h.db, query)
+	for _, column := range []string{"location_city", "location"} {
+		values, err := distinctNonEmptyStrings(c, h.db, column)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
 			return
@@ -255,7 +268,7 @@ func (h *Handler) filterOptions(c *gin.Context) {
 		techStacks = append(techStacks, value)
 	}
 	sortStrings(techStacks)
-	employmentTypes, err := selectStrings(c, h.db, `SELECT DISTINCT employment_type FROM parsed_jobs WHERE employment_type IS NOT NULL AND employment_type != '' ORDER BY employment_type ASC`)
+	employmentTypes, err := distinctNonEmptyStrings(c, h.db, "employment_type")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
 		return
@@ -266,13 +279,7 @@ func (h *Handler) filterOptions(c *gin.Context) {
 		minSalaryOptions = append(minSalaryOptions, salary)
 	}
 
-	seniorities := []string{}
-	for _, check := range []struct{ Name, Field string }{{"entry", "is_entry_level"}, {"junior", "is_junior"}, {"mid", "is_mid_level"}, {"senior", "is_senior"}, {"lead", "is_lead"}} {
-		var count int
-		if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT COUNT(id) FROM parsed_jobs WHERE `+check.Field+` = 1`).Scan(&count); err == nil && count > 0 {
-			seniorities = append(seniorities, check.Name)
-		}
-	}
+	seniorities := []string{"entry", "junior", "mid", "senior", "lead"}
 
 	c.JSON(http.StatusOK, gin.H{
 		"job_categories":     categories,
@@ -368,8 +375,8 @@ func (h *Handler) listJobs(c *gin.Context) {
 	}
 	if minSalary := strings.TrimSpace(c.Query("min_salary")); minSalary != "" {
 		if parsed, err := strconv.ParseFloat(minSalary, 64); err == nil {
-			filters = append(filters, annualizedSalarySQL(`COALESCE(p.salary_min, p.salary_min_usd)`)+` >= ?`)
-			args = append(args, parsed)
+			filters = append(filters, minSalaryFilterSQL())
+			args = append(args, parsed, parsed)
 		}
 	}
 	if seniorities := parseCSVQuery(c.Query("seniority")); len(seniorities) > 0 {
@@ -401,7 +408,7 @@ func (h *Handler) listJobs(c *gin.Context) {
 	previewPerPage := max(h.cfg.PublicJobsMaxPerPage, 1)
 	idOrderBy := `created_at_source DESC, id DESC`
 	if c.DefaultQuery("sort_criteria", "date") == "salary" {
-		idOrderBy = annualizedSalarySQL(`COALESCE(salary_max, salary_max_usd, salary_min, salary_min_usd)`) + ` DESC, id DESC`
+		idOrderBy = `COALESCE(salary_max_usd, salary_min_usd) DESC, ` + annualizedSalarySQL(`COALESCE(salary_max, salary_min)`) + ` DESC, id DESC`
 	}
 
 	pageOut := page
