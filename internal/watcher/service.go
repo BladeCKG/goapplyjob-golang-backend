@@ -102,25 +102,51 @@ func (s *Service) RunOnce() error {
 		return nil
 	}
 
-	fullData, err := s.FetchFull()
-	if err != nil {
-		s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
-		return err
-	}
-
 	newSampleLastmod := s.ExtractLastLastmod(sample)
-	previousSource := "sample"
+	previousDT := s.parseLastmod(previousFirstLastmod)
+	sampleLastDT := s.parseLastmod(newSampleLastmod)
+	hasCompleteSampleBlocks := urlBlockPattern.Find(sample) != nil
+	useSampleDelta := previousFirstLastmod != "" &&
+		!previousDT.IsZero() &&
+		!sampleLastDT.IsZero() &&
+		(sampleLastDT.Before(previousDT) || sampleLastDT.Equal(previousDT)) &&
+		hasCompleteSampleBlocks
 
-	deltaData := fullData
+	var fullData []byte
+	deltaData := sample
 	deltaSource := "full_no_previous_lastmod"
 	overlapBytes := 0
-	if previousFirstLastmod != "" {
-		deltaData = s.DeltaNewerThanLastmod(fullData, previousFirstLastmod)
-		overlapBytes = max(len(fullData)-len(deltaData), 0)
-		deltaSource = "lastmod_value_" + previousSource
+	if useSampleDelta {
+		deltaData = s.DeltaNewerThanLastmod(sample, previousFirstLastmod)
+		deltaSource = "sample_lastmod_window"
+		overlapBytes = max(len(sample)-len(deltaData), 0)
+		if len(deltaData) == 0 {
+			_ = s.saveState(context.Background(), currentHash, firstNonEmpty(currentFirstLastmod, previousFirstLastmod))
+			s.setStatus(map[string]any{
+				"last_change_at":              utcNowISO(),
+				"last_overlap_bytes":          overlapBytes,
+				"last_delta_size":             0,
+				"last_new_sample_lastmod":     emptyToNil(newSampleLastmod),
+				"last_previous_first_lastmod": emptyToNil(previousFirstLastmod),
+				"last_delta_payload_id":       nil,
+			})
+			return nil
+		}
+	} else {
+		fullData, err = s.FetchFull()
+		if err != nil {
+			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
+			return err
+		}
+		deltaData = fullData
+		if previousFirstLastmod != "" {
+			deltaData = s.DeltaNewerThanLastmod(fullData, previousFirstLastmod)
+			overlapBytes = max(len(fullData)-len(deltaData), 0)
+			deltaSource = "full_lastmod_window"
+		}
 	}
 
-	if currentFirstLastmod == "" {
+	if len(fullData) > 0 && currentFirstLastmod == "" {
 		currentFirstLastmod = s.ExtractFirstLastmod(fullData)
 	}
 	_ = s.saveState(context.Background(), currentHash, firstNonEmpty(currentFirstLastmod, previousFirstLastmod))

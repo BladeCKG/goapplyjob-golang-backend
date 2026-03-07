@@ -2,6 +2,7 @@ package watcher
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -90,5 +91,35 @@ func TestRunOnceSkipsDeltaFileWhenDeltaIsEmpty(t *testing.T) {
 	}
 	if status["last_delta_size"].(int) != 0 {
 		t.Fatalf("expected zero delta size, got %#v", status["last_delta_size"])
+	}
+}
+
+func TestRunOnceUsesSampleDeltaWithoutFullFetch(t *testing.T) {
+	service := buildService(t)
+	sample := []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<url><loc>https://example.com/new</loc><lastmod>2026-02-12T11:00:00+00:00</lastmod></url>
+<url><loc>https://example.com/old</loc><lastmod>2026-02-12T10:00:00+00:00</lastmod></url>
+</urlset>`)
+
+	service.FetchSample = func() ([]byte, error) { return sample, nil }
+	service.FetchFull = func() ([]byte, error) { return nil, errors.New("full fetch should not be called") }
+	if _, err := service.DB.SQL.ExecContext(context.Background(), `INSERT INTO watcher_states (source_url, sample_hash, first_lastmod, updated_at) VALUES (?, ?, ?, ?)`, service.Config.URL, "old-hash", "2026-02-12T10:00:00+00:00", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := service.RunOnce(); err != nil {
+		t.Fatal(err)
+	}
+
+	status := service.Status()
+	if status["last_delta_source"] != "sample_lastmod_window" {
+		t.Fatalf("expected sample_lastmod_window source, got %#v", status["last_delta_source"])
+	}
+	if status["last_delta_payload_id"] == nil {
+		t.Fatalf("expected delta payload id, got %#v", status["last_delta_payload_id"])
+	}
+	if status["last_delta_size"].(int) == 0 {
+		t.Fatalf("expected non-zero delta size")
 	}
 }
