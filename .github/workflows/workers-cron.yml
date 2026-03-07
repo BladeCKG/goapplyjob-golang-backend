@@ -25,7 +25,7 @@ jobs:
       - name: Run database migrations
         run: go run ./cmd/migrate
 
-      - name: Run hourly workers
+      - name: Run every-3-hours workers
         env:
           WATCH_RUN_ONCE: "true"
           RAW_IMPORT_RUN_ONCE: "true"
