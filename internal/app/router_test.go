@@ -42,6 +42,17 @@ func TestAuthAndJobsFlow(t *testing.T) {
 	code := requestLoginCode(t, router, "user@example.com")
 	cookie := verifyLoginCode(t, router, "user@example.com", code)
 
+	meReq := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	meReq.AddCookie(cookie)
+	meRec := httptest.NewRecorder()
+	router.ServeHTTP(meRec, meReq)
+	assertStatus(t, meRec.Code, http.StatusOK)
+	var meBody map[string]any
+	decodeBody(t, meRec.Body.Bytes(), &meBody)
+	if meBody["email"].(string) != "user@example.com" {
+		t.Fatalf("unexpected me payload %#v", meBody)
+	}
+
 	req := httptest.NewRequest(http.MethodGet, "/jobs?sort_criteria=salary&job_title=Engineer&region=Texas&min_salary=100&seniority=senior&page=1&per_page=10", nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
@@ -217,6 +228,16 @@ func TestPasswordSignupAndLoginFlow(t *testing.T) {
 	signupRec := httptest.NewRecorder()
 	router.ServeHTTP(signupRec, signupReq)
 	assertStatus(t, signupRec.Code, http.StatusOK)
+	meAfterSignupReq := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	meAfterSignupReq.AddCookie(signupRec.Result().Cookies()[0])
+	meAfterSignupRec := httptest.NewRecorder()
+	router.ServeHTTP(meAfterSignupRec, meAfterSignupReq)
+	assertStatus(t, meAfterSignupRec.Code, http.StatusOK)
+	var meAfterSignup map[string]any
+	decodeBody(t, meAfterSignupRec.Body.Bytes(), &meAfterSignup)
+	if meAfterSignup["email"].(string) != "pw-user@example.com" {
+		t.Fatalf("unexpected me signup payload %#v", meAfterSignup)
+	}
 	cookie := signupRec.Result().Cookies()[0]
 	logoutReq := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
 	logoutReq.AddCookie(cookie)

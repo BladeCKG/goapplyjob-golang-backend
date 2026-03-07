@@ -46,6 +46,7 @@ func (h *Handler) Register(router gin.IRouter) {
 	router.POST("/auth/login/verify-code", h.verifyCode)
 	router.POST("/auth/password/signup", h.passwordSignup)
 	router.POST("/auth/password/login", h.passwordLogin)
+	router.GET("/auth/me", h.me)
 	router.POST("/auth/logout", h.logout)
 }
 
@@ -292,6 +293,14 @@ func (h *Handler) passwordLogin(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+func (h *Handler) me(c *gin.Context) {
+	user, err := h.CurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Not authenticated"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": user.ID, "email": user.Email})
+}
 func (h *Handler) logout(c *gin.Context) {
 	if token, err := c.Cookie(h.cfg.AuthCookieName); err == nil && token != "" {
 		_, _ = h.db.SQL.ExecContext(c.Request.Context(), `DELETE FROM auth_sessions WHERE session_token_hash = ?`, hashText(token))
