@@ -106,18 +106,20 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		sourceCreatedAt := parseDT(payload["created_at"])
 		if _, err := s.DB.SQL.ExecContext(
 			ctx,
-			`INSERT INTO parsed_jobs (raw_us_job_id, created_at_source, url, categorized_job_title, role_title, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?)
+			`INSERT INTO parsed_jobs (raw_us_job_id, created_at_source, url, categorized_job_title, categorized_job_function, role_title, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(raw_us_job_id) DO UPDATE SET
 			   created_at_source = excluded.created_at_source,
 			   url = excluded.url,
 			   categorized_job_title = excluded.categorized_job_title,
+			   categorized_job_function = excluded.categorized_job_function,
 			   role_title = excluded.role_title,
 			   updated_at = excluded.updated_at`,
 			row.id,
 			formatNullableTime(sourceCreatedAt),
 			stringFromPayload(payload["url"]),
 			stringFromPayload(payload["categorizedJobTitle"]),
+			stringFromPayload(payload["categorizedJobFunction"]),
 			stringFromPayload(payload["roleTitle"]),
 			time.Now().UTC().Format(time.RFC3339Nano),
 		); err != nil {

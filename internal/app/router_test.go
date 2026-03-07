@@ -244,6 +244,29 @@ func TestJobsPaginationStableWithCompanyJoin(t *testing.T) {
 	}
 }
 
+func TestJobsTitleFilterMatchesExactFunction(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJobWithFunction(t, db, 61, "Platform Engineering", "backend", "Distributed Systems Lead")
+	insertJobWithFunction(t, db, 62, "Data Science", "data", "ML Engineer")
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?job_title=backend", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	items := body["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("expected one function match, got %#v", body)
+	}
+	if items[0].(map[string]any)["categorized_job_title"].(string) != "Platform Engineering" {
+		t.Fatalf("unexpected function match %#v", items[0])
+	}
+}
+
 func TestPricingFlow(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
@@ -573,6 +596,18 @@ func insertCSVJob(t *testing.T, db *database.DB, rawID int, title, region string
 		t.Fatal(err)
 	}
 	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, location, is_mid_level, is_senior, salary_min_usd, salary_type, url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, rawID+2000, title, region, boolToInt(isMid), boolToInt(!isMid), salaryMin, salaryType, "https://jobs.example.com/csv-"+strconv.Itoa(rawID))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertJobWithFunction(t *testing.T, db *database.DB, rawID int, categoryTitle, categoryFunction, roleTitle string) {
+	t.Helper()
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 1, 0, '{}')`, rawID+3000, "https://example.com/function-"+strconv.Itoa(rawID), time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, categorized_job_function, role_title, created_at_source, url) VALUES (?, ?, ?, ?, ?, ?)`, rawID+3000, categoryTitle, categoryFunction, roleTitle, time.Now().UTC().Format(time.RFC3339Nano), "https://jobs.example.com/function-"+strconv.Itoa(rawID))
 	if err != nil {
 		t.Fatal(err)
 	}

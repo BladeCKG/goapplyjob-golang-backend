@@ -67,6 +67,7 @@ func (db *DB) Migrate(ctx context.Context) error {
             created_at_source TEXT,
             url TEXT,
             categorized_job_title TEXT,
+            categorized_job_function TEXT,
             role_title TEXT,
             role_description TEXT,
             role_requirements TEXT,
@@ -169,6 +170,37 @@ func (db *DB) Migrate(ctx context.Context) error {
 		if _, err := db.SQL.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("migrate schema: %w", err)
 		}
+	}
+	if err := db.ensureColumn(ctx, "parsed_jobs", "categorized_job_function", "TEXT"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (db *DB) ensureColumn(ctx context.Context, tableName, columnName, columnType string) error {
+	rows, err := db.SQL.QueryContext(ctx, `PRAGMA table_info(`+tableName+`)`)
+	if err != nil {
+		return fmt.Errorf("inspect %s columns: %w", tableName, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, dataType string
+		var notNull, pk int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &pk); err != nil {
+			return fmt.Errorf("scan %s columns: %w", tableName, err)
+		}
+		if name == columnName {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate %s columns: %w", tableName, err)
+	}
+	if _, err := db.SQL.ExecContext(ctx, `ALTER TABLE `+tableName+` ADD COLUMN `+columnName+` `+columnType); err != nil {
+		return fmt.Errorf("add %s.%s: %w", tableName, columnName, err)
 	}
 	return nil
 }

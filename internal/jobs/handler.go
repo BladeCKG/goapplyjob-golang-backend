@@ -216,8 +216,10 @@ func (h *Handler) listJobs(c *gin.Context) {
 	if titles := parseCSVQuery(c.Query("job_title")); len(titles) > 0 {
 		parts := make([]string, 0, len(titles))
 		for _, title := range titles {
-			parts = append(parts, `p.categorized_job_title LIKE ?`)
+			normalizedTitle := strings.ToLower(strings.TrimSpace(title))
+			parts = append(parts, `(p.categorized_job_title LIKE ? OR lower(trim(COALESCE(p.categorized_job_function, ''))) = ?)`)
 			args = append(args, "%"+title+"%")
+			args = append(args, normalizedTitle)
 		}
 		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 	}
