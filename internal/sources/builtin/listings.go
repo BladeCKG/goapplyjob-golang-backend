@@ -14,7 +14,7 @@ var publishedDateByJobIDRegex = regexp.MustCompile(`(?is)\{[^{}]*['"]id['"]\s*:\
 func ExtractJobListings(htmlText string) []map[string]any {
 	collectionPage, itemList := findItemListLD(htmlText)
 	publishedDatesByJobID := extractPublishedDatesByJobID(htmlText)
-	listURL := stringValue(collectionPage["url"])
+	_ = collectionPage
 
 	items, _ := itemList["itemListElement"].([]any)
 	if len(items) == 0 {
@@ -33,19 +33,15 @@ func ExtractJobListings(htmlText string) []map[string]any {
 		if externalJobIDInt, ok := externalJobID.(int); ok {
 			postDate = publishedDatesByJobID[externalJobIDInt]
 		}
+		normalizedPostDate := normalizePostDate(postDate)
 		parsed = append(parsed, map[string]any{
-			"external_job_id":                  externalJobID,
-			"role_title":                       valueOrNil(stringValue(node["name"])),
-			"job_description_summary":          valueOrNil(stringValue(node["description"])),
-			"two_line_job_description_summary": valueOrNil(stringValue(node["description"])),
-			"url":                              valueOrNil(jobURL),
-			"slug":                             slugFromURL(jobURL),
-			"source_name":                      "builtin",
-			"source_list_url":                  valueOrNil(listURL),
-			"source_position":                  node["position"],
-			"created_at_source":                valueOrNil(normalizePostDate(postDate)),
-			"parsed_at":                        time.Now().UTC().Format(time.RFC3339Nano),
-			"source_list_item_jsonld":          node,
+			"url":          valueOrNil(jobURL),
+			"post_date":    valueOrNil(firstNonEmpty(normalizedPostDate, time.Now().UTC().Format(time.RFC3339Nano))),
+			"is_ready":     false,
+			"is_skippable": false,
+			"is_parsed":    false,
+			"retry_count":  0,
+			"raw_json":     nil,
 		})
 	}
 	return parsed

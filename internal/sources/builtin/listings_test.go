@@ -2,7 +2,7 @@ package builtin
 
 import "testing"
 
-func TestExtractJobListingsUsesPublishedDateAsCreatedAtSource(t *testing.T) {
+func TestExtractJobListingsReturnsRawJobRowsWithNormalizedPostDate(t *testing.T) {
 	htmlText := `
 <html>
   <head>
@@ -37,10 +37,10 @@ func TestExtractJobListingsUsesPublishedDateAsCreatedAtSource(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("expected one listing, got %d", len(items))
 	}
-	if items[0]["created_at_source"] != "2026-02-17T04:30:12Z" {
-		t.Fatalf("expected normalized created_at_source, got %#v", items[0]["created_at_source"])
+	if items[0]["post_date"] != "2026-02-17T04:30:12Z" {
+		t.Fatalf("expected normalized post_date, got %#v", items[0]["post_date"])
 	}
-	if items[0]["slug"] != "platform-engineer-12345" {
-		t.Fatalf("expected slug, got %#v", items[0]["slug"])
+	if items[0]["is_ready"] != false || items[0]["raw_json"] != nil {
+		t.Fatalf("expected raw import row shape, got %#v", items[0])
 	}
 }
