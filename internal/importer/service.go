@@ -42,6 +42,7 @@ type Stats struct {
 type SitemapRow struct {
 	URL      string
 	PostDate time.Time
+	RawJSON  map[string]any
 }
 
 type Service struct {
@@ -131,17 +132,15 @@ func ParseRowsForBuiltinPayload(payloadText string) ([]SitemapRow, int) {
 	return rows, skipped
 }
 
-func ParseRowsForWorkablePayload(payloadText string) ([]SitemapRow, []map[string]any, int) {
+func ParseRowsForWorkablePayload(payloadText string) ([]SitemapRow, int) {
 	rows, skipped := workable.ParseImportRows(payloadText)
 	out := make([]SitemapRow, 0, len(rows))
-	rawPayloads := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		postDate, _ := row["post_date"].(time.Time)
-		out = append(out, SitemapRow{URL: stringValue(row["url"]), PostDate: postDate})
 		rawPayload, _ := row["raw_payload"].(map[string]any)
-		rawPayloads = append(rawPayloads, rawPayload)
+		out = append(out, SitemapRow{URL: stringValue(row["url"]), PostDate: postDate, RawJSON: rawPayload})
 	}
-	return out, rawPayloads, skipped
+	return out, skipped
 }
 
 func iterSitemapRows(xmlPath string) ([][2]string, error) {
@@ -239,35 +238,43 @@ func newImportedPath(importDir, importedPrefix string) string {
 	}
 }
 
-func (s *Service) flushBuffer(buffer map[string]time.Time) (int, int, int, map[string]time.Time) {
+func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int, int, int, map[string]SitemapRow) {
 	if len(buffer) == 0 {
-		return 0, 0, 0, map[string]time.Time{}
+		return 0, 0, 0, map[string]SitemapRow{}
 	}
 	inserted, updated, failedDB := 0, 0, 0
-	failedRows := map[string]time.Time{}
+	failedRows := map[string]SitemapRow{}
 
 	tx, err := s.DB.SQL.Begin()
 	if err != nil {
-		for url, postDate := range buffer {
-			failedRows[url] = postDate
+		for url, row := range buffer {
+			failedRows[url] = row
 		}
 		return 0, 0, len(buffer), failedRows
 	}
 	defer tx.Rollback()
 
-	for url, postDate := range buffer {
+	for url, row := range buffer {
+		postDate := row.PostDate
 		var existingID int64
 		var existingPostDate string
-		err := tx.QueryRow(`SELECT id, post_date FROM raw_us_jobs WHERE source = ? AND url = ? LIMIT 1`, sourceName, url).Scan(&existingID, &existingPostDate)
+		err := tx.QueryRow(`SELECT id, post_date FROM raw_us_jobs WHERE source = ? AND url = ? LIMIT 1`, source, url).Scan(&existingID, &existingPostDate)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			failedDB++
-			failedRows[url] = postDate
+			failedRows[url] = row
 			continue
 		}
+		rawJSONText := any(nil)
+		isReady := 0
+		if row.RawJSON != nil {
+			body, _ := json.Marshal(row.RawJSON)
+			rawJSONText = string(body)
+			isReady = 1
+		}
 		if errors.Is(err, sql.ErrNoRows) {
-			if _, err := tx.Exec(`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, retry_count, raw_json) VALUES (?, ?, ?, 0, 0, 0, NULL)`, sourceName, url, postDate.Format(time.RFC3339)); err != nil {
+			if _, err := tx.Exec(`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, retry_count, raw_json) VALUES (?, ?, ?, ?, 0, 0, ?)`, source, url, postDate.Format(time.RFC3339), isReady, rawJSONText); err != nil {
 				failedDB++
-				failedRows[url] = postDate
+				failedRows[url] = row
 				continue
 			}
 			inserted++
@@ -280,25 +287,25 @@ func (s *Service) flushBuffer(buffer map[string]time.Time) (int, int, int, map[s
 		}
 		if _, err := tx.Exec(`DELETE FROM parsed_jobs WHERE raw_us_job_id = ?`, existingID); err != nil {
 			failedDB++
-			failedRows[url] = postDate
+			failedRows[url] = row
 			continue
 		}
 		if _, err := tx.Exec(`DELETE FROM raw_us_jobs WHERE id = ?`, existingID); err != nil {
 			failedDB++
-			failedRows[url] = postDate
+			failedRows[url] = row
 			continue
 		}
-		if _, err := tx.Exec(`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, retry_count, raw_json) VALUES (?, ?, ?, 0, 0, 0, NULL)`, sourceName, url, postDate.Format(time.RFC3339)); err != nil {
+		if _, err := tx.Exec(`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, retry_count, raw_json) VALUES (?, ?, ?, ?, 0, 0, ?)`, source, url, postDate.Format(time.RFC3339), isReady, rawJSONText); err != nil {
 			failedDB++
-			failedRows[url] = postDate
+			failedRows[url] = row
 			continue
 		}
 		updated++
 	}
 
 	if err := tx.Commit(); err != nil {
-		for url, postDate := range buffer {
-			failedRows[url] = postDate
+		for url, row := range buffer {
+			failedRows[url] = row
 		}
 		return 0, 0, len(buffer), failedRows
 	}
@@ -320,49 +327,53 @@ func (s *Service) ImportRawUSJobsText(xmlText string, batchSize int) (Stats, map
 	rows, skippedInvalid := parseRowsFromXMLText(xmlText)
 	stats, failedRows, succeededRows, err := s.ImportRawUSJobsRows(rows, batchSize)
 	if err != nil {
-		return stats, failedRows, succeededRows, err
+		return stats, flattenImportRowDates(failedRows), flattenImportRowDates(succeededRows), err
 	}
 	stats.SkippedInvalid = skippedInvalid
-	return stats, failedRows, succeededRows, nil
+	return stats, flattenImportRowDates(failedRows), flattenImportRowDates(succeededRows), nil
 }
 
-func (s *Service) ImportRawUSJobsRows(rows []SitemapRow, batchSize int) (Stats, map[string]time.Time, map[string]time.Time, error) {
+func (s *Service) ImportRawUSJobsRows(rows []SitemapRow, batchSize int, source ...string) (Stats, map[string]SitemapRow, map[string]SitemapRow, error) {
 	if batchSize <= 0 {
 		batchSize = 100
 	}
+	rowSource := sourceName
+	if len(source) > 0 && strings.TrimSpace(source[0]) != "" {
+		rowSource = strings.TrimSpace(source[0])
+	}
 
 	stats := Stats{}
-	buffer := map[string]time.Time{}
-	allRows := map[string]time.Time{}
-	failedRows := map[string]time.Time{}
+	buffer := map[string]SitemapRow{}
+	allRows := map[string]SitemapRow{}
+	failedRows := map[string]SitemapRow{}
 
 	for _, row := range rows {
 		stats.Seen++
-		if current, ok := allRows[row.URL]; !ok || row.PostDate.After(current) {
-			allRows[row.URL] = row.PostDate
+		if current, ok := allRows[row.URL]; !ok || row.PostDate.After(current.PostDate) {
+			allRows[row.URL] = row
 		}
-		if current, ok := buffer[row.URL]; !ok || row.PostDate.After(current) {
-			buffer[row.URL] = row.PostDate
+		if current, ok := buffer[row.URL]; !ok || row.PostDate.After(current.PostDate) {
+			buffer[row.URL] = row
 		}
 		if len(buffer) >= batchSize {
-			inserted, updated, failedDB, failedBatch := s.flushBuffer(buffer)
+			inserted, updated, failedDB, failedBatch := s.flushBuffer(buffer, rowSource)
 			stats.Inserted += inserted
 			stats.Updated += updated
 			stats.FailedDB += failedDB
-			mergeRows(failedRows, failedBatch)
-			buffer = map[string]time.Time{}
+			mergeImportRows(failedRows, failedBatch)
+			buffer = map[string]SitemapRow{}
 		}
 	}
-	inserted, updated, failedDB, failedBatch := s.flushBuffer(buffer)
+	inserted, updated, failedDB, failedBatch := s.flushBuffer(buffer, rowSource)
 	stats.Inserted += inserted
 	stats.Updated += updated
 	stats.FailedDB += failedDB
-	mergeRows(failedRows, failedBatch)
+	mergeImportRows(failedRows, failedBatch)
 
-	succeededRows := map[string]time.Time{}
-	for url, postDate := range allRows {
+	succeededRows := map[string]SitemapRow{}
+	for url, row := range allRows {
 		if _, failed := failedRows[url]; !failed {
-			succeededRows[url] = postDate
+			succeededRows[url] = row
 		}
 	}
 	return stats, failedRows, succeededRows, nil
@@ -489,6 +500,32 @@ func FailedRowsToList(rows map[string]time.Time) []SitemapRow {
 		out = append(out, SitemapRow{URL: url, PostDate: postDate})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].PostDate.After(out[j].PostDate) })
+	return out
+}
+
+func FailedImportRowsToList(rows map[string]SitemapRow) []SitemapRow {
+	out := make([]SitemapRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].PostDate.After(out[j].PostDate) })
+	return out
+}
+
+func mergeImportRows(target map[string]SitemapRow, incoming map[string]SitemapRow) {
+	for url, row := range incoming {
+		current, ok := target[url]
+		if !ok || row.PostDate.After(current.PostDate) {
+			target[url] = row
+		}
+	}
+}
+
+func flattenImportRowDates(rows map[string]SitemapRow) map[string]time.Time {
+	out := make(map[string]time.Time, len(rows))
+	for url, row := range rows {
+		out[url] = row.PostDate
+	}
 	return out
 }
 

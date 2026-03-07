@@ -60,17 +60,7 @@ func main() {
 			case payload.PayloadType == "delta" && payload.Source == "builtin":
 				payloadRows, skippedInvalid = importer.ParseRowsForBuiltinPayload(payload.BodyText)
 			case payload.PayloadType == "delta" && payload.Source == "workable":
-				var rawPayloads []map[string]any
-				payloadRows, rawPayloads, skippedInvalid = importer.ParseRowsForWorkablePayload(payload.BodyText)
-				for idx, row := range payloadRows {
-					if idx >= len(rawPayloads) {
-						break
-					}
-					payloadRows[idx] = importer.SitemapRow{
-						URL:      row.URL,
-						PostDate: row.PostDate,
-					}
-				}
+				payloadRows, skippedInvalid = importer.ParseRowsForWorkablePayload(payload.BodyText)
 			default:
 				log.Printf("importer skipping unsupported payload_id=%d source=%s payload_type=%s", payload.ID, payload.Source, payload.PayloadType)
 				continue
@@ -87,12 +77,12 @@ func main() {
 			rowsToProcess := payloadRows[:toProcessCount]
 			unprocessedRows := payloadRows[toProcessCount:]
 
-			stats, failedRows, _, err := svc.ImportRawUSJobsRows(rowsToProcess, batchSize)
+			stats, failedRows, _, err := svc.ImportRawUSJobsRows(rowsToProcess, batchSize, payload.Source)
 			if err != nil {
 				log.Fatal(err)
 			}
 			stats.SkippedInvalid = skippedInvalid
-			failedRowsList := importer.FailedRowsToList(failedRows)
+			failedRowsList := importer.FailedImportRowsToList(failedRows)
 			remainingRows := append(failedRowsList, unprocessedRows...)
 			remainingRowsBudget -= toProcessCount
 
