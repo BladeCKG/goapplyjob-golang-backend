@@ -261,8 +261,10 @@ func (h *Handler) listJobs(c *gin.Context) {
 
 	previewPerPage := max(h.cfg.PublicJobsMaxPerPage, 1)
 	orderBy := `p.created_at_source DESC, p.id DESC`
+	idOrderBy := `created_at_source DESC, id DESC`
 	if c.DefaultQuery("sort_criteria", "date") == "salary" {
 		orderBy = annualizedSalarySQL(`COALESCE(p.salary_max_usd, p.salary_max, p.salary_min_usd, p.salary_min)`) + ` DESC, p.id DESC`
+		idOrderBy = annualizedSalarySQL(`COALESCE(salary_max_usd, salary_max, salary_min_usd, salary_min)`) + ` DESC, id DESC`
 	}
 
 	pageOut := page
@@ -276,9 +278,22 @@ func (h *Handler) listJobs(c *gin.Context) {
 		limit = min(rawTotal, previewPerPage)
 	}
 
-	queryArgs := append([]any{}, args...)
-	queryArgs = append(queryArgs, limit, offset)
-	rows, err := h.db.SQL.QueryContext(c.Request.Context(), `SELECT p.id, p.raw_us_job_id, p.role_title, p.job_description_summary, c.name, c.slug, c.tagline, c.profile_pic_url, c.home_page_url, c.linkedin_url, c.employee_range, c.founded_year, c.sponsors_h1b, p.categorized_job_title, p.location, p.location_city, p.location_type, p.location_us_states, p.employment_type, p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_type, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.updated_at, p.created_at_source, p.url FROM parsed_jobs p LEFT JOIN parsed_companies c ON c.id = p.company_id`+where+` ORDER BY `+orderBy+` LIMIT ? OFFSET ?`, queryArgs...)
+	idArgs := append([]any{}, args...)
+	idArgs = append(idArgs, limit, offset)
+	rows, err := h.db.SQL.QueryContext(
+		c.Request.Context(),
+		`SELECT p.id, p.raw_us_job_id, p.role_title, p.job_description_summary, c.name, c.slug, c.tagline, c.profile_pic_url, c.home_page_url, c.linkedin_url, c.employee_range, c.founded_year, c.sponsors_h1b, p.categorized_job_title, p.location, p.location_city, p.location_type, p.location_us_states, p.employment_type, p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_type, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.updated_at, p.created_at_source, p.url
+		 FROM parsed_jobs p
+		 JOIN (
+		   SELECT id
+		   FROM parsed_jobs p`+where+`
+		   ORDER BY `+idOrderBy+`
+		   LIMIT ? OFFSET ?
+		 ) page_ids ON p.id = page_ids.id
+		 LEFT JOIN parsed_companies c ON c.id = p.company_id
+		 ORDER BY `+orderBy,
+		idArgs...,
+	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs"})
 		return

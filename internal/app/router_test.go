@@ -197,6 +197,53 @@ func TestJobsListSupportsCSVFilters(t *testing.T) {
 	}
 }
 
+func TestJobsPaginationStableWithCompanyJoin(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	code := requestLoginCode(t, router, "pagination@example.com")
+	cookie := verifyLoginCode(t, router, "pagination@example.com", code)
+
+	for idx := 0; idx < 25; idx++ {
+		rawID := idx + 5000
+		createdAt := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+		_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 1, 0, '{}')`, rawID, "https://example.com/pagination/"+strconv.Itoa(idx), createdAt.Format(time.RFC3339Nano))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, created_at_source, url) VALUES (?, ?, ?, ?)`, rawID, "Role-"+strconv.Itoa(idx), createdAt.Format(time.RFC3339Nano), "https://jobs.example.com/pagination/"+strconv.Itoa(idx))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	getPageIDs := func(page int) []int {
+		req := httptest.NewRequest(http.MethodGet, "/jobs?per_page=10&page="+strconv.Itoa(page), nil)
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		assertStatus(t, rec.Code, http.StatusOK)
+		var body map[string]any
+		decodeBody(t, rec.Body.Bytes(), &body)
+		items := body["items"].([]any)
+		out := make([]int, 0, len(items))
+		for _, item := range items {
+			out = append(out, int(item.(map[string]any)["id"].(float64)))
+		}
+		return out
+	}
+
+	page1 := getPageIDs(1)
+	page2 := getPageIDs(2)
+	page3 := getPageIDs(3)
+	if len(page1) != 10 || len(page2) != 10 || len(page3) != 5 {
+		t.Fatalf("unexpected page sizes p1=%d p2=%d p3=%d", len(page1), len(page2), len(page3))
+	}
+	if overlaps(page1, page2) || overlaps(page2, page3) || overlaps(page1, page3) {
+		t.Fatalf("expected stable pagination without overlaps p1=%v p2=%v p3=%v", page1, page2, page3)
+	}
+}
+
 func TestPricingFlow(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
@@ -574,4 +621,17 @@ func boolToInt(value bool) int {
 		return 1
 	}
 	return 0
+}
+
+func overlaps(left, right []int) bool {
+	seen := map[int]struct{}{}
+	for _, item := range left {
+		seen[item] = struct{}{}
+	}
+	for _, item := range right {
+		if _, ok := seen[item]; ok {
+			return true
+		}
+	}
+	return false
 }
