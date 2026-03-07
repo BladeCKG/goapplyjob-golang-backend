@@ -20,6 +20,7 @@ type Service struct {
 	DB        *database.DB
 	ReadHTML  ReadHTMLFunc
 	ParseHTML ParseHTMLFunc
+	Status    StatusFunc
 }
 
 func New(db *database.DB) *Service {

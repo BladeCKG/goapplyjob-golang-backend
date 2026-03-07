@@ -42,6 +42,7 @@ type Config struct {
 	NowPaymentsDefaultPayCurrency string
 	NowPaymentsCurrencyCandidates string
 	NowPaymentsIPNSecret          string
+	SkippableRecheckBatchSize     int
 }
 
 func Load() Config {
@@ -82,6 +83,7 @@ func Load() Config {
 		NowPaymentsDefaultPayCurrency: getenv("NOWPAYMENTS_DEFAULT_PAY_CURRENCY", "usdttrc20"),
 		NowPaymentsCurrencyCandidates: getenv("NOWPAYMENTS_CURRENCY_CANDIDATES", "btc,eth,ltc,usdttrc20,usdterc20,usdtbsc,usdc"),
 		NowPaymentsIPNSecret:          getenv("NOWPAYMENTS_IPN_SECRET", ""),
+		SkippableRecheckBatchSize:     getenvInt("SKIPPABLE_RECHECK_BATCH_SIZE", 100),
 	}
 }
 

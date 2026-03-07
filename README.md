@@ -71,6 +71,23 @@ export $(grep -v "^#" .env |xargs)
 ./t.sh
 ```
 
+### One-Time Skippable Recheck Worker
+
+Re-checks `raw_us_jobs` rows marked `is_skippable=true`. If the normalized URL no longer returns `404`, the worker
+marks the row as `is_skippable=false` and `is_ready=false` so it can be processed again.
+
+Run:
+
+```bash
+go run ./cmd/skippablerecheck
+```
+
+Optional env:
+
+```env
+SKIPPABLE_RECHECK_BATCH_SIZE=100
+```
+
 ### Adding new database migrations
 
 This expects `goose` to be installed and it can be found from the `$PATH`:
