@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -124,6 +125,75 @@ func parseCSVQuery(value string) []string {
 	return items
 }
 
+func buildDenseSalaryOptions(values []float64, step int, window int) []int {
+	if len(values) == 0 {
+		return nil
+	}
+	cleaned := make([]float64, 0, len(values))
+	for _, value := range values {
+		if value > 0 {
+			cleaned = append(cleaned, value)
+		}
+	}
+	if len(cleaned) == 0 {
+		return nil
+	}
+	sortFloat64s(cleaned)
+	percentile := func(sortedValues []float64, q float64) float64 {
+		if len(sortedValues) == 1 {
+			return sortedValues[0]
+		}
+		pos := float64(len(sortedValues)-1) * q
+		lo := int(math.Floor(pos))
+		hi := int(math.Ceil(pos))
+		if lo == hi {
+			return sortedValues[lo]
+		}
+		weight := pos - float64(lo)
+		return sortedValues[lo]*(1-weight) + sortedValues[hi]*weight
+	}
+	p05 := percentile(cleaned, 0.05)
+	p95 := percentile(cleaned, 0.95)
+	trimmed := make([]float64, 0, len(cleaned))
+	for _, value := range cleaned {
+		if value >= p05 && value <= p95 {
+			trimmed = append(trimmed, value)
+		}
+	}
+	targetValues := cleaned
+	if len(trimmed) >= 10 {
+		targetValues = trimmed
+	}
+	binCounts := map[int]int{}
+	for _, value := range targetValues {
+		binStart := int(math.Floor(value/float64(step))) * step
+		binCounts[binStart]++
+	}
+	binsPerWindow := max(window/step, 1)
+	sortedStarts := make([]int, 0, len(binCounts))
+	for start := range binCounts {
+		sortedStarts = append(sortedStarts, start)
+	}
+	sortInts(sortedStarts)
+	bestStart := sortedStarts[0]
+	bestCount := -1
+	for _, start := range sortedStarts {
+		windowCount := 0
+		for i := 0; i < binsPerWindow; i++ {
+			windowCount += binCounts[start+(i*step)]
+		}
+		if windowCount > bestCount {
+			bestCount = windowCount
+			bestStart = start
+		}
+	}
+	options := make([]int, 0, binsPerWindow+1)
+	for i := 0; i <= binsPerWindow; i++ {
+		options = append(options, bestStart+(i*step))
+	}
+	return options
+}
+
 func (h *Handler) filterOptions(c *gin.Context) {
 	categories, err := selectStrings(c, h.db, `SELECT DISTINCT categorized_job_title FROM parsed_jobs WHERE categorized_job_title IS NOT NULL AND categorized_job_title != '' ORDER BY categorized_job_title ASC`)
 	if err != nil {
@@ -180,12 +250,20 @@ func (h *Handler) filterOptions(c *gin.Context) {
 	}
 	sortStrings(techStacks)
 
-	var salaryMin, salaryMax sql.NullFloat64
-	query := `SELECT MIN(` + annualizedSalarySQL(`salary_min_usd`) + `), MAX(` + annualizedSalarySQL(`salary_min_usd`) + `) FROM parsed_jobs WHERE salary_min_usd IS NOT NULL`
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(), query).Scan(&salaryMin, &salaryMax); err != nil {
+	salaryRows, err := h.db.SQL.QueryContext(c.Request.Context(), `SELECT `+annualizedSalarySQL(`COALESCE(salary_min_usd, salary_min)`)+` FROM parsed_jobs WHERE salary_min_usd IS NOT NULL OR salary_min IS NOT NULL`)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
 		return
 	}
+	defer salaryRows.Close()
+	salaryValues := []float64{}
+	for salaryRows.Next() {
+		var value sql.NullFloat64
+		if err := salaryRows.Scan(&value); err == nil && value.Valid {
+			salaryValues = append(salaryValues, value.Float64)
+		}
+	}
+	minSalaryOptions := buildDenseSalaryOptions(salaryValues, 10000, 100000)
 
 	seniorities := []string{}
 	for _, check := range []struct{ Name, Field string }{{"entry", "is_entry_level"}, {"junior", "is_junior"}, {"mid", "is_mid_level"}, {"senior", "is_senior"}, {"lead", "is_lead"}} {
@@ -206,12 +284,9 @@ func (h *Handler) filterOptions(c *gin.Context) {
 			"month",
 			"3_months",
 		},
-		"tech_stacks": techStacks,
-		"min_salary_range": gin.H{
-			"min": nullFloatValue(salaryMin),
-			"max": nullFloatValue(salaryMax),
-		},
-		"seniorities": seniorities,
+		"tech_stacks":        techStacks,
+		"min_salary_options": minSalaryOptions,
+		"seniorities":        seniorities,
 	})
 }
 
@@ -560,6 +635,24 @@ func parseIntDefault(raw string, fallback int) int {
 	return parsed
 }
 func sortStrings(values []string) {
+	for i := 0; i < len(values); i++ {
+		for j := i + 1; j < len(values); j++ {
+			if values[j] < values[i] {
+				values[i], values[j] = values[j], values[i]
+			}
+		}
+	}
+}
+func sortFloat64s(values []float64) {
+	for i := 0; i < len(values); i++ {
+		for j := i + 1; j < len(values); j++ {
+			if values[j] < values[i] {
+				values[i], values[j] = values[j], values[i]
+			}
+		}
+	}
+}
+func sortInts(values []int) {
 	for i := 0; i < len(values); i++ {
 		for j := i + 1; j < len(values); j++ {
 			if values[j] < values[i] {

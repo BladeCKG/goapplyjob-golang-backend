@@ -150,6 +150,9 @@ func TestJobsFilterOptionsAnnualized(t *testing.T) {
 	insertJobWithSalaryType(t, db, 1, "Hourly Role", 40, "hourly")
 	insertJobWithSalaryType(t, db, 2, "Monthly Role", 6000, "monthly")
 	insertJobWithSalaryType(t, db, 3, "Yearly Role", 70000, "yearly")
+	for idx := 0; idx < 12; idx++ {
+		insertJobWithSalaryType(t, db, 100+idx, "Dense Role", float64(80000+(idx*1000)), "yearly")
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/jobs/filter-options", nil)
 	rec := httptest.NewRecorder()
@@ -157,9 +160,9 @@ func TestJobsFilterOptionsAnnualized(t *testing.T) {
 	assertStatus(t, rec.Code, http.StatusOK)
 	var body map[string]any
 	decodeBody(t, rec.Body.Bytes(), &body)
-	salaryRange := body["min_salary_range"].(map[string]any)
-	if salaryRange["min"].(float64) != 70000 || salaryRange["max"].(float64) != 83200 {
-		t.Fatalf("unexpected salary range %#v", salaryRange)
+	minSalaryOptions := body["min_salary_options"].([]any)
+	if len(minSalaryOptions) != 11 {
+		t.Fatalf("unexpected min salary options %#v", body)
 	}
 }
 
