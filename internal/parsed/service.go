@@ -107,6 +107,42 @@ func jaccardSimilarity(left, right map[string]struct{}) float64 {
 	return float64(intersection) / float64(len(union))
 }
 
+func orderedTokenMatchScore(roleTitle, categoryTitle string) float64 {
+	roleTokens := orderedTokens(roleTitle)
+	categoryTokens := orderedTokens(categoryTitle)
+	if len(roleTokens) == 0 || len(categoryTokens) == 0 {
+		return 0
+	}
+	matched := 0
+	idx := 0
+	for _, categoryToken := range categoryTokens {
+		for idx < len(roleTokens) {
+			if roleTokens[idx] == categoryToken {
+				matched++
+				idx++
+				break
+			}
+			idx++
+		}
+	}
+	return float64(matched) / float64(len(categoryTokens))
+}
+
+func orderedTokens(value string) []string {
+	raw := regexp.MustCompile(`[^a-z0-9]+`).Split(strings.ToLower(value), -1)
+	out := make([]string, 0, len(raw))
+	for _, token := range raw {
+		if len(token) <= 1 {
+			continue
+		}
+		if _, ok := seniorityTokens[token]; ok {
+			continue
+		}
+		out = append(out, token)
+	}
+	return out
+}
+
 func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle string) (string, string, error) {
 	sourceTokens := tokenizeRoleTitleForSimilarity(roleTitle)
 	if len(sourceTokens) == 0 {
@@ -132,6 +168,12 @@ func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle str
 			return "", "", err
 		}
 		score := jaccardSimilarity(sourceTokens, tokenizeRoleTitleForSimilarity(candidateRoleTitle.String))
+		titleTokens := orderedTokens(candidateTitle.String)
+		score += orderedTokenMatchScore(roleTitle, candidateTitle.String)
+		score += 0.1 * float64(len(titleTokens))
+		if strings.EqualFold(candidateTitle.String, "Engineer") || strings.EqualFold(candidateTitle.String, "Manager") {
+			score -= 0.35
+		}
 		if score > bestScore {
 			bestScore = score
 			bestTitle = candidateTitle.String
@@ -141,7 +183,7 @@ func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle str
 	if err := rows.Err(); err != nil {
 		return "", "", err
 	}
-	if bestScore < 0.35 {
+	if bestScore < 0.5 {
 		return "", "", nil
 	}
 	return bestTitle, bestFunction, nil

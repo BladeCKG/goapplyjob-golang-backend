@@ -167,3 +167,37 @@ func TestBuiltinBackfillsCategoriesFromSimilarRemoteJob(t *testing.T) {
 		t.Fatalf("expected inferred categories, got %q / %q", title.String, function.String)
 	}
 }
+
+func TestOrderedTokenMatchScorePrefersSpecificCategory(t *testing.T) {
+	if score := orderedTokenMatchScore("Senior Product Implementation Engineer I II", "Implementation Engineer"); score <= 0.5 {
+		t.Fatalf("expected strong ordered match score, got %v", score)
+	}
+}
+
+func TestFindSimilarRemoteCategoriesAvoidsGenericEngineer(t *testing.T) {
+	db, err := database.Open("file:test_parsed_weighted_similarity?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (1, 'remoterocketship', 'https://remote.example/jobs/engineer', ?, 1, 0, 1, 0, '{}')`, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (2, 'remoterocketship', 'https://remote.example/jobs/implementation-engineer', ?, 1, 0, 1, 0, '{}')`, time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, role_title, categorized_job_title, categorized_job_function, updated_at) VALUES (1, 'Engineer', 'Engineer', 'Engineering', ?), (2, 'Consultant', 'Implementation Engineer', 'Engineering', ?)`, time.Now().UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(db)
+	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Product Implementation Engineer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if title != "Implementation Engineer" || function != "Engineering" {
+		t.Fatalf("expected specific category match, got %q / %q", title, function)
+	}
+}
