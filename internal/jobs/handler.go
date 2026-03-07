@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -52,6 +53,7 @@ var (
 		"senior": {},
 		"lead":   {},
 	}
+	nonAlphaTitleChars = regexp.MustCompile(`[^A-Za-z\s]+`)
 )
 
 type jobItem struct {
@@ -200,6 +202,11 @@ func parseCSVQuery(value string) []string {
 	return items
 }
 
+func tokenizeTitleSearchText(value string) []string {
+	normalized := strings.ToLower(nonAlphaTitleChars.ReplaceAllString(value, " "))
+	return strings.Fields(normalized)
+}
+
 func annualizedMinSalarySQL() string {
 	return `COALESCE(salary_min_usd, ` + annualizedSalarySQL(`salary_min`) + `)`
 }
@@ -333,11 +340,25 @@ func (h *Handler) listJobs(c *gin.Context) {
 		parts := make([]string, 0, len(titles))
 		for _, title := range titles {
 			normalizedTitle := strings.ToLower(strings.TrimSpace(title))
-			parts = append(parts, `(lower(trim(COALESCE(p.role_title, ''))) = ? OR lower(trim(COALESCE(p.categorized_job_function, ''))) = ? OR p.categorized_job_title LIKE ? OR p.role_title LIKE ?)`)
+			titleParts := []string{
+				`lower(trim(COALESCE(p.role_title, ''))) = ?`,
+				`lower(trim(COALESCE(p.categorized_job_function, ''))) = ?`,
+				`p.categorized_job_title LIKE ?`,
+				`p.role_title LIKE ?`,
+			}
 			args = append(args, normalizedTitle)
 			args = append(args, normalizedTitle)
 			args = append(args, "%"+title+"%")
 			args = append(args, "%"+title+"%")
+			if tokens := tokenizeTitleSearchText(title); len(tokens) > 0 {
+				tokenParts := make([]string, 0, len(tokens))
+				for _, token := range tokens {
+					tokenParts = append(tokenParts, `p.role_title LIKE ?`)
+					args = append(args, "%"+token+"%")
+				}
+				titleParts = append(titleParts, "("+strings.Join(tokenParts, " AND ")+")")
+			}
+			parts = append(parts, "("+strings.Join(titleParts, " OR ")+")")
 		}
 		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 	}

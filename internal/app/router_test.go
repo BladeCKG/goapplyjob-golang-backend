@@ -344,6 +344,28 @@ func TestJobsTitleFilterMatchesRoleTitleVariants(t *testing.T) {
 	}
 }
 
+func TestJobsTitleFilterIgnoresSpecialCharactersInRoleTitle(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJobWithFunction(t, db, 73, "Software Engineer", "frontend", "Frontend (React) Engineer")
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?job_title=frontend+react+engineer", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	items := body["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("expected one special character-tolerant match, got %#v", body)
+	}
+	if items[0].(map[string]any)["role_title"].(string) != "Frontend (React) Engineer" {
+		t.Fatalf("unexpected special character role title match %#v", items[0])
+	}
+}
+
 func TestJobsTechStackFilterAndOptions(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
