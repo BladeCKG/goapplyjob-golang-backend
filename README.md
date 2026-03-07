@@ -130,6 +130,41 @@ cd <backend-directory>
 .\scripts\docker_bootstrap_and_start.ps1
 ```
 
+### Render Deployment (API + Workers)
+
+This repo includes `render.yaml` for one-click Render Blueprint deployment with:
+
+* 1 PostgreSQL database
+* 1 web service for the Gin API
+* background workers for:
+  * `watcher`
+  * `importer`
+
+Steps:
+
+1. Push this backend folder to GitHub.
+2. In Render, choose **New +** -> **Blueprint** and select the repository.
+3. Render reads `render.yaml` and creates the database and services.
+4. Set all `sync: false` env vars in Render before the first production run.
+
+Required manual env vars:
+
+* `WATCH_URL`
+* `SMTP_HOST`
+* `SMTP_USER`
+* `SMTP_PASS`
+* `SMTP_FROM`
+* `AUTH_MAGIC_LINK_BASE_URL`
+* `PAYMENT_SUCCESS_URL`
+* `PAYMENT_CANCEL_URL`
+* `CRYPTO_IPN_CALLBACK_URL`
+* `OXAPAY_MERCHANT_API_KEY`
+
+Notes:
+
+* `DATABASE_URL` is wired from Render Postgres.
+* `AUTH_COOKIE_SECURE=true` is already set in `render.yaml`.
+
 ### Adding new database migrations
 
 This expects `goose` to be installed and it can be found from the `$PATH`:
