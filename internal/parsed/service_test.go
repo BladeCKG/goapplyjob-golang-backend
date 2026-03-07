@@ -2,6 +2,7 @@ package parsed
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"testing"
 	"time"
@@ -102,5 +103,67 @@ func TestProcessPendingKeepsParsingWhenSourceCreatedAtIsOlderThanPostDate(t *tes
 	}
 	if parsedCount != 1 {
 		t.Fatalf("expected parsed row to be created, got %d", parsedCount)
+	}
+}
+
+func TestTokenizeRoleTitleRemovesSeniorityTokens(t *testing.T) {
+	tokens := tokenizeRoleTitleForSimilarity("Senior Staff Backend Engineer Python")
+	if _, ok := tokens["senior"]; ok {
+		t.Fatal("expected senior to be removed")
+	}
+	if _, ok := tokens["staff"]; ok {
+		t.Fatal("expected staff to be removed")
+	}
+	if _, ok := tokens["backend"]; !ok {
+		t.Fatal("expected backend token")
+	}
+}
+
+func TestJaccardSimilarityWorksForOverlap(t *testing.T) {
+	left := map[string]struct{}{"backend": {}, "engineer": {}, "python": {}}
+	right := map[string]struct{}{"backend": {}, "engineer": {}, "go": {}}
+	if got := jaccardSimilarity(left, right); got != 0.5 {
+		t.Fatalf("expected 0.5 similarity, got %v", got)
+	}
+}
+
+func TestBuiltinBackfillsCategoriesFromSimilarRemoteJob(t *testing.T) {
+	db, err := database.Open("file:test_parsed_builtin_backfill?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (1, 'remoterocketship', 'https://remote.example/jobs/1', ?, 1, 0, 1, 0, '{}')`, time.Date(2026, 2, 17, 0, 0, 0, 0, time.UTC).Format(time.RFC3339))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, role_title, categorized_job_title, categorized_job_function, updated_at) VALUES (1, 'Senior Backend Platform Engineer Python', 'Backend Engineer', 'Engineering', ?)`, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(map[string]any{
+		"created_at": "2026-02-12T09:00:00Z",
+		"url":        "https://builtin.com/job/acme/200",
+		"roleTitle":  "Backend Platform Engineer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (2, 'builtin', 'https://builtin.com/job/acme/200', ?, 1, 0, 0, 0, ?)`, time.Date(2026, 2, 17, 0, 0, 0, 0, time.UTC).Format(time.RFC3339), string(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(db)
+	if _, err := svc.ProcessPending(context.Background(), 10); err != nil {
+		t.Fatal(err)
+	}
+	var title, function sql.NullString
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT categorized_job_title, categorized_job_function FROM parsed_jobs WHERE raw_us_job_id = 2`).Scan(&title, &function); err != nil {
+		t.Fatal(err)
+	}
+	if title.String != "Backend Engineer" || function.String != "Engineering" {
+		t.Fatalf("expected inferred categories, got %q / %q", title.String, function.String)
 	}
 }
