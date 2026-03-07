@@ -35,17 +35,18 @@ var (
 )
 
 type Config struct {
-	Enabled              bool
-	URL                  string
-	IntervalMinutes      float64
-	SampleKB             int
-	TimeoutSeconds       float64
-	BuiltinBaseURL       string
-	BuiltinMaxPage       int
-	BuiltinPagesPerCycle int
-	WorkableAPIURL       string
-	WorkablePageLimit    int
-	EnabledSources       map[string]struct{}
+	Enabled                bool
+	URL                    string
+	IntervalMinutes        float64
+	SampleKB               int
+	TimeoutSeconds         float64
+	BuiltinBaseURL         string
+	BuiltinMaxPage         int
+	BuiltinPagesPerCycle   int
+	BuiltinCheckpointPages int
+	WorkableAPIURL         string
+	WorkablePageLimit      int
+	EnabledSources         map[string]struct{}
 }
 
 type FetchSampleFunc func() ([]byte, error)
@@ -260,8 +261,22 @@ func (s *Service) runOnceBuiltin() error {
 	currentPage := nextPage
 	pagesScanned := 0
 	payloadsCreated := 0
-	firstSeenMarkerUpdated := false
 	phase1BoundaryMatched := false
+	checkpointEveryPages := max(s.Config.BuiltinCheckpointPages, 1)
+	saveCheckpoint := func(nextPageValue int) error {
+		nextSavedPage := nextPageValue
+		if nextSavedPage < 1 {
+			nextSavedPage = 1
+		}
+		return s.saveStatePayload(sourceBuiltin, map[string]any{
+			"next_page":                   nextSavedPage,
+			"last_post_date":              valueOrNil(lastPostDate),
+			"last_job_url":                valueOrNil(lastJobURL),
+			"last_scan_at":                utcNowISO(),
+			"pages_scanned_last_cycle":    pagesScanned,
+			"payloads_created_last_cycle": payloadsCreated,
+		})
+	}
 
 	if (lastJobURL != "" || lastPostDateDT != nil) && currentPage < s.Config.BuiltinMaxPage {
 		probePage := currentPage + 1
@@ -286,6 +301,11 @@ func (s *Service) runOnceBuiltin() error {
 			if containsListingURL(listings, lastJobURL) || allListingsOlderThan(listings, lastPostDateDT) {
 				phase1BoundaryMatched = true
 				break
+			}
+			if pagesScanned%checkpointEveryPages == 0 {
+				if err := saveCheckpoint(probePage); err != nil {
+					return err
+				}
 			}
 			probePage++
 		}
@@ -317,31 +337,22 @@ func (s *Service) runOnceBuiltin() error {
 				return err
 			}
 			payloadsCreated++
-			if !firstSeenMarkerUpdated {
-				if firstURL, ok := listings[0]["url"].(string); ok {
-					lastJobURL = firstURL
-				}
-				if firstPostDate, ok := listings[0]["post_date"].(string); ok {
-					lastPostDate = firstPostDate
-				}
-				firstSeenMarkerUpdated = true
+			if firstURL, ok := listings[0]["url"].(string); ok {
+				lastJobURL = firstURL
+			}
+			if firstPostDate, ok := listings[0]["post_date"].(string); ok {
+				lastPostDate = firstPostDate
+			}
+		}
+		if pagesScanned%checkpointEveryPages == 0 {
+			if err := saveCheckpoint(currentPage); err != nil {
+				return err
 			}
 		}
 		currentPage--
 	}
 
-	nextSavedPage := currentPage
-	if nextSavedPage < 1 {
-		nextSavedPage = 1
-	}
-	return s.saveStatePayload(sourceBuiltin, map[string]any{
-		"next_page":                   nextSavedPage,
-		"last_post_date":              valueOrNil(lastPostDate),
-		"last_job_url":                valueOrNil(lastJobURL),
-		"last_scan_at":                utcNowISO(),
-		"pages_scanned_last_cycle":    pagesScanned,
-		"payloads_created_last_cycle": payloadsCreated,
-	})
+	return saveCheckpoint(currentPage)
 }
 
 func (s *Service) runOnceWorkable() error {
