@@ -15,6 +15,8 @@ var (
 	metaDescriptionPattern  = regexp.MustCompile(`(?is)<meta[^>]*name=['"]description['"][^>]*content=['"]([^'"]+)['"]`)
 	companyProfileInitRegex = regexp.MustCompile(`(?is)Builtin\.companyProfileInit\((\{.*?\})\);`)
 	topSkillsRegex          = regexp.MustCompile(`(?is)Top Skills\s*</h[1-6]>.*?<div[^>]*>\s*([^<]*,[^<]*)\s*</div>`)
+	salaryChipRegex         = regexp.MustCompile(`(?is)(\d[\d,]*)\s*K?\s*-\s*(\d[\d,]*)\s*K?\s*(Annually|Yearly|Hourly|Monthly)?`)
+	seniorityRegex          = regexp.MustCompile(`(?is)\b(Entry level|Junior level|Mid level|Senior level|Expert\s*/\s*Leader)\b`)
 	tagPattern              = regexp.MustCompile(`(?is)<[^>]+>`)
 	spacePattern            = regexp.MustCompile(`\s+`)
 )
@@ -31,13 +33,18 @@ func ExtractJob(htmlText, companyHTML string) map[string]any {
 		identifierValue = stringValue(identifier["value"])
 	}
 
-	locationLabels, firstLocality, firstRegion, applicantCountry := extractLocationParts(jobPosting)
+	locationLabels, firstLocality, applicantCountry := extractLocationParts(jobPosting)
 	roleDescription := toPlainText(stringValue(jobPosting["description"]))
 	roleTitle := stringValue(jobPosting["title"])
 	jobSummary, twoLineSummary := summariesFromDescription(roleDescription)
 	rawCompany := toRawCompanyShape(extractCompanyInfo(companyHTML, stringValueFromMap(jobPosting, "hiringOrganization", "sameAs")))
 	rawCompanyMap, _ := rawCompany.(map[string]any)
-	techStack := extractTopSkills(htmlText)
+	techStack := extractJSONLDSkills(jobPosting)
+	if len(techStack) == 0 {
+		techStack = extractTopSkills(htmlText)
+	}
+	levelFlags := inferLevelFlags(roleTitle, extractSeniorityLabel(htmlText))
+	salaryRange := parseSalaryRange(jobPosting, htmlText)
 
 	return map[string]any{
 		"id":                           extractExternalJobID(jobURL, identifierValue),
@@ -78,32 +85,23 @@ func ExtractJob(htmlText, companyHTML string) map[string]any {
 		"jobDescriptionSummaryGermany":             nil,
 		"twoLineJobDescriptionSummaryGermany":      nil,
 		"url":                                      jobURL,
-		"isEntryLevel":                             inferLevelFlags(roleTitle)["isEntryLevel"],
-		"isJunior":                                 inferLevelFlags(roleTitle)["isJunior"],
-		"isMidLevel":                               inferLevelFlags(roleTitle)["isMidLevel"],
-		"isSenior":                                 inferLevelFlags(roleTitle)["isSenior"],
-		"isLead":                                   inferLevelFlags(roleTitle)["isLead"],
-		"salaryRange": map[string]any{
-			"max":                     nil,
-			"min":                     nil,
-			"salaryType":              nil,
-			"currencyCode":            "USD",
-			"currencySymbol":          "$",
-			"maxSalaryAsUSD":          nil,
-			"minSalaryAsUSD":          nil,
-			"salaryHumanReadableText": nil,
-		},
-		"techStack":              techStack,
-		"slug":                   slugFromURL(jobURL),
-		"isPromoted":             false,
-		"employmentType":         normalizeEmploymentType(stringValue(jobPosting["employmentType"])),
-		"location":               firstNonEmpty(strings.Join(locationLabels, ", "), applicantCountry),
-		"locationType":           normalizeLocationType(stringValue(jobPosting["jobLocationType"])),
-		"locationCity":           firstLocality,
-		"locationUSStates":       sliceIfSet(firstRegion),
-		"categorizedJobTitle":    nil,
-		"categorizedJobFunction": nil,
-		"company":                rawCompany,
+		"isEntryLevel":                             levelFlags["isEntryLevel"],
+		"isJunior":                                 levelFlags["isJunior"],
+		"isMidLevel":                               levelFlags["isMidLevel"],
+		"isSenior":                                 levelFlags["isSenior"],
+		"isLead":                                   levelFlags["isLead"],
+		"salaryRange":                              salaryRange,
+		"techStack":                                techStack,
+		"slug":                                     slugFromURL(jobURL),
+		"isPromoted":                               false,
+		"employmentType":                           normalizeEmploymentType(stringValue(jobPosting["employmentType"])),
+		"location":                                 firstNonEmpty(strings.Join(locationLabels, " | "), applicantCountry),
+		"locationType":                             normalizeLocationType(stringValue(jobPosting["jobLocationType"])),
+		"locationCity":                             firstLocality,
+		"locationUSStates":                         extractUSStates(jobPosting),
+		"categorizedJobTitle":                      nil,
+		"categorizedJobFunction":                   nil,
+		"company":                                  rawCompany,
 	}
 }
 
@@ -259,6 +257,40 @@ func extractTopSkills(htmlText string) []string {
 	return out
 }
 
+func extractJSONLDSkills(jobPosting map[string]any) []string {
+	out := []string{}
+	seen := map[string]struct{}{}
+	var add func(any)
+	add = func(value any) {
+		switch item := value.(type) {
+		case string:
+			parts := []string{item}
+			if strings.Contains(item, ",") {
+				parts = strings.Split(item, ",")
+			}
+			for _, part := range parts {
+				skill := strings.TrimSpace(part)
+				if skill == "" {
+					continue
+				}
+				key := strings.ToLower(skill)
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				out = append(out, skill)
+			}
+		case []any:
+			for _, entry := range item {
+				add(entry)
+			}
+		}
+	}
+	add(jobPosting["skills"])
+	add(jobPosting["keywords"])
+	return out
+}
+
 func extractCompanyInfo(companyHTML, companySameAs string) map[string]any {
 	if strings.TrimSpace(companyHTML) == "" {
 		return nil
@@ -348,7 +380,19 @@ func normalizeLocationType(value string) any {
 	return normalized
 }
 
-func inferLevelFlags(roleTitle string) map[string]bool {
+func inferLevelFlags(roleTitle, seniorityLabel string) map[string]bool {
+	switch strings.ToLower(strings.TrimSpace(seniorityLabel)) {
+	case "entry level":
+		return map[string]bool{"isEntryLevel": true, "isJunior": false, "isMidLevel": false, "isSenior": false, "isLead": false}
+	case "junior level":
+		return map[string]bool{"isEntryLevel": false, "isJunior": true, "isMidLevel": false, "isSenior": false, "isLead": false}
+	case "mid level":
+		return map[string]bool{"isEntryLevel": false, "isJunior": false, "isMidLevel": true, "isSenior": false, "isLead": false}
+	case "senior level":
+		return map[string]bool{"isEntryLevel": false, "isJunior": false, "isMidLevel": false, "isSenior": true, "isLead": false}
+	case "expert / leader":
+		return map[string]bool{"isEntryLevel": false, "isJunior": false, "isMidLevel": false, "isSenior": false, "isLead": true}
+	}
 	title := strings.ToLower(roleTitle)
 	return map[string]bool{
 		"isEntryLevel": strings.Contains(title, "entry") || strings.Contains(title, "intern"),
@@ -359,7 +403,126 @@ func inferLevelFlags(roleTitle string) map[string]bool {
 	}
 }
 
-func extractLocationParts(jobPosting map[string]any) ([]string, any, string, string) {
+func extractSeniorityLabel(htmlText string) string {
+	headerPart := htmlText
+	if parts := strings.SplitN(htmlText, "container py-lg", 2); len(parts) > 0 {
+		headerPart = parts[0]
+	}
+	match := seniorityRegex.FindStringSubmatch(html.UnescapeString(tagPattern.ReplaceAllString(headerPart, " ")))
+	if len(match) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(spacePattern.ReplaceAllString(match[1], " "))
+}
+
+func parseSalaryRange(jobPosting map[string]any, htmlText string) map[string]any {
+	out := map[string]any{
+		"max":                     nil,
+		"min":                     nil,
+		"salaryType":              nil,
+		"currencyCode":            "USD",
+		"currencySymbol":          "$",
+		"maxSalaryAsUSD":          nil,
+		"minSalaryAsUSD":          nil,
+		"salaryHumanReadableText": nil,
+	}
+	baseSalary, _ := jobPosting["baseSalary"].(map[string]any)
+	if currency := stringValue(baseSalary["currency"]); currency != "" {
+		out["currencyCode"] = strings.ToUpper(currency)
+		if out["currencyCode"] != "USD" {
+			out["currencySymbol"] = nil
+		}
+	}
+	valueMap, _ := baseSalary["value"].(map[string]any)
+	if minValue, ok := parseInt(valueMap["minValue"]); ok {
+		out["min"] = minValue
+	}
+	if maxValue, ok := parseInt(valueMap["maxValue"]); ok {
+		out["max"] = maxValue
+	}
+	if salaryType := salaryTypeFromUnit(stringValue(valueMap["unitText"])); salaryType != nil {
+		out["salaryType"] = salaryType
+	}
+	if out["min"] == nil && out["max"] == nil {
+		if match := salaryChipRegex.FindStringSubmatch(htmlText); len(match) >= 3 {
+			left, _ := strconv.Atoi(strings.ReplaceAll(match[1], ",", ""))
+			right, _ := strconv.Atoi(strings.ReplaceAll(match[2], ",", ""))
+			if strings.Contains(strings.ToLower(match[0]), "k") && len(match[1]) <= 3 {
+				left *= 1000
+				right *= 1000
+			}
+			out["min"] = left
+			out["max"] = right
+			out["salaryType"] = salaryTypeFromUnit(match[3])
+		}
+	}
+	if out["currencyCode"] == "USD" {
+		out["minSalaryAsUSD"] = out["min"]
+		out["maxSalaryAsUSD"] = out["max"]
+	}
+	if out["min"] != nil && out["max"] != nil {
+		typeLabel := stringValue(out["salaryType"])
+		if typeLabel == "" {
+			typeLabel = "salary"
+		}
+		out["salaryHumanReadableText"] = "$" + humanizeInt(out["min"]) + "-$" + humanizeInt(out["max"]) + " " + typeLabel
+	}
+	return out
+}
+
+func salaryTypeFromUnit(value string) any {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "year", "yearly", "annually", "annual":
+		return "per year"
+	case "hour", "hourly":
+		return "per hour"
+	case "month", "monthly":
+		return "per month"
+	case "week", "weekly":
+		return "per week"
+	case "day", "daily":
+		return "per day"
+	default:
+		return nil
+	}
+}
+
+func parseInt(value any) (int, bool) {
+	switch v := value.(type) {
+	case float64:
+		return int(v), true
+	case int:
+		return v, true
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return 0, false
+		}
+		n, err := strconv.Atoi(v)
+		return n, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func humanizeInt(value any) string {
+	number, ok := parseInt(value)
+	if !ok {
+		return ""
+	}
+	text := strconv.Itoa(number)
+	if len(text) <= 3 {
+		return text
+	}
+	parts := []string{}
+	for len(text) > 3 {
+		parts = append([]string{text[len(text)-3:]}, parts...)
+		text = text[:len(text)-3]
+	}
+	parts = append([]string{text}, parts...)
+	return strings.Join(parts, ",")
+}
+
+func extractLocationParts(jobPosting map[string]any) ([]string, any, string) {
 	locations, _ := jobPosting["jobLocation"].([]any)
 	if locations == nil {
 		if one, ok := jobPosting["jobLocation"].(map[string]any); ok {
@@ -368,7 +531,6 @@ func extractLocationParts(jobPosting map[string]any) ([]string, any, string, str
 	}
 	labels := []string{}
 	firstLocality := ""
-	firstRegion := ""
 	for idx, location := range locations {
 		entry, _ := location.(map[string]any)
 		address, _ := entry["address"].(map[string]any)
@@ -377,7 +539,6 @@ func extractLocationParts(jobPosting map[string]any) ([]string, any, string, str
 		country := stringValue(address["addressCountry"])
 		if idx == 0 {
 			firstLocality = locality
-			firstRegion = region
 		}
 		parts := []string{}
 		for _, part := range []string{locality, region, country} {
@@ -390,7 +551,33 @@ func extractLocationParts(jobPosting map[string]any) ([]string, any, string, str
 		}
 	}
 	applicantCountry := stringValueFromMap(jobPosting, "applicantLocationRequirements", "name")
-	return labels, valueOrNil(firstLocality), firstRegion, applicantCountry
+	return labels, valueOrNil(firstLocality), applicantCountry
+}
+
+func extractUSStates(jobPosting map[string]any) any {
+	locations, _ := jobPosting["jobLocation"].([]any)
+	if locations == nil {
+		if one, ok := jobPosting["jobLocation"].(map[string]any); ok {
+			locations = []any{one}
+		}
+	}
+	states := []string{}
+	seen := map[string]struct{}{}
+	for _, location := range locations {
+		entry, _ := location.(map[string]any)
+		address, _ := entry["address"].(map[string]any)
+		region := stringValue(address["addressRegion"])
+		country := strings.ToUpper(stringValue(address["addressCountry"]))
+		if region == "" || (country != "USA" && country != "US" && country != "UNITED STATES") {
+			continue
+		}
+		if _, ok := seen[region]; ok {
+			continue
+		}
+		seen[region] = struct{}{}
+		states = append(states, region)
+	}
+	return states
 }
 
 func stringValue(value any) string {
