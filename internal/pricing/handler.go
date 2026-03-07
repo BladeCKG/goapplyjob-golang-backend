@@ -524,7 +524,7 @@ func (h *Handler) createCryptoInvoice(planName string, priceUSD int, payCurrency
 		return "", "", nil, err
 	}
 	callbackURL := strings.TrimSpace(h.cfg.CryptoIPNCallbackURL)
-	result, err := gateway.CreateInvoice(paymentcrypto.CheckoutRequest{
+	result, err := gateway.CreateInvoice(paymentcrypto.InvoiceRequest{
 		OrderID:     fmt.Sprintf("%d", paymentID),
 		AmountUSD:   float64(priceUSD),
 		Description: fmt.Sprintf("GoApplyJob %s plan", planName),
@@ -536,7 +536,7 @@ func (h *Handler) createCryptoInvoice(planName string, priceUSD int, payCurrency
 	if err != nil {
 		return "", "", nil, err
 	}
-	return result.ProviderCheckoutID, result.CheckoutURL, result.ProviderPayload, nil
+	return result.ProviderInvoiceID, result.InvoiceURL, result.ProviderPayload, nil
 }
 
 func (h *Handler) planDefinitions() []struct {

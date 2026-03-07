@@ -8,7 +8,7 @@ const (
 	PaymentFailed  PaymentStatus = "failed"
 )
 
-type CheckoutRequest struct {
+type InvoiceRequest struct {
 	OrderID     string
 	AmountUSD   float64
 	Description string
@@ -18,10 +18,10 @@ type CheckoutRequest struct {
 	PayCurrency string
 }
 
-type CheckoutResult struct {
-	ProviderCheckoutID string
-	CheckoutURL        string
-	ProviderPayload    map[string]any
+type InvoiceResult struct {
+	ProviderInvoiceID string
+	InvoiceURL        string
+	ProviderPayload   map[string]any
 }
 
 type CurrencyOption struct {
@@ -36,7 +36,7 @@ type WebhookParseResult struct {
 }
 
 type Gateway interface {
-	CreateInvoice(request CheckoutRequest) (CheckoutResult, error)
+	CreateInvoice(request InvoiceRequest) (InvoiceResult, error)
 	ListCurrencies(amountUSD *float64) []CurrencyOption
 	VerifyWebhookSignature(payload map[string]any, headers map[string]string) error
 	ParseWebhook(payload map[string]any) WebhookParseResult

@@ -23,6 +23,10 @@ type Config struct {
 	FreePlanDurationDays          int
 	CryptoPaymentProvider         string
 	CryptoIPNCallbackURL          string
+	CoinPaymentsAPIBaseURL        string
+	CoinPaymentsClientID          string
+	CoinPaymentsClientSecret      string
+	CoinPaymentsWebhookURL        string
 	NowPaymentsAPIBaseURL         string
 	NowPaymentsAPIKey             string
 	NowPaymentsDefaultPayCurrency string
@@ -49,6 +53,10 @@ func Load() Config {
 		FreePlanDurationDays:          getenvInt("FREE_PLAN_DURATION_DAYS", 7),
 		CryptoPaymentProvider:         getenv("CRYPTO_PAYMENT_PROVIDER", "nowpayments"),
 		CryptoIPNCallbackURL:          getenv("CRYPTO_IPN_CALLBACK_URL", "http://localhost:8000/pricing/webhooks/crypto"),
+		CoinPaymentsAPIBaseURL:        getenv("COINPAYMENTS_API_BASE_URL", "https://a-api.coinpayments.net/api"),
+		CoinPaymentsClientID:          getenv("COINPAYMENTS_CLIENT_ID", ""),
+		CoinPaymentsClientSecret:      getenv("COINPAYMENTS_CLIENT_SECRET", ""),
+		CoinPaymentsWebhookURL:        getenv("COINPAYMENTS_WEBHOOK_URL", "http://localhost:8000/pricing/webhooks/crypto"),
 		NowPaymentsAPIBaseURL:         getenv("NOWPAYMENTS_API_BASE_URL", "https://api.nowpayments.io/v1"),
 		NowPaymentsAPIKey:             getenv("NOWPAYMENTS_API_KEY", ""),
 		NowPaymentsDefaultPayCurrency: getenv("NOWPAYMENTS_DEFAULT_PAY_CURRENCY", "usdttrc20"),

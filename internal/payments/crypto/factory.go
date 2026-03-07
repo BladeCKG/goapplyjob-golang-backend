@@ -12,6 +12,8 @@ func GetGateway(cfg config.Config) (Gateway, error) {
 	switch provider {
 	case "", "nowpayments", "now_payment", "now-payments":
 		return NewNowPaymentsGateway(cfg), nil
+	case "coinpayments", "coinpayment", "coin-payments", "coin_payment":
+		return NewCoinPaymentsGateway(cfg), nil
 	default:
 		return nil, fmt.Errorf("unsupported crypto payment provider: %s", provider)
 	}

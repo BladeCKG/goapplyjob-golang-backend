@@ -19,18 +19,15 @@ func NewNowPaymentsGateway(cfg config.Config) *NowPaymentsGateway {
 	return &NowPaymentsGateway{cfg: cfg}
 }
 
-func (g *NowPaymentsGateway) CreateInvoice(request CheckoutRequest) (CheckoutResult, error) {
+func (g *NowPaymentsGateway) CreateInvoice(request InvoiceRequest) (InvoiceResult, error) {
 	payCode := strings.ToLower(strings.TrimSpace(request.PayCurrency))
-	if payCode == "" {
-		payCode = strings.ToLower(strings.TrimSpace(g.cfg.NowPaymentsDefaultPayCurrency))
-	}
 	if payCode == "" {
 		payCode = "usdttrc20"
 	}
 	if strings.TrimSpace(g.cfg.NowPaymentsAPIKey) == "" {
-		return CheckoutResult{
-			ProviderCheckoutID: "nowpayments_local_" + request.OrderID,
-			CheckoutURL:        request.SuccessURL + "?payment_id=" + request.OrderID,
+		return InvoiceResult{
+			ProviderInvoiceID: "nowpayments_local_" + request.OrderID,
+			InvoiceURL:        request.SuccessURL + "?payment_id=" + request.OrderID,
 			ProviderPayload: map[string]any{
 				"mode":                     "local_stub",
 				"provider":                 "nowpayments",
@@ -41,15 +38,15 @@ func (g *NowPaymentsGateway) CreateInvoice(request CheckoutRequest) (CheckoutRes
 			},
 		}, nil
 	}
-	return CheckoutResult{
-		ProviderCheckoutID: "nowpayments_remote",
-		CheckoutURL:        request.SuccessURL,
+	return InvoiceResult{
+		ProviderInvoiceID: "nowpayments_invoice_" + request.OrderID,
+		InvoiceURL:        request.SuccessURL,
 		ProviderPayload: map[string]any{
+			"id":                "nowpayments_invoice_" + request.OrderID,
+			"invoice_id":        "nowpayments_invoice_" + request.OrderID,
+			"invoice_url":       request.SuccessURL,
 			"order_description": request.Description,
 			"price_amount":      request.AmountUSD,
-			"price_currency":    "usd",
-			"cancel_url":        request.CancelURL,
-			"invoice_url":       request.SuccessURL,
 		},
 	}, nil
 }
@@ -81,15 +78,15 @@ func (g *NowPaymentsGateway) VerifyWebhookSignature(payload map[string]any, head
 	if secret == "" {
 		return nil
 	}
-	signature := headers["x-nowpayments-sig"]
-	if strings.TrimSpace(signature) == "" {
+	signature := strings.TrimSpace(getHeader(headers, "x-nowpayments-sig"))
+	if signature == "" {
 		return fmt.Errorf("Missing NOWPayments signature")
 	}
 	message, _ := json.Marshal(payload)
 	mac := hmac.New(sha512.New, []byte(secret))
 	_, _ = mac.Write(message)
 	expected := fmt.Sprintf("%x", mac.Sum(nil))
-	if !hmac.Equal([]byte(strings.ToLower(expected)), []byte(strings.ToLower(strings.TrimSpace(signature)))) {
+	if !hmac.Equal([]byte(strings.ToLower(expected)), []byte(strings.ToLower(signature))) {
 		return fmt.Errorf("Invalid NOWPayments signature")
 	}
 	return nil
@@ -97,15 +94,15 @@ func (g *NowPaymentsGateway) VerifyWebhookSignature(payload map[string]any, head
 
 func (g *NowPaymentsGateway) ParseWebhook(payload map[string]any) WebhookParseResult {
 	status := PaymentPending
-	switch strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", firstNonEmpty(payload["payment_status"], payload["status"], "pending")))) {
+	switch strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", firstAny(payload["payment_status"], payload["status"], "pending")))) {
 	case "confirmed", "finished", "sending":
 		status = PaymentPaid
 	case "failed", "expired", "refunded":
 		status = PaymentFailed
 	}
 	return WebhookParseResult{
-		OrderID:           fmt.Sprintf("%v", firstNonEmpty(payload["order_id"], "")),
-		ProviderPaymentID: fmt.Sprintf("%v", firstNonEmpty(payload["payment_id"], "")),
+		OrderID:           fmt.Sprintf("%v", firstAny(payload["order_id"], "")),
+		ProviderPaymentID: fmt.Sprintf("%v", firstAny(payload["payment_id"], "")),
 		Status:            status,
 	}
 }
@@ -117,16 +114,4 @@ func contains(values []string, target string) bool {
 		}
 	}
 	return false
-}
-
-func firstNonEmpty(values ...any) any {
-	for _, value := range values {
-		if text, ok := value.(string); ok && strings.TrimSpace(text) != "" {
-			return text
-		}
-		if value != nil {
-			return value
-		}
-	}
-	return ""
 }
