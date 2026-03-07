@@ -21,6 +21,11 @@ type Config struct {
 	AuthDebugReturnCode           bool
 	AuthEnableCodeLogin           bool
 	AuthEnableGoogleLogin         bool
+	EmailProvider                 string
+	BrevoAPIKey                   string
+	BrevoFromEmail                string
+	BrevoFromName                 string
+	BrevoAPIURL                   string
 	SupabaseURL                   string
 	SupabaseAnonKey               string
 	SMTPHost                      string
@@ -73,6 +78,11 @@ func Load() Config {
 		AuthDebugReturnCode:           getenvBool("AUTH_DEBUG_RETURN_CODE", false),
 		AuthEnableCodeLogin:           getenvBool("AUTH_ENABLE_CODE_LOGIN", false),
 		AuthEnableGoogleLogin:         getenvBool("AUTH_ENABLE_GOOGLE_LOGIN", false),
+		EmailProvider:                 getenv("EMAIL_PROVIDER", "brevo"),
+		BrevoAPIKey:                   getenv("BREVO_API_KEY", ""),
+		BrevoFromEmail:                getenv("BREVO_FROM_EMAIL", ""),
+		BrevoFromName:                 getenv("BREVO_FROM_NAME", "GoApplyJob"),
+		BrevoAPIURL:                   getenv("BREVO_API_URL", "https://api.brevo.com/v3/smtp/email"),
 		SupabaseURL:                   getenv("SUPABASE_URL", ""),
 		SupabaseAnonKey:               getenv("SUPABASE_ANON_KEY", ""),
 		SMTPHost:                      getenv("SMTP_HOST", ""),
