@@ -125,7 +125,7 @@ func TestJobDetailEndpoint(t *testing.T) {
 	assertStatus(t, rec.Code, http.StatusOK)
 	var body map[string]any
 	decodeBody(t, rec.Body.Bytes(), &body)
-	if body["company_name"].(string) != "Example Co" || body["role_title"].(string) != "Staff Backend Engineer" || body["salary_type"].(string) != "hourly" {
+	if body["company_name"].(string) != "Example Co" || body["role_title"].(string) != "Staff Backend Engineer" || body["salary_type"].(string) != "hourly" || body["education_requirements_credential_category"].(string) != "bachelor" {
 		t.Fatalf("unexpected detail payload %#v", body)
 	}
 }
@@ -265,7 +265,8 @@ func insertRichJob(t *testing.T, db *database.DB, companyID int64) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, company_id, categorized_job_title, role_title, role_description, role_requirements, location, location_city, salary_min_usd, salary_max_usd, salary_type, employment_type, benefits, url) VALUES (999, ?, 'Software Engineer', 'Staff Backend Engineer', 'Build distributed systems.', 'Python\nFastAPI', 'United States', 'Austin', 150, 210, 'hourly', 'full-time', 'Great benefits', 'https://jobs.example.com/detail')`, companyID)
+	result, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, company_id, categorized_job_title, role_title, role_description, role_requirements, location, location_city, salary_min_usd, salary_max_usd, salary_type, employment_type, education_requirements_credential_category, experience_requirements_months, experience_in_place_of_education, required_languages, tech_stack, benefits, url) VALUES (999, ?, 'Software Engineer', 'Staff Backend Engineer', 'Build distributed systems.', 'Python
+FastAPI', 'United States', 'Austin', 150, 210, 'hourly', 'full-time', 'bachelor', 24, 1, '["English"]', '["Go","SQL"]', 'Great benefits', 'https://jobs.example.com/detail')`, companyID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,12 +316,14 @@ func decodeBody(t *testing.T, body []byte, dest any) {
 		t.Fatal(err)
 	}
 }
+
 func assertStatus(t *testing.T, got, want int) {
 	t.Helper()
 	if got != want {
 		t.Fatalf("status=%d want=%d", got, want)
 	}
 }
+
 func boolToInt(value bool) int {
 	if value {
 		return 1
