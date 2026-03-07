@@ -510,12 +510,13 @@ func (h *Handler) subscriptionStatus(c *gin.Context) {
 	status := "expired"
 	var daysLeft any
 	if endsAt.Valid {
-		if parsed, err := time.Parse(time.RFC3339Nano, endsAt.String); err == nil {
-			if parsed.After(now) {
+		if parsed, err := parseUTCDateTime(endsAt.String); err == nil {
+			nowUTC := ensureUTC(now)
+			if parsed.After(nowUTC) {
 				isActive = true
 				status = "active"
 			}
-			daysLeft = getDaysLeft(parsed, now)
+			daysLeft = getDaysLeft(parsed, nowUTC)
 		}
 	}
 	if !isActive {
@@ -658,10 +659,30 @@ func firstNonEmpty(values ...any) any {
 }
 
 func getDaysLeft(endsAt, now time.Time) int {
-	diffSeconds := endsAt.Sub(now).Seconds()
+	diffSeconds := ensureUTC(endsAt).Sub(ensureUTC(now)).Seconds()
 	days := int((diffSeconds + 86399) / 86400)
 	if days < 0 {
 		return 0
 	}
 	return days
+}
+
+func ensureUTC(value time.Time) time.Time {
+	if value.Location() == nil {
+		return time.Date(value.Year(), value.Month(), value.Day(), value.Hour(), value.Minute(), value.Second(), value.Nanosecond(), time.UTC)
+	}
+	return value.UTC()
+}
+
+func parseUTCDateTime(raw string) (time.Time, error) {
+	if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return ensureUTC(parsed), nil
+	}
+	if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+		return ensureUTC(parsed), nil
+	}
+	if parsed, err := time.Parse("2006-01-02 15:04:05", raw); err == nil {
+		return time.Date(parsed.Year(), parsed.Month(), parsed.Day(), parsed.Hour(), parsed.Minute(), parsed.Second(), parsed.Nanosecond(), time.UTC), nil
+	}
+	return time.Time{}, fmt.Errorf("invalid datetime")
 }

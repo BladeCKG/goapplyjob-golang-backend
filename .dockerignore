@@ -1,0 +1,12 @@
+.git
+.env
+page_extract.db
+*.db
+logs
+watcher_output
+watcher_state.json
+bin
+dist
+coverage.out
+tmp
+*.test

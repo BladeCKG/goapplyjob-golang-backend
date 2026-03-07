@@ -1,32 +1,35 @@
 services:
-  postgres:
-    image: "postgres:17.2"
-    restart: on-failure:3
-    environment:
-      - "POSTGRES_PASSWORD=${DB_PASSWORD}"
+  api:
+    build:
+      context: .
+    image: goapplyjob-golang-backend
     ports:
-      - "127.0.0.1:${DB_PORT}:5432"
-    command: "-c log_statement=all"
-    # Uncomment the following lines to retain the data
-    #volumes:
-    #  - "$PWD/postgres-data:/var/lib/postgresql/data:rw"
-
-  otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.118.0
-    command: ["--config=/etc/otel-collector.yaml"]
+      - "8080:8080"
+    env_file:
+      - .env
     volumes:
-      - ./otel-collector.yaml:/etc/otel-collector.yaml
-    ports:
-      - 127.0.0.1:4317:4317
+      - ./page_extract.db:/app/page_extract.db
 
-  prometheus:
-    image: prom/prometheus:v3.1.0
+  watcher:
+    build:
+      context: .
+    image: goapplyjob-golang-backend
+    profiles:
+      - workers
+    env_file:
+      - .env
+    command: ["/app/api"]
     volumes:
-      - ./prometheus.yaml:/etc/prometheus/prometheus.yml
-    ports:
-      - 127.0.0.1:9090:9090
+      - ./page_extract.db:/app/page_extract.db
 
-  jaeger:
-    image: jaegertracing/all-in-one:1.60
-    ports:
-      - 127.0.0.1:16686:16686
+  importer:
+    build:
+      context: .
+    image: goapplyjob-golang-backend
+    profiles:
+      - workers
+    env_file:
+      - .env
+    command: ["/app/api"]
+    volumes:
+      - ./page_extract.db:/app/page_extract.db
