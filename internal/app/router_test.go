@@ -505,6 +505,7 @@ func TestDefaultFreeSubscriptionAndUpgradePreview(t *testing.T) {
 	cfg := config.Load()
 	cfg.DatabaseURL = "file:test_upgrade_preview?mode=memory&cache=shared"
 	cfg.AuthDebugReturnCode = true
+	cfg.AuthEnableCodeLogin = true
 	cfg.PublicJobsMaxPerPage = 3
 	db, err := database.Open(cfg.DatabaseURL)
 	if err != nil {
@@ -573,6 +574,7 @@ func TestCryptoWebhookRequiresSignatureAndActivatesSubscription(t *testing.T) {
 	cfg := config.Load()
 	cfg.DatabaseURL = "file:test_crypto_webhook_paid?mode=memory&cache=shared"
 	cfg.AuthDebugReturnCode = true
+	cfg.AuthEnableCodeLogin = true
 	cfg.NowPaymentsIPNSecret = "secret-token"
 	db, err := database.Open(cfg.DatabaseURL)
 	if err != nil {
@@ -720,6 +722,7 @@ func TestPasswordSignupAndLoginFlow(t *testing.T) {
 func TestSupabaseGoogleLoginFlow(t *testing.T) {
 	cfg := config.Load()
 	cfg.DatabaseURL = "file:test_supabase_login?mode=memory&cache=shared"
+	cfg.AuthEnableGoogleLogin = true
 	cfg.SupabaseAnonKey = "anon-key"
 	supabase := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/auth/v1/user" {
@@ -765,6 +768,25 @@ func TestSupabaseGoogleLoginFlow(t *testing.T) {
 	assertStatus(t, meRec.Code, http.StatusOK)
 }
 
+func TestCodeLoginDisabled(t *testing.T) {
+	cfg := config.Load()
+	cfg.DatabaseURL = "file:test_code_login_disabled?mode=memory&cache=shared"
+	cfg.AuthEnableCodeLogin = false
+	db, err := database.Open(cfg.DatabaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	router := NewRouter(cfg, db)
+
+	body, _ := json.Marshal(map[string]string{"email": "disabled@example.com"})
+	req := httptest.NewRequest(http.MethodPost, "/auth/login/request-code", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusServiceUnavailable)
+}
+
 func TestPasswordSignupValidatesPasswordLength(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
@@ -781,6 +803,7 @@ func testRouter(t *testing.T) (*gin.Engine, *database.DB) {
 	cfg := config.Load()
 	cfg.DatabaseURL = "file:test_page_extract?mode=memory&cache=shared"
 	cfg.AuthDebugReturnCode = true
+	cfg.AuthEnableCodeLogin = true
 	db, err := database.Open(cfg.DatabaseURL)
 	if err != nil {
 		t.Fatal(err)

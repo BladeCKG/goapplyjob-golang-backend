@@ -96,6 +96,10 @@ func (h *Handler) OptionalCurrentUser(c *gin.Context) *User {
 }
 
 func (h *Handler) requestCode(c *gin.Context) {
+	if !h.cfg.AuthEnableCodeLogin {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "Email verification login is temporarily disabled"})
+		return
+	}
 	var payload struct {
 		Email string `json:"email"`
 	}
@@ -161,6 +165,10 @@ func (h *Handler) requestCode(c *gin.Context) {
 }
 
 func (h *Handler) verifyCode(c *gin.Context) {
+	if !h.cfg.AuthEnableCodeLogin {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "Email verification login is temporarily disabled"})
+		return
+	}
 	var payload struct {
 		Email string `json:"email"`
 		Code  string `json:"code"`
@@ -223,6 +231,10 @@ func (h *Handler) verifyCode(c *gin.Context) {
 }
 
 func (h *Handler) verifyLink(c *gin.Context) {
+	if !h.cfg.AuthEnableCodeLogin {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "Email verification login is temporarily disabled"})
+		return
+	}
 	var payload struct {
 		Token string `json:"token"`
 	}
@@ -343,6 +355,10 @@ func (h *Handler) passwordSignup(c *gin.Context) {
 }
 
 func (h *Handler) supabaseGoogleLogin(c *gin.Context) {
+	if !h.cfg.AuthEnableGoogleLogin {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "Google login is temporarily disabled"})
+		return
+	}
 	var payload struct {
 		AccessToken string `json:"access_token"`
 	}
