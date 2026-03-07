@@ -611,6 +611,101 @@ func TestCryptoWebhookRequiresSignatureAndActivatesSubscription(t *testing.T) {
 	assertStatus(t, webhookRec.Code, http.StatusOK)
 }
 
+func TestOxaPayWebhookRequestShapeMarksPaymentPaid(t *testing.T) {
+	cfg := config.Load()
+	cfg.DatabaseURL = "file:test_oxapay_webhook_paid?mode=memory&cache=shared"
+	cfg.CryptoPaymentProvider = "oxapay"
+	cfg.OxaPayMerchantAPIKey = "secret-token"
+	db, err := database.Open(cfg.DatabaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	router := NewRouter(cfg, db)
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := db.SQL.ExecContext(context.Background(), `INSERT INTO auth_users (email, created_at) VALUES (?, ?)`, "oxapay-user@example.com", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, _ := result.LastInsertId()
+	result, err = db.SQL.ExecContext(context.Background(), `INSERT INTO pricing_plans (code, name, billing_cycle, duration_days, price_usd, is_active, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)`, "weekly", "Weekly", "weekly", 7, 3, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planID, _ := result.LastInsertId()
+	result, err = db.SQL.ExecContext(context.Background(), `INSERT INTO pricing_payments (user_id, pricing_plan_id, provider, payment_method, currency, amount_minor, status, provider_checkout_id, created_at) VALUES (?, ?, 'crypto', 'crypto', 'USD', 300, 'pending', ?, ?)`, userID, planID, "140013835", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paymentID, _ := result.LastInsertId()
+
+	bodyObj := map[string]any{
+		"track_id":            "140013835",
+		"status":              "Paid",
+		"type":                "invoice",
+		"module_name":         "goapplyjob",
+		"amount":              3,
+		"currency":            "USD",
+		"value":               3.0440897036220003,
+		"sent_value":          3.0440897036220003,
+		"order_id":            strconv.FormatInt(paymentID, 10),
+		"email":               "neverdreamagain9106@gmail.com",
+		"note":                "",
+		"fee_paid_by_payer":   1,
+		"under_paid_coverage": 2.5,
+		"description":         "GoApplyJob Weekly plan",
+		"date":                1771269963,
+		"txs": []map[string]any{{
+			"status":                "confirmed",
+			"tx_hash":               "sandbox",
+			"sent_amount":           0.0015427329,
+			"sent_value":            3.0440897036220003,
+			"received_amount":       0.0015427329,
+			"value":                 3.0440897036220003,
+			"currency":              "ETH",
+			"network":               "Ethereum Network",
+			"sender_address":        "",
+			"address":               "sandbox",
+			"memo":                  "",
+			"rate":                  1,
+			"confirmations":         10,
+			"auto_convert_amount":   0,
+			"auto_convert_currency": "",
+			"date":                  1771269981,
+		}},
+	}
+	rawBody, _ := json.Marshal(bodyObj)
+	mac := hmac.New(sha512.New, []byte("secret-token"))
+	_, _ = mac.Write(rawBody)
+	signature := fmt.Sprintf("%x", mac.Sum(nil))
+
+	webhookReq := httptest.NewRequest(http.MethodPost, "/pricing/webhooks/crypto", bytes.NewReader(rawBody))
+	webhookReq.Header.Set("Content-Type", "application/json")
+	webhookReq.Header.Set("Hmac", signature)
+	webhookReq.Header.Set("X-Request-Id", "69936f613eda0")
+	webhookReq.Header.Set("X-Timestamp", "1771269985")
+	webhookReq.Header.Set("X-Webhook-Version", "v1")
+	webhookRec := httptest.NewRecorder()
+	router.ServeHTTP(webhookRec, webhookReq)
+	assertStatus(t, webhookRec.Code, http.StatusOK)
+
+	var status string
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT status FROM pricing_payments WHERE id = ?`, paymentID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "paid" {
+		t.Fatalf("expected paid payment status, got %q", status)
+	}
+	var subscriptionCount int
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM user_subscriptions WHERE user_id = ?`, userID).Scan(&subscriptionCount); err != nil {
+		t.Fatal(err)
+	}
+	if subscriptionCount != 1 {
+		t.Fatalf("expected one user subscription, got %d", subscriptionCount)
+	}
+}
+
 func TestPricingCryptoCurrenciesSupportsAmountFiltering(t *testing.T) {
 	cfg := config.Load()
 	cfg.DatabaseURL = "file:test_currency_filtering?mode=memory&cache=shared"
