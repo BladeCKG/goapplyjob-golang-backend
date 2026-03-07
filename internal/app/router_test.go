@@ -176,6 +176,26 @@ func TestJobsFilterOptionsAnnualized(t *testing.T) {
 	if len(items) == 0 {
 		t.Fatalf("expected salary-sorted jobs")
 	}
+
+	code := requestLoginCode(t, router, "salary-check@example.com")
+	cookie := verifyLoginCode(t, router, "salary-check@example.com", code)
+	req3 := httptest.NewRequest(http.MethodGet, "/jobs?min_salary=80000&per_page=50", nil)
+	req3.AddCookie(cookie)
+	rec3 := httptest.NewRecorder()
+	router.ServeHTTP(rec3, req3)
+	assertStatus(t, rec3.Code, http.StatusOK)
+	var body3 map[string]any
+	decodeBody(t, rec3.Body.Bytes(), &body3)
+	foundHourlySlash := false
+	for _, item := range body3["items"].([]any) {
+		if item.(map[string]any)["categorized_job_title"].(string) == "Hourly Slash Role" {
+			foundHourlySlash = true
+			break
+		}
+	}
+	if !foundHourlySlash {
+		t.Fatalf("expected hourly slash role to pass annualized min salary filter, got %#v", body3)
+	}
 }
 
 func TestJobDetailEndpoint(t *testing.T) {

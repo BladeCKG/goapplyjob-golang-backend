@@ -27,6 +27,12 @@ const (
 	minSalaryStart    = 30000
 	minSalaryEnd      = 300000
 	minSalaryStep     = 10000
+	hoursPerYear      = 2080.0
+	daysPerYear       = 260.0
+	weeksPerYear      = 52.0
+	biweeksPerYear    = 26.0
+	monthsPerYear     = 12.0
+	minutesPerYear    = hoursPerYear * 60.0
 )
 
 var (
@@ -134,27 +140,50 @@ func (h *Handler) Register(router gin.IRouter) {
 
 func annualizedSalarySQL(expr string) string {
 	return fmt.Sprintf(`(%[1]s) * CASE
-		WHEN lower(trim(COALESCE(salary_type, '%[2]s'))) IN ('hourly', 'hour', 'hr')
-			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%hour%%'
-			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%/hr%%'
-			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%% hr%%'
-		THEN 2080.0
-		WHEN lower(trim(COALESCE(salary_type, '%[2]s'))) IN ('daily', 'day')
-			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%day%%'
-			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%/day%%'
-		THEN 260.0
-		WHEN lower(trim(COALESCE(salary_type, '%[2]s'))) IN ('weekly', 'week')
-			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%week%%'
-			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%/wk%%'
-			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%% wk%%'
-		THEN 52.0
+		WHEN lower(trim(COALESCE(salary_type, '%[2]s'))) IN ('yearly', 'year', 'annual')
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%year%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%annual%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%annually%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%per year%%'
+		THEN %[3]f
 		WHEN lower(trim(COALESCE(salary_type, '%[2]s'))) IN ('monthly', 'month')
 			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%month%%'
 			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%/mo%%'
 			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%% mo%%'
-		THEN 12.0
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%per month%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%month-salary%%'
+		THEN %[4]f
+		WHEN lower(trim(COALESCE(salary_type, '%[2]s'))) IN ('biweekly', 'bi-weekly')
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%biweekly%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%bi-weekly%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%per biweekly%%'
+		THEN %[5]f
+		WHEN lower(trim(COALESCE(salary_type, '%[2]s'))) IN ('weekly', 'week')
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%week%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%/wk%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%% wk%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%per week%%'
+		THEN %[6]f
+		WHEN lower(trim(COALESCE(salary_type, '%[2]s'))) IN ('daily', 'day')
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%day%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%/day%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%per day%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%per visit%%'
+		THEN %[7]f
+		WHEN lower(trim(COALESCE(salary_type, '%[2]s'))) IN ('hourly', 'hour', 'hr')
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%hour%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%/hr%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%% hr%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%per hour%%'
+		THEN %[8]f
+		WHEN lower(trim(COALESCE(salary_type, '%[2]s'))) IN ('minute', 'min')
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%minute%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%/min%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%% min%%'
+			OR lower(trim(COALESCE(salary_type, '%[2]s'))) LIKE '%%per minute%%'
+		THEN %[9]f
 		ELSE 1.0
-	END`, expr, defaultSalaryType)
+	END`, expr, defaultSalaryType, 1.0, monthsPerYear, biweeksPerYear, weeksPerYear, daysPerYear, hoursPerYear, minutesPerYear)
 }
 
 func parseCSVQuery(value string) []string {
@@ -339,7 +368,7 @@ func (h *Handler) listJobs(c *gin.Context) {
 	}
 	if minSalary := strings.TrimSpace(c.Query("min_salary")); minSalary != "" {
 		if parsed, err := strconv.ParseFloat(minSalary, 64); err == nil {
-			filters = append(filters, annualizedSalarySQL(`COALESCE(p.salary_min_usd, p.salary_min)`)+` >= ?`)
+			filters = append(filters, annualizedSalarySQL(`COALESCE(p.salary_min, p.salary_min_usd)`)+` >= ?`)
 			args = append(args, parsed)
 		}
 	}
@@ -372,7 +401,7 @@ func (h *Handler) listJobs(c *gin.Context) {
 	previewPerPage := max(h.cfg.PublicJobsMaxPerPage, 1)
 	idOrderBy := `created_at_source DESC, id DESC`
 	if c.DefaultQuery("sort_criteria", "date") == "salary" {
-		idOrderBy = annualizedSalarySQL(`COALESCE(salary_max_usd, salary_max, salary_min_usd, salary_min)`) + ` DESC, id DESC`
+		idOrderBy = annualizedSalarySQL(`COALESCE(salary_max, salary_max_usd, salary_min, salary_min_usd)`) + ` DESC, id DESC`
 	}
 
 	pageOut := page
