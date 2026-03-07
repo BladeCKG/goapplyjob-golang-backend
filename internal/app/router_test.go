@@ -94,7 +94,7 @@ func TestJobsPublicPreviewIsLimited(t *testing.T) {
 	}
 }
 
-func TestJobsDefaultSortUsesUpdatedAt(t *testing.T) {
+func TestJobsDefaultSortUsesCreatedAtSource(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
 	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (3001, 'https://example.com/old-updated', ?, 1, 0, 1, 0, '{}')`, time.Now().UTC().Format(time.RFC3339Nano))
@@ -120,7 +120,7 @@ func TestJobsDefaultSortUsesUpdatedAt(t *testing.T) {
 	var body map[string]any
 	decodeBody(t, rec.Body.Bytes(), &body)
 	items := body["items"].([]any)
-	if items[0].(map[string]any)["categorized_job_title"].(string) != "Newer Updated" || items[1].(map[string]any)["categorized_job_title"].(string) != "Older Updated" {
+	if items[0].(map[string]any)["categorized_job_title"].(string) != "Older Updated" || items[1].(map[string]any)["categorized_job_title"].(string) != "Newer Updated" {
 		t.Fatalf("unexpected order %#v", items)
 	}
 }

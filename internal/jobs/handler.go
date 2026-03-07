@@ -243,7 +243,7 @@ func (h *Handler) listJobs(c *gin.Context) {
 	}
 
 	previewPerPage := max(h.cfg.PublicJobsMaxPerPage, 1)
-	orderBy := `p.updated_at DESC, p.id DESC`
+	orderBy := `p.created_at_source DESC, p.id DESC`
 	if c.DefaultQuery("sort_criteria", "date") == "salary" {
 		orderBy = annualizedSalarySQL(`COALESCE(p.salary_max_usd, p.salary_max, p.salary_min_usd, p.salary_min)`) + ` DESC, p.id DESC`
 	}
