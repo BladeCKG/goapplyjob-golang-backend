@@ -79,6 +79,11 @@ func main() {
 		if err != nil {
 			log.Fatalf("copy %s: %v", tableName, err)
 		}
+		if !*timeOnly {
+			if err := resetPostgresSequence(ctx, targetDB, tableName); err != nil {
+				log.Fatalf("reset sequence %s: %v", tableName, err)
+			}
+		}
 		total += copied
 		log.Printf("[done] %s: %d rows", tableName, copied)
 	}
@@ -651,6 +656,24 @@ func contains(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func resetPostgresSequence(ctx context.Context, db *sql.DB, tableName string) error {
+	var sequenceName sql.NullString
+	if err := db.QueryRowContext(ctx, `SELECT pg_get_serial_sequence($1, 'id')`, tableName).Scan(&sequenceName); err != nil {
+		return err
+	}
+	if !sequenceName.Valid || strings.TrimSpace(sequenceName.String) == "" {
+		return nil
+	}
+	quotedSequence := quoteLiteral(sequenceName.String)
+	sqlText := fmt.Sprintf(`SELECT setval(%s, COALESCE((SELECT MAX(id) FROM %s), 1), true)`, quotedSequence, tableName)
+	_, err := db.ExecContext(ctx, sqlText)
+	return err
+}
+
+func quoteLiteral(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }
 
 func getenv(key, fallback string) string {
