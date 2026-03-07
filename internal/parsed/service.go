@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"regexp"
 	"sort"
 	"strconv"
@@ -348,8 +349,10 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	if err := rows.Err(); err != nil {
 		return 0, err
 	}
+	log.Printf("parsed-job-worker picked_pending_rows=%d", len(pending))
 
 	processed := 0
+	skipped := 0
 	for _, row := range pending {
 		payload := map[string]any{}
 		if !row.rawJSON.Valid || row.rawJSON.String == "" {
@@ -357,6 +360,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				return processed, err
 			}
 			processed++
+			skipped++
 			continue
 		}
 		if err := json.Unmarshal([]byte(row.rawJSON.String), &payload); err != nil {
@@ -364,8 +368,10 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				return processed, err
 			}
 			processed++
+			skipped++
 			continue
 		}
+		log.Printf("parsed-job-worker upsert_start raw_job_id=%d source=%s", row.id, row.source)
 		sourceCreatedAt := parseDT(payload["created_at"])
 		categorizedTitle := stringFromPayload(payload["categorizedJobTitle"])
 		categorizedFunction := stringFromPayload(payload["categorizedJobFunction"])
@@ -410,8 +416,10 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		}); err != nil {
 			return processed, err
 		}
+		log.Printf("parsed-job-worker upsert_done raw_job_id=%d source=%s", row.id, row.source)
 		processed++
 	}
+	log.Printf("parsed-job-worker batch_done rows=%d processed=%d skipped=%d", len(pending), processed, skipped)
 	return processed, nil
 }
 

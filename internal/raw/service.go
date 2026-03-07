@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/url"
 	"regexp"
 	"strings"
@@ -127,16 +128,19 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	if err := rows.Err(); err != nil {
 		return 0, err
 	}
+	log.Printf("raw-us-job-worker picked_unready_jobs=%d", len(jobs))
 
 	processed := 0
 	for _, job := range jobs {
 		targetURL := toTargetJobURLForSource(job.source, job.url)
+		log.Printf("raw-us-job-worker fetch_start job_id=%d source=%s target_url=%s", job.id, job.source, targetURL)
 		html, statusCode, err := s.ReadHTML(targetURL)
 		if err != nil {
 			return processed, err
 		}
 		switch {
 		case statusCode == statusNotFound:
+			log.Printf("raw-us-job-worker fetch_result job_id=%d status=404", job.id)
 			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
 				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_skippable = 1, retry_count = retry_count + 1 WHERE id = ?`, job.id)
 				return err
@@ -144,6 +148,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				return processed, err
 			}
 		case strings.TrimSpace(html) == "":
+			log.Printf("raw-us-job-worker fetch_result job_id=%d status=%d empty_html_or_error", job.id, statusCode)
 			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
 				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET retry_count = retry_count + 1 WHERE id = ?`, job.id)
 				return err
@@ -151,6 +156,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				return processed, err
 			}
 		default:
+			log.Printf("raw-us-job-worker parse_start job_id=%d source=%s", job.id, job.source)
 			payload, err := s.ParseHTML(html)
 			if err != nil {
 				return processed, err
@@ -164,6 +170,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			if _, ok := payload["url"]; !ok {
 				payload["url"] = job.url
 			}
+			log.Printf("raw-us-job-worker parse_done job_id=%d parsed_keys=%d", job.id, len(payload))
 			rawJSON, err := json.Marshal(payload)
 			if err != nil {
 				return processed, err

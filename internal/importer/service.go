@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -242,6 +243,7 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 	if len(buffer) == 0 {
 		return 0, 0, 0, map[string]SitemapRow{}
 	}
+	log.Printf("raw-import-worker flush_buffer_start source=%s rows=%d", source, len(buffer))
 	inserted, updated, failedDB := 0, 0, 0
 	failedRows := map[string]SitemapRow{}
 	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
@@ -303,17 +305,20 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 		return tx.Commit()
 	})
 	if err != nil && database.IsLockedError(err) {
+		log.Printf("raw-import-worker flush_buffer_failed source=%s rows=%d reason=locked", source, len(buffer))
 		for url, row := range buffer {
 			failedRows[url] = row
 		}
 		return 0, 0, len(buffer), failedRows
 	}
 	if err != nil {
+		log.Printf("raw-import-worker flush_buffer_failed source=%s rows=%d error=%v", source, len(buffer), err)
 		for url, row := range buffer {
 			failedRows[url] = row
 		}
 		return 0, 0, len(buffer), failedRows
 	}
+	log.Printf("raw-import-worker flush_buffer_done source=%s inserted=%d updated=%d failed_db=%d", source, inserted, updated, failedDB)
 	return inserted, updated, failedDB, failedRows
 }
 
@@ -346,6 +351,7 @@ func (s *Service) ImportRawUSJobsRows(rows []SitemapRow, batchSize int, source .
 	if len(source) > 0 && strings.TrimSpace(source[0]) != "" {
 		rowSource = strings.TrimSpace(source[0])
 	}
+	log.Printf("raw-import-worker import_rows_start source=%s rows=%d batch_size=%d", rowSource, len(rows), batchSize)
 
 	stats := Stats{}
 	buffer := map[string]SitemapRow{}
@@ -381,6 +387,15 @@ func (s *Service) ImportRawUSJobsRows(rows []SitemapRow, batchSize int, source .
 			succeededRows[url] = row
 		}
 	}
+	log.Printf(
+		"raw-import-worker import_rows_done source=%s seen=%d inserted=%d updated=%d failed_db=%d failed_rows=%d",
+		rowSource,
+		stats.Seen,
+		stats.Inserted,
+		stats.Updated,
+		stats.FailedDB,
+		len(failedRows),
+	)
 	return stats, failedRows, succeededRows, nil
 }
 
@@ -433,7 +448,11 @@ func (s *Service) PickUnconsumedPayloads(limit int, enabledSources map[string]st
 			result = append(result, item)
 		}
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	log.Printf("raw-import-worker picked_payloads=%d limit=%d", len(result), limit)
+	return result, nil
 }
 
 func sortedSourceNames(values map[string]struct{}) []string {
@@ -450,6 +469,9 @@ func (s *Service) DeletePayload(payloadID int64) error {
 		_, execErr := s.DB.SQL.Exec(`DELETE FROM watcher_payloads WHERE id = ?`, payloadID)
 		return execErr
 	})
+	if err == nil {
+		log.Printf("raw-import-worker payload_deleted payload_id=%d", payloadID)
+	}
 	return err
 }
 
@@ -491,6 +513,9 @@ func (s *Service) ReplacePayloadRows(payloadID int64, rows []SitemapRow) error {
 		_, execErr := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, rowsListToXML(rows), payloadID)
 		return execErr
 	})
+	if err == nil {
+		log.Printf("raw-import-worker payload_updated payload_id=%d remaining_rows=%d", payloadID, len(rows))
+	}
 	return err
 }
 

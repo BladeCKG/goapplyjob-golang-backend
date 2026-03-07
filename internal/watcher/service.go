@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/url"
 	"regexp"
 	"sort"
@@ -135,20 +136,27 @@ func (s *Service) RunForever(runOnce bool) error {
 }
 
 func (s *Service) RunOnce() error {
+	log.Printf("watcher cycle_start enabled_sources=%v", sortedSourceNames(s.Config.EnabledSources))
 	if strings.TrimSpace(s.Config.URL) != "" && s.isSourceEnabled(sourceName) {
+		log.Printf("watcher source_start source=%s runner=runOnceRemoteRocketship", sourceName)
 		if err := s.runOnceRemoteRocketship(); err != nil {
 			return err
 		}
+		log.Printf("watcher source_done source=%s runner=runOnceRemoteRocketship", sourceName)
 	}
 	if strings.TrimSpace(s.Config.BuiltinBaseURL) != "" && s.isSourceEnabled(sourceBuiltin) {
+		log.Printf("watcher source_start source=%s runner=runOnceBuiltin", sourceBuiltin)
 		if err := s.runOnceBuiltin(); err != nil {
 			return err
 		}
+		log.Printf("watcher source_done source=%s runner=runOnceBuiltin", sourceBuiltin)
 	}
 	if strings.TrimSpace(s.Config.WorkableAPIURL) != "" && s.isSourceEnabled("workable") {
+		log.Printf("watcher source_start source=workable runner=runOnceWorkable")
 		if err := s.runOnceWorkable(); err != nil {
 			return err
 		}
+		log.Printf("watcher source_done source=workable runner=runOnceWorkable")
 	}
 	return nil
 }
@@ -263,6 +271,13 @@ func (s *Service) runOnceBuiltin() error {
 	payloadsCreated := 0
 	phase1BoundaryMatched := false
 	checkpointEveryPages := max(s.Config.BuiltinCheckpointPages, 1)
+	log.Printf(
+		"Builtin watcher cycle_start next_page=%d last_job_url=%s last_post_date=%s pages_per_cycle=%d",
+		nextPage,
+		lastJobURL,
+		lastPostDate,
+		s.Config.BuiltinPagesPerCycle,
+	)
 	saveCheckpoint := func(nextPageValue int) error {
 		nextSavedPage := nextPageValue
 		if nextSavedPage < 1 {
@@ -282,6 +297,7 @@ func (s *Service) runOnceBuiltin() error {
 		probePage := currentPage + 1
 		for probePage <= s.Config.BuiltinMaxPage && pagesScanned < s.Config.BuiltinPagesPerCycle {
 			pageURL := strings.ReplaceAll(s.Config.BuiltinBaseURL, "{page}", strconv.Itoa(probePage))
+			log.Printf("Builtin phase1 fetch_start page=%d url=%s", probePage, pageURL)
 			htmlText, err := s.FetchText(pageURL)
 			if err != nil {
 				return err
@@ -314,6 +330,7 @@ func (s *Service) runOnceBuiltin() error {
 	skipPhase2UntilBoundary := !phase1BoundaryMatched && (lastJobURL != "" || lastPostDateDT != nil)
 	for currentPage >= 1 && pagesScanned < s.Config.BuiltinPagesPerCycle {
 		pageURL := strings.ReplaceAll(s.Config.BuiltinBaseURL, "{page}", strconv.Itoa(currentPage))
+		log.Printf("Builtin phase2 fetch_start page=%d url=%s", currentPage, pageURL)
 		htmlText, err := s.FetchText(pageURL)
 		if err != nil {
 			return err
@@ -359,7 +376,9 @@ func (s *Service) runOnceWorkable() error {
 	currentURL := workable.BuildAPIURL(s.Config.WorkableAPIURL, "", max(s.Config.WorkablePageLimit, 1))
 	pageCount := 0
 	payloadsCreated := 0
+	log.Printf("Workable watcher cycle_start page_limit=%d", s.Config.WorkablePageLimit)
 	for currentURL != "" && pageCount < 10 {
+		log.Printf("Workable fetch_start url=%s", currentURL)
 		htmlText, err := s.FetchText(currentURL)
 		if err != nil {
 			return err
@@ -368,6 +387,7 @@ func (s *Service) runOnceWorkable() error {
 		if len(rows) == 0 && skipped > 0 {
 			break
 		}
+		log.Printf("Workable fetch_done jobs=%d", len(rows))
 		if len(rows) > 0 {
 			if _, err := s.saveDeltaPayloadForSource("workable", currentURL, payloadTypeDelta, workable.SerializeImportRows(rows)); err != nil {
 				return err
