@@ -180,7 +180,7 @@ This repo includes `.github/workflows/workers-cron.yml` for scheduled worker exe
 
 Schedule:
 
-* every hour: `watcher` and `importer`
+* every 3 hours: `watcher` and `importer`
 * every 3 hours: `parsedfreshness`
 * manual `workflow_dispatch`: runs all configured worker steps immediately
 

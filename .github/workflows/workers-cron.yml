@@ -33,12 +33,14 @@ jobs:
       - name: Run every-3-hours import worker
         env:
           RAW_IMPORT_RUN_ONCE: "true"
-          RAW_IMPORT_BATCH_SIZE: "300"
+          RAW_IMPORT_BATCH_SIZE: "1500"
+          RAW_IMPORT_PAYLOADS_PER_CYCLE: "10"
         run: go run ./cmd/importer
 
-      - name: Run every-6-hours workers
+      - name: Run every-3-hours workers
         env:
           PARSED_JOB_RUN_ONCE: "true"
+          PARSED_JOB_WORKER_BATCH_SIZE: "400"
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             go run ./cmd/parsedfreshness
@@ -46,8 +48,8 @@ jobs:
           fi
 
           HOUR="$(date -u +%H)"
-          if [ $((10#$HOUR % 6)) -eq 0 ]; then
+          if [ $((10#$HOUR % 3)) -eq 0 ]; then
             go run ./cmd/parsedfreshness
           else
-            echo "Skipping 6-hour workers at hour=$HOUR (UTC)."
+            echo "Skipping 3-hour workers at hour=$HOUR (UTC)."
           fi
