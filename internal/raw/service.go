@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"goapplyjob-golang-backend/internal/database"
-	"goapplyjob-golang-backend/internal/sources/builtin"
+	"goapplyjob-golang-backend/internal/sources/plugins"
 )
 
 const statusNotFound = 404
@@ -82,24 +82,22 @@ func toTargetJobURL(rawURL string) string {
 }
 
 func toTargetJobURLForSource(source, rawURL string) string {
-	if source == sourceBuiltin {
-		return rawURL
+	if plugin, ok := plugins.Get(source); ok && plugin.ToTargetJobURL != nil {
+		return plugin.ToTargetJobURL(rawURL)
 	}
 	return toTargetJobURL(rawURL)
 }
 
 func parseHTMLForSource(source, html, sourceURL string) map[string]any {
-	switch source {
-	case sourceBuiltin:
-		return builtin.ExtractJob(html, "")
-	default:
-		parser := New(nil).ParseHTML
-		payload, _ := parser(html)
-		if payload == nil {
-			return map[string]any{}
-		}
-		return payload
+	if plugin, ok := plugins.Get(source); ok && plugin.ParseRawHTML != nil {
+		return plugin.ParseRawHTML(html, sourceURL)
 	}
+	parser := New(nil).ParseHTML
+	payload, _ := parser(html)
+	if payload == nil {
+		return map[string]any{}
+	}
+	return payload
 }
 
 func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error) {

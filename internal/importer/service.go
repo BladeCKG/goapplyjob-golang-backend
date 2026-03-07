@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/sources/plugins"
+	"goapplyjob-golang-backend/internal/sources/workable"
 )
 
 const (
@@ -49,6 +51,7 @@ type Service struct {
 const sourceName = "remoterocketship"
 const (
 	sourceBuiltin           = "builtin"
+	sourceWorkable          = "workable"
 	payloadTypeXML          = "delta_xml"
 	payloadTypeJSON         = "delta"
 	defaultPayloadsPerCycle = 50
@@ -126,6 +129,19 @@ func ParseRowsForBuiltinPayload(payloadText string) ([]SitemapRow, int) {
 		rows = append(rows, SitemapRow{URL: rowURL, PostDate: postDate})
 	}
 	return rows, skipped
+}
+
+func ParseRowsForWorkablePayload(payloadText string) ([]SitemapRow, []map[string]any, int) {
+	rows, skipped := workable.ParseImportRows(payloadText)
+	out := make([]SitemapRow, 0, len(rows))
+	rawPayloads := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		postDate, _ := row["post_date"].(time.Time)
+		out = append(out, SitemapRow{URL: stringValue(row["url"]), PostDate: postDate})
+		rawPayload, _ := row["raw_payload"].(map[string]any)
+		rawPayloads = append(rawPayloads, rawPayload)
+	}
+	return out, rawPayloads, skipped
 }
 
 func iterSitemapRows(xmlPath string) ([][2]string, error) {
@@ -458,6 +474,15 @@ func (s *Service) ReplaceBuiltinPayloadRows(payloadID int64, rows []SitemapRow) 
 	return err
 }
 
+func (s *Service) ReplaceSourcePayloadRows(payloadID int64, source string, rows []map[string]any) error {
+	plugin, ok := plugins.Get(source)
+	if !ok || plugin.SerializeImportRows == nil {
+		return errors.New("unsupported source payload serializer")
+	}
+	_, err := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, plugin.SerializeImportRows(rows), payloadID)
+	return err
+}
+
 func FailedRowsToList(rows map[string]time.Time) []SitemapRow {
 	out := make([]SitemapRow, 0, len(rows))
 	for url, postDate := range rows {
@@ -495,4 +520,9 @@ func (s *Service) ProcessImportFile(xmlPath, importDir, importedPrefix string, b
 func MarshalRows(rows map[string]time.Time) string {
 	payload, _ := json.Marshal(rows)
 	return string(payload)
+}
+
+func stringValue(value any) string {
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
 }

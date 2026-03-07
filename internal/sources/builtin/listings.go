@@ -9,6 +9,16 @@ import (
 	"time"
 )
 
+const (
+	Source      = "builtin"
+	PayloadType = "delta"
+)
+
+type ImportRow struct {
+	URL      string
+	PostDate time.Time
+}
+
 var publishedDateByJobIDRegex = regexp.MustCompile(`(?is)\{[^{}]*['"]id['"]\s*:\s*(\d+)[^{}]*['"]published_date['"]\s*:\s*['"]([^'"]+)['"][^{}]*\}`)
 
 func ExtractJobListings(htmlText string) []map[string]any {
@@ -133,4 +143,48 @@ func normalizePostDate(value string) string {
 		return parsed.UTC().Format(time.RFC3339Nano)
 	}
 	return value
+}
+
+func ParseImportRows(payloadText string) ([]ImportRow, int) {
+	var payload []map[string]any
+	if err := json.Unmarshal([]byte(payloadText), &payload); err != nil {
+		return nil, 1
+	}
+	rows := make([]ImportRow, 0, len(payload))
+	skipped := 0
+	for _, item := range payload {
+		rowURL, _ := item["url"].(string)
+		postDateRaw, _ := item["post_date"].(string)
+		if strings.TrimSpace(rowURL) == "" || strings.TrimSpace(postDateRaw) == "" {
+			skipped++
+			continue
+		}
+		postDate, err := time.Parse(time.RFC3339Nano, normalizePostDate(postDateRaw))
+		if err != nil {
+			postDate, err = time.Parse(time.RFC3339, normalizePostDate(postDateRaw))
+		}
+		if err != nil {
+			skipped++
+			continue
+		}
+		rows = append(rows, ImportRow{URL: rowURL, PostDate: postDate.UTC()})
+	}
+	return rows, skipped
+}
+
+func SerializeImportRows(rows []ImportRow) string {
+	payload := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		payload = append(payload, map[string]any{
+			"url":          row.URL,
+			"post_date":    row.PostDate.UTC().Format(time.RFC3339Nano),
+			"is_ready":     false,
+			"is_skippable": false,
+			"is_parsed":    false,
+			"retry_count":  0,
+			"raw_json":     nil,
+		})
+	}
+	body, _ := json.Marshal(payload)
+	return string(body)
 }

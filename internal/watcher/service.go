@@ -17,6 +17,7 @@ import (
 
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/sources/builtin"
+	"goapplyjob-golang-backend/internal/sources/workable"
 )
 
 const (
@@ -42,6 +43,8 @@ type Config struct {
 	BuiltinBaseURL       string
 	BuiltinMaxPage       int
 	BuiltinPagesPerCycle int
+	WorkableAPIURL       string
+	WorkablePageLimit    int
 	EnabledSources       map[string]struct{}
 }
 
@@ -65,6 +68,7 @@ func New(config Config, db *database.DB) *Service {
 		"interval_minutes":            config.IntervalMinutes,
 		"sample_kb":                   config.SampleKB,
 		"enabled_sources":             sortedSourceNames(config.EnabledSources),
+		"workable_api_url":            config.WorkableAPIURL,
 		"running":                     false,
 		"last_check_at":               nil,
 		"last_change_at":              nil,
@@ -137,6 +141,11 @@ func (s *Service) RunOnce() error {
 	}
 	if strings.TrimSpace(s.Config.BuiltinBaseURL) != "" && s.isSourceEnabled(sourceBuiltin) {
 		if err := s.runOnceBuiltin(); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(s.Config.WorkableAPIURL) != "" && s.isSourceEnabled("workable") {
+		if err := s.runOnceWorkable(); err != nil {
 			return err
 		}
 	}
@@ -331,6 +340,43 @@ func (s *Service) runOnceBuiltin() error {
 		"last_job_url":                valueOrNil(lastJobURL),
 		"last_scan_at":                utcNowISO(),
 		"pages_scanned_last_cycle":    pagesScanned,
+		"payloads_created_last_cycle": payloadsCreated,
+	})
+}
+
+func (s *Service) runOnceWorkable() error {
+	currentURL := workable.BuildAPIURL(s.Config.WorkableAPIURL, "", max(s.Config.WorkablePageLimit, 1))
+	pageCount := 0
+	payloadsCreated := 0
+	for currentURL != "" && pageCount < 10 {
+		htmlText, err := s.FetchText(currentURL)
+		if err != nil {
+			return err
+		}
+		rows, skipped := workable.NormalizeJobs(htmlText)
+		if len(rows) == 0 && skipped > 0 {
+			break
+		}
+		if len(rows) > 0 {
+			if _, err := s.saveDeltaPayloadForSource("workable", currentURL, payloadTypeDelta, workable.SerializeImportRows(rows)); err != nil {
+				return err
+			}
+			payloadsCreated++
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(htmlText), &payload); err != nil {
+			break
+		}
+		nextToken, _ := payload["nextPageToken"].(string)
+		if strings.TrimSpace(nextToken) == "" {
+			break
+		}
+		currentURL = workable.BuildAPIURL(s.Config.WorkableAPIURL, nextToken, max(s.Config.WorkablePageLimit, 1))
+		pageCount++
+	}
+	return s.saveStatePayload("workable", map[string]any{
+		"last_scan_at":                utcNowISO(),
+		"pages_scanned_last_cycle":    pageCount + 1,
 		"payloads_created_last_cycle": payloadsCreated,
 	})
 }
