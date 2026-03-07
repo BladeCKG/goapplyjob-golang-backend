@@ -2,7 +2,7 @@ name: Backend Workers Cron
 
 on:
   schedule:
-    - cron: "0 */3 * * *"
+    - cron: "0 * * * *"
   workflow_dispatch:
 
 jobs:
@@ -12,7 +12,7 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       WATCH_URL: ${{ secrets.WATCH_URL }}
-      ENABLED_SOURCES: ${{ secrets.ENABLED_SOURCES }}
+      ENABLED_SOURCES: ${{ vars.ENABLED_SOURCES || 'remoterocketship' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,32 +26,23 @@ jobs:
       - name: Run database migrations
         run: go run ./cmd/migrate
 
-      - name: Run every-3-hours watcher
+      - name: Run hourly watcher
         env:
           WATCH_RUN_ONCE: "true"
         run: go run ./cmd/watcher
 
-      - name: Run every-3-hours import worker
+      - name: Run hourly import worker
         env:
           RAW_IMPORT_RUN_ONCE: "true"
-          RAW_IMPORT_BATCH_SIZE: "1500"
-          RAW_IMPORT_PAYLOADS_PER_CYCLE: "10"
+          RAW_IMPORT_BATCH_SIZE: "800"
+          RAW_IMPORT_PAYLOADS_PER_CYCLE: "4"
         run: go run ./cmd/importer
 
-      - name: Run every-3-hours workers
+      - name: Run hourly workers
         env:
           PARSED_JOB_RUN_ONCE: "true"
           RAW_JOB_RETENTION_DAYS: ${{ secrets.RAW_JOB_RETENTION_DAYS }}
-          PARSED_JOB_WORKER_BATCH_SIZE: "600"
+          RAW_JOB_WORKER_BATCH_SIZE: "320"
+          PARSED_JOB_WORKER_BATCH_SIZE: "260"
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            go run ./cmd/parsedfreshness
-            exit 0
-          fi
-
-          HOUR="$(date -u +%H)"
-          if [ $((10#$HOUR % 3)) -eq 0 ]; then
-            go run ./cmd/parsedfreshness
-          else
-            echo "Skipping 3-hour workers at hour=$HOUR (UTC)."
-          fi
+          go run ./cmd/parsedfreshness
