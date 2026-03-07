@@ -717,6 +717,54 @@ func TestPasswordSignupAndLoginFlow(t *testing.T) {
 	assertStatus(t, badRec.Code, http.StatusUnauthorized)
 }
 
+func TestSupabaseGoogleLoginFlow(t *testing.T) {
+	cfg := config.Load()
+	cfg.DatabaseURL = "file:test_supabase_login?mode=memory&cache=shared"
+	cfg.SupabaseAnonKey = "anon-key"
+	supabase := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/auth/v1/user" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer access-token" || r.Header.Get("apikey") != "anon-key" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"email": "google-user@example.com",
+			"app_metadata": map[string]any{
+				"provider": "google",
+			},
+		})
+	}))
+	defer supabase.Close()
+	cfg.SupabaseURL = supabase.URL
+
+	db, err := database.Open(cfg.DatabaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	router := NewRouter(cfg, db)
+
+	body, _ := json.Marshal(map[string]string{"access_token": "access-token"})
+	req := httptest.NewRequest(http.MethodPost, "/auth/oauth/supabase/google", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	cookies := rec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatalf("expected auth cookie")
+	}
+	meReq := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	meReq.AddCookie(cookies[0])
+	meRec := httptest.NewRecorder()
+	router.ServeHTTP(meRec, meReq)
+	assertStatus(t, meRec.Code, http.StatusOK)
+}
+
 func TestPasswordSignupValidatesPasswordLength(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()

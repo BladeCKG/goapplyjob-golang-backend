@@ -19,6 +19,8 @@ type Config struct {
 	AuthCookieSameSite            string
 	AuthCookieDomain              string
 	AuthDebugReturnCode           bool
+	SupabaseURL                   string
+	SupabaseAnonKey               string
 	SMTPHost                      string
 	SMTPPort                      int
 	SMTPUser                      string
@@ -67,6 +69,8 @@ func Load() Config {
 		AuthCookieSameSite:            getenv("AUTH_COOKIE_SAMESITE", "lax"),
 		AuthCookieDomain:              os.Getenv("AUTH_COOKIE_DOMAIN"),
 		AuthDebugReturnCode:           getenvBool("AUTH_DEBUG_RETURN_CODE", false),
+		SupabaseURL:                   getenv("SUPABASE_URL", ""),
+		SupabaseAnonKey:               getenv("SUPABASE_ANON_KEY", ""),
 		SMTPHost:                      getenv("SMTP_HOST", ""),
 		SMTPPort:                      getenvInt("SMTP_PORT", 587),
 		SMTPUser:                      getenv("SMTP_USER", ""),

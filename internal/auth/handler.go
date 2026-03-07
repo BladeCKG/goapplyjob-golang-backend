@@ -7,10 +7,13 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/mail"
+	"net/url"
 	"strings"
 	"time"
 
@@ -29,8 +32,9 @@ const (
 )
 
 type Handler struct {
-	cfg config.Config
-	db  *database.DB
+	cfg        config.Config
+	db         *database.DB
+	httpClient *http.Client
 }
 
 type User struct {
@@ -39,13 +43,20 @@ type User struct {
 }
 
 func NewHandler(cfg config.Config, db *database.DB) *Handler {
-	return &Handler{cfg: cfg, db: db}
+	return &Handler{
+		cfg: cfg,
+		db:  db,
+		httpClient: &http.Client{
+			Timeout: 15 * time.Second,
+		},
+	}
 }
 
 func (h *Handler) Register(router gin.IRouter) {
 	router.POST("/auth/login/request-code", h.requestCode)
 	router.POST("/auth/login/verify-code", h.verifyCode)
 	router.POST("/auth/login/verify-link", h.verifyLink)
+	router.POST("/auth/oauth/supabase/google", h.supabaseGoogleLogin)
 	router.POST("/auth/password/signup", h.passwordSignup)
 	router.POST("/auth/password/login", h.passwordLogin)
 	router.GET("/auth/me", h.me)
@@ -331,6 +342,47 @@ func (h *Handler) passwordSignup(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+func (h *Handler) supabaseGoogleLogin(c *gin.Context) {
+	var payload struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid request"})
+		return
+	}
+	email, err := h.fetchSupabaseUserEmail(payload.AccessToken)
+	if err != nil {
+		status := http.StatusUnauthorized
+		switch {
+		case errors.Is(err, errMissingAccessToken):
+			status = http.StatusBadRequest
+		case errors.Is(err, errSupabaseNotConfigured):
+			status = http.StatusInternalServerError
+		case errors.Is(err, errSupabaseUnavailable):
+			status = http.StatusServiceUnavailable
+		}
+		c.JSON(status, gin.H{"detail": err.Error()})
+		return
+	}
+
+	userID, err := h.getOrCreateUser(c, email)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create session"})
+		return
+	}
+	if err := h.ensureDefaultFreeSubscription(c, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create session"})
+		return
+	}
+	sessionToken, err := h.createSessionForUser(c, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create session"})
+		return
+	}
+	h.setAuthCookie(c, sessionToken)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 func (h *Handler) passwordLogin(c *gin.Context) {
 	var payload struct {
 		Email    string `json:"email"`
@@ -591,4 +643,68 @@ func randomToken() string {
 	buf := make([]byte, 36)
 	_, _ = rand.Read(buf)
 	return base64.RawURLEncoding.EncodeToString(buf)
+}
+
+var (
+	errMissingAccessToken    = errors.New("Access token is required")
+	errSupabaseNotConfigured = errors.New("Supabase OAuth is not configured")
+	errSupabaseUnavailable   = errors.New("Could not reach Supabase auth")
+	errInvalidSupabaseToken  = errors.New("Invalid Supabase access token")
+	errSupabaseEmailMissing  = errors.New("Supabase user email is missing")
+	errSupabaseWrongProvider = errors.New("Supabase provider is not Google")
+)
+
+func (h *Handler) fetchSupabaseUserEmail(accessToken string) (string, error) {
+	token := strings.TrimSpace(accessToken)
+	if token == "" {
+		return "", errMissingAccessToken
+	}
+	baseURL := strings.TrimRight(strings.TrimSpace(h.cfg.SupabaseURL), "/")
+	anonKey := strings.TrimSpace(h.cfg.SupabaseAnonKey)
+	if baseURL == "" || anonKey == "" {
+		return "", errSupabaseNotConfigured
+	}
+
+	endpoint, err := url.Parse(baseURL + "/auth/v1/user")
+	if err != nil {
+		return "", errSupabaseUnavailable
+	}
+	req, err := http.NewRequest(http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return "", errSupabaseUnavailable
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("apikey", anonKey)
+
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return "", errSupabaseUnavailable
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", errInvalidSupabaseToken
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", errSupabaseUnavailable
+	}
+	var payload struct {
+		Email       string `json:"email"`
+		AppMetadata struct {
+			Provider string `json:"provider"`
+		} `json:"app_metadata"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", errInvalidSupabaseToken
+	}
+	email, err := normalizeEmail(payload.Email)
+	if err != nil {
+		return "", errSupabaseEmailMissing
+	}
+	provider := strings.ToLower(strings.TrimSpace(payload.AppMetadata.Provider))
+	if provider != "" && provider != "google" {
+		return "", errSupabaseWrongProvider
+	}
+	return email, nil
 }
