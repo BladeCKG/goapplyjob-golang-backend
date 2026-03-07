@@ -53,6 +53,17 @@ func TestCryptoGatewayFactorySupportsMaxelPay(t *testing.T) {
 	}
 }
 
+func TestCryptoGatewayFactorySupportsOxaPay(t *testing.T) {
+	cfg := config.Config{CryptoPaymentProvider: "oxa-pay"}
+	gateway, err := GetGateway(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := gateway.(*OxaPayGateway); !ok {
+		t.Fatalf("expected OxaPayGateway, got %T", gateway)
+	}
+}
+
 func TestNowPaymentsVerifyWebhookSignatureAcceptsValidSignature(t *testing.T) {
 	cfg := config.Config{NowPaymentsIPNSecret: "secret-token"}
 	gateway := NewNowPaymentsGateway(cfg)

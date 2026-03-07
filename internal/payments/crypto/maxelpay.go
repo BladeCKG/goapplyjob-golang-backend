@@ -29,14 +29,19 @@ func (g *MaxelPayGateway) CreateInvoice(request InvoiceRequest) (InvoiceResult, 
 	if strings.TrimSpace(request.CustomerEmail) == "" {
 		return InvoiceResult{}, fmt.Errorf("Maxelpay requires a customer email address")
 	}
+	invoiceURL := request.SuccessURL
+	if strings.TrimSpace(fmt.Sprintf("%v", firstAny(map[string]any{"result": request.SuccessURL}["result"]))) != "" {
+		invoiceURL = strings.TrimSpace(fmt.Sprintf("%v", firstAny(map[string]any{"result": request.SuccessURL}["result"])))
+	}
 	return InvoiceResult{
 		ProviderInvoiceID: "maxelpay_invoice_" + request.OrderID,
-		InvoiceURL:        request.SuccessURL,
+		InvoiceURL:        invoiceURL,
 		ProviderPayload: map[string]any{
 			"orderID":   request.OrderID,
 			"provider":  "maxelpay",
 			"userEmail": request.CustomerEmail,
 			"userName":  firstAny(request.CustomerName, strings.Split(request.CustomerEmail, "@")[0]),
+			"result":    invoiceURL,
 		},
 	}, nil
 }

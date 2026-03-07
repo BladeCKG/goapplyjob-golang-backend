@@ -34,6 +34,9 @@ type Config struct {
 	MaxelPaySiteName              string
 	MaxelPaySiteURL               string
 	MaxelPayWebhookURL            string
+	OxaPayEnv                     string
+	OxaPayAPIBaseURL              string
+	OxaPayMerchantAPIKey          string
 	NowPaymentsAPIBaseURL         string
 	NowPaymentsAPIKey             string
 	NowPaymentsDefaultPayCurrency string
@@ -71,6 +74,9 @@ func Load() Config {
 		MaxelPaySiteName:              getenv("MAXELPAY_SITE_NAME", "GoApplyJob"),
 		MaxelPaySiteURL:               getenv("MAXELPAY_SITE_URL", "http://localhost:3000"),
 		MaxelPayWebhookURL:            getenv("MAXELPAY_WEBHOOK_URL", "http://localhost:8000/pricing/webhooks/crypto"),
+		OxaPayEnv:                     getenv("OXAPAY_ENV", ""),
+		OxaPayAPIBaseURL:              getenv("OXAPAY_API_BASE_URL", "https://api.oxapay.com/v1"),
+		OxaPayMerchantAPIKey:          getenv("OXAPAY_MERCHANT_API_KEY", ""),
 		NowPaymentsAPIBaseURL:         getenv("NOWPAYMENTS_API_BASE_URL", "https://api.nowpayments.io/v1"),
 		NowPaymentsAPIKey:             getenv("NOWPAYMENTS_API_KEY", ""),
 		NowPaymentsDefaultPayCurrency: getenv("NOWPAYMENTS_DEFAULT_PAY_CURRENCY", "usdttrc20"),

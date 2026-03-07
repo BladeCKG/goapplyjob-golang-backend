@@ -16,6 +16,8 @@ func GetGateway(cfg config.Config) (Gateway, error) {
 		return NewCoinPaymentsGateway(cfg), nil
 	case "maxelpay", "maxel_pay", "maxel-pay":
 		return NewMaxelPayGateway(cfg), nil
+	case "oxapay", "oxa-pay", "oxa_pay":
+		return NewOxaPayGateway(cfg), nil
 	default:
 		return nil, fmt.Errorf("unsupported crypto payment provider: %s", provider)
 	}
