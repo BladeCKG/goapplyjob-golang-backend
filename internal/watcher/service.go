@@ -10,13 +10,20 @@ import (
 	"errors"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/sources/builtin"
 )
 
-const sourceName = "remoterocketship"
+const (
+	sourceName       = "remoterocketship"
+	sourceBuiltin    = "builtin"
+	payloadTypeDelta = "delta"
+	payloadTypeXML   = "delta_xml"
+)
 
 var (
 	lastmodPattern     = regexp.MustCompile(`(?is)<lastmod>\s*([^<]+?)\s*</lastmod>`)
@@ -26,11 +33,14 @@ var (
 )
 
 type Config struct {
-	Enabled         bool
-	URL             string
-	IntervalMinutes float64
-	SampleKB        int
-	TimeoutSeconds  float64
+	Enabled              bool
+	URL                  string
+	IntervalMinutes      float64
+	SampleKB             int
+	TimeoutSeconds       float64
+	BuiltinBaseURL       string
+	BuiltinMaxPage       int
+	BuiltinPagesPerCycle int
 }
 
 type FetchSampleFunc func() ([]byte, error)
@@ -41,6 +51,7 @@ type Service struct {
 	DB          *database.DB
 	FetchSample FetchSampleFunc
 	FetchFull   FetchFullFunc
+	FetchText   func(string) (string, error)
 	status      map[string]any
 }
 
@@ -65,6 +76,7 @@ func New(config Config, db *database.DB) *Service {
 	}
 	svc.FetchSample = func() ([]byte, error) { return nil, errors.New("fetch sample not configured") }
 	svc.FetchFull = func() ([]byte, error) { return nil, errors.New("fetch full not configured") }
+	svc.FetchText = func(string) (string, error) { return "", errors.New("fetch text not configured") }
 	return svc
 }
 
@@ -87,8 +99,8 @@ func (s *Service) RunForever(runOnce bool) error {
 		s.setStatus(map[string]any{"last_error": nil})
 		return nil
 	}
-	if strings.TrimSpace(s.Config.URL) == "" {
-		s.setStatus(map[string]any{"last_error": "WATCH_URL is not set"})
+	if strings.TrimSpace(s.Config.URL) == "" && strings.TrimSpace(s.Config.BuiltinBaseURL) == "" {
+		s.setStatus(map[string]any{"last_error": "No source configured"})
 		return nil
 	}
 
@@ -111,6 +123,20 @@ func (s *Service) RunForever(runOnce bool) error {
 }
 
 func (s *Service) RunOnce() error {
+	if strings.TrimSpace(s.Config.URL) != "" {
+		if err := s.runOnceRemoteRocketship(); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(s.Config.BuiltinBaseURL) != "" {
+		if err := s.runOnceBuiltin(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) runOnceRemoteRocketship() error {
 	sample, err := s.FetchSample()
 	if err != nil {
 		s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
@@ -203,6 +229,105 @@ func (s *Service) RunOnce() error {
 	return nil
 }
 
+func (s *Service) runOnceBuiltin() error {
+	statePayload, err := s.loadStatePayload(sourceBuiltin)
+	if err != nil {
+		return err
+	}
+	nextPage := intFromAny(statePayload["next_page"], s.Config.BuiltinMaxPage)
+	if nextPage <= 0 {
+		nextPage = s.Config.BuiltinMaxPage
+	}
+	lastJobURL, _ := statePayload["last_job_url"].(string)
+	lastPostDate, _ := statePayload["last_post_date"].(string)
+	lastPostDateDT := parseISOTime(lastPostDate)
+	currentPage := nextPage
+	pagesScanned := 0
+	payloadsCreated := 0
+	firstSeenMarkerUpdated := false
+	phase1BoundaryMatched := false
+
+	if (lastJobURL != "" || lastPostDateDT != nil) && currentPage < s.Config.BuiltinMaxPage {
+		probePage := currentPage + 1
+		for probePage <= s.Config.BuiltinMaxPage && pagesScanned < s.Config.BuiltinPagesPerCycle {
+			pageURL := strings.ReplaceAll(s.Config.BuiltinBaseURL, "{page}", strconv.Itoa(probePage))
+			htmlText, err := s.FetchText(pageURL)
+			if err != nil {
+				return err
+			}
+			pagesScanned++
+			if strings.Contains(htmlText, "No job results") {
+				break
+			}
+			listings := builtin.ExtractJobListings(htmlText)
+			if len(listings) == 0 {
+				break
+			}
+			if _, err := s.saveDeltaPayloadForSource(sourceBuiltin, pageURL, payloadTypeDelta, mustMarshalJSON(listings)); err != nil {
+				return err
+			}
+			payloadsCreated++
+			if containsListingURL(listings, lastJobURL) || allListingsOlderThan(listings, lastPostDateDT) {
+				phase1BoundaryMatched = true
+				break
+			}
+			probePage++
+		}
+	}
+
+	skipPhase2UntilBoundary := !phase1BoundaryMatched && (lastJobURL != "" || lastPostDateDT != nil)
+	for currentPage >= 1 && pagesScanned < s.Config.BuiltinPagesPerCycle {
+		pageURL := strings.ReplaceAll(s.Config.BuiltinBaseURL, "{page}", strconv.Itoa(currentPage))
+		htmlText, err := s.FetchText(pageURL)
+		if err != nil {
+			return err
+		}
+		pagesScanned++
+		if strings.Contains(htmlText, "No job results") {
+			currentPage--
+			continue
+		}
+		listings := builtin.ExtractJobListings(htmlText)
+		if skipPhase2UntilBoundary && len(listings) > 0 {
+			boundaryHit := containsListingURL(listings, lastJobURL) || allListingsOlderThan(listings, lastPostDateDT)
+			if boundaryHit {
+				skipPhase2UntilBoundary = false
+			}
+			currentPage--
+			continue
+		}
+		if len(listings) > 0 {
+			if _, err := s.saveDeltaPayloadForSource(sourceBuiltin, pageURL, payloadTypeDelta, mustMarshalJSON(listings)); err != nil {
+				return err
+			}
+			payloadsCreated++
+			if !firstSeenMarkerUpdated {
+				if firstURL, ok := listings[0]["url"].(string); ok {
+					lastJobURL = firstURL
+				}
+				if firstPostDate, ok := listings[0]["post_date"].(string); ok {
+					lastPostDate = firstPostDate
+				}
+				firstSeenMarkerUpdated = true
+			}
+		}
+		currentPage--
+	}
+
+	nextSavedPage := currentPage
+	if nextSavedPage < 1 {
+		nextSavedPage = s.Config.BuiltinMaxPage
+	}
+	return s.saveStatePayload(sourceBuiltin, map[string]any{
+		"next_page":                   nextSavedPage,
+		"last_post_date":              valueOrNil(lastPostDate),
+		"last_job_url":                valueOrNil(lastJobURL),
+		"last_scan_at":                utcNowISO(),
+		"pages_scanned_last_cycle":    pagesScanned,
+		"payloads_created_last_cycle": payloadsCreated,
+	})
+}
+
 func (s *Service) loadState(ctx context.Context) (string, string, error) {
 	if s.DB == nil {
 		return "", "", nil
@@ -273,9 +398,11 @@ func (s *Service) saveDeltaPayload(ctx context.Context, bodyText string) (int64,
 	}
 	result, err := s.DB.SQL.ExecContext(
 		ctx,
-		`INSERT INTO watcher_payloads (source_url, payload_type, body_text, created_at)
-		 VALUES (?, 'delta_xml', ?, ?)`,
+		`INSERT INTO watcher_payloads (source, source_url, payload_type, body_text, created_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		sourceName,
 		s.Config.URL,
+		payloadTypeXML,
 		bodyText,
 		utcNowISO(),
 	)
@@ -285,9 +412,123 @@ func (s *Service) saveDeltaPayload(ctx context.Context, bodyText string) (int64,
 	return result.LastInsertId()
 }
 
+func (s *Service) saveDeltaPayloadForSource(source, sourceURL, payloadType, bodyText string) (int64, error) {
+	if s.DB == nil {
+		return 0, nil
+	}
+	result, err := s.DB.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO watcher_payloads (source, source_url, payload_type, body_text, created_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		source,
+		sourceURL,
+		payloadType,
+		bodyText,
+		utcNowISO(),
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
+}
+
+func (s *Service) loadStatePayload(source string) (map[string]any, error) {
+	var stateJSON sql.NullString
+	err := s.DB.SQL.QueryRowContext(context.Background(), `SELECT COALESCE(state_json, '') FROM watcher_states WHERE source = ? LIMIT 1`, source).Scan(&stateJSON)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return map[string]any{}, nil
+		}
+		return nil, err
+	}
+	payload := map[string]any{}
+	if stateJSON.Valid && strings.TrimSpace(stateJSON.String) != "" {
+		_ = json.Unmarshal([]byte(stateJSON.String), &payload)
+	}
+	return payload, nil
+}
+
+func (s *Service) saveStatePayload(source string, payload map[string]any) error {
+	_, err := s.DB.SQL.ExecContext(context.Background(),
+		`INSERT INTO watcher_states (source, state_json, updated_at)
+		 VALUES (?, ?, ?)
+		 ON CONFLICT(source) DO UPDATE SET state_json = excluded.state_json, updated_at = excluded.updated_at`,
+		source,
+		mustMarshalJSON(payload),
+		utcNowISO(),
+	)
+	return err
+}
+
 func mustMarshalJSON(value any) string {
 	data, _ := json.Marshal(value)
 	return string(data)
+}
+
+func parseISOTime(value string) *time.Time {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return &parsed
+	}
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return &parsed
+	}
+	if parsed, err := time.Parse("2006-01-02T15:04:05", value); err == nil {
+		utc := parsed.UTC()
+		return &utc
+	}
+	return nil
+}
+
+func intFromAny(value any, fallback int) int {
+	switch v := value.(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	default:
+		return fallback
+	}
+}
+
+func containsListingURL(listings []map[string]any, targetURL string) bool {
+	if strings.TrimSpace(targetURL) == "" {
+		return false
+	}
+	for _, listing := range listings {
+		if urlValue, _ := listing["url"].(string); urlValue == targetURL {
+			return true
+		}
+	}
+	return false
+}
+
+func allListingsOlderThan(listings []map[string]any, marker *time.Time) bool {
+	if marker == nil {
+		return false
+	}
+	foundAny := false
+	for _, listing := range listings {
+		postDate, _ := listing["post_date"].(string)
+		listingDT := parseISOTime(postDate)
+		if listingDT == nil {
+			continue
+		}
+		foundAny = true
+		if !listingDT.Before(*marker) {
+			return false
+		}
+	}
+	return foundAny
+}
+
+func valueOrNil(value string) any {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
 }
 
 func (s *Service) ExtractFirstLastmod(data []byte) string {

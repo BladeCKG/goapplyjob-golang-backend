@@ -3,6 +3,7 @@ package watcher
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,11 +19,14 @@ func buildService(t *testing.T) *Service {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	return New(Config{
-		Enabled:         true,
-		URL:             "https://example.com/jobs.xml",
-		IntervalMinutes: 1,
-		SampleKB:        8,
-		TimeoutSeconds:  30,
+		Enabled:              true,
+		URL:                  "https://example.com/jobs.xml",
+		IntervalMinutes:      1,
+		SampleKB:             8,
+		TimeoutSeconds:       30,
+		BuiltinBaseURL:       "",
+		BuiltinMaxPage:       1000,
+		BuiltinPagesPerCycle: 25,
 	}, db)
 }
 
@@ -150,4 +154,71 @@ func TestRunForeverRunOnceExecutesSingleCycle(t *testing.T) {
 	if service.Status()["running"].(bool) {
 		t.Fatalf("expected watcher not running after run-once")
 	}
+}
+
+func TestBuiltinScansNextPagesThenUpperPages(t *testing.T) {
+	service := buildService(t)
+	service.Config.URL = ""
+	service.Config.BuiltinBaseURL = "https://builtin.com/jobs?page={page}"
+	service.Config.BuiltinMaxPage = 1000
+	service.Config.BuiltinPagesPerCycle = 4
+	service.FetchText = func(rawURL string) (string, error) {
+		page := rawURL[strings.LastIndex(rawURL, "=")+1:]
+		switch page {
+		case "11":
+			return builtinPageHTML("https://builtin.com/job/new-a/11111", 11111, "2026-02-18T00:00:00+00:00"), nil
+		case "12":
+			return builtinPageHTML("https://builtin.com/job/marker/12121", 12121, "2026-02-17T00:00:00+00:00"), nil
+		case "10":
+			return builtinPageHTML("https://builtin.com/job/up-10/10101", 10101, "2026-02-16T00:00:00+00:00"), nil
+		case "9":
+			return builtinPageHTML("https://builtin.com/job/up-9/9090", 9090, "2026-02-15T00:00:00+00:00"), nil
+		default:
+			return "No job results", nil
+		}
+	}
+	if err := service.saveStatePayload(sourceBuiltin, map[string]any{
+		"next_page":      10,
+		"last_job_url":   "https://builtin.com/job/marker/12121",
+		"last_post_date": "2026-02-17T00:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.runOnceBuiltin(); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := service.DB.SQL.QueryContext(context.Background(), `SELECT source_url FROM watcher_payloads WHERE source = ? ORDER BY id ASC`, sourceBuiltin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	got := []string{}
+	for rows.Next() {
+		var url string
+		if err := rows.Scan(&url); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, url)
+	}
+	expected := []string{
+		"https://builtin.com/jobs?page=11",
+		"https://builtin.com/jobs?page=12",
+		"https://builtin.com/jobs?page=10",
+		"https://builtin.com/jobs?page=9",
+	}
+	if strings.Join(got, ",") != strings.Join(expected, ",") {
+		t.Fatalf("payload pages=%v expected=%v", got, expected)
+	}
+	state, err := service.loadStatePayload(sourceBuiltin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intFromAny(state["next_page"], 0) != 8 {
+		t.Fatalf("expected next_page=8, got %#v", state["next_page"])
+	}
+}
+
+func builtinPageHTML(jobURL string, jobID int, publishedDate string) string {
+	return `<html><head><script type="application/ld+json">{"@graph":[{"@type":"ItemList","itemListElement":[{"@type":"ListItem","position":1,"url":"` + jobURL + `","name":"Role","description":"Desc"}]}]}</script></head><body><script>logBuiltinTrackEvent('job_board_view', {'jobs':[{'id':` + strconv.Itoa(jobID) + `,'published_date':'` + publishedDate + `'}],'filters':{}});</script></body></html>`
 }
