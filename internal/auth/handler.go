@@ -47,6 +47,7 @@ func (h *Handler) Register(router gin.IRouter) {
 	router.POST("/auth/password/signup", h.passwordSignup)
 	router.POST("/auth/password/login", h.passwordLogin)
 	router.GET("/auth/me", h.me)
+	router.POST("/auth/password/change", h.passwordChange)
 	router.POST("/auth/logout", h.logout)
 }
 
@@ -300,6 +301,53 @@ func (h *Handler) me(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"id": user.ID, "email": user.Email})
+}
+func (h *Handler) passwordChange(c *gin.Context) {
+	user, err := h.CurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Not authenticated"})
+		return
+	}
+	var payload struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid request"})
+		return
+	}
+	currentPassword, err := validatePassword(payload.CurrentPassword)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+	newPassword, err := validatePassword(payload.NewPassword)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+	var saltHex, storedHash string
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT password_salt, password_hash FROM auth_password_credentials WHERE user_id = ? LIMIT 1`, user.ID).Scan(&saltHex, &storedHash); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Password account is not configured"})
+		return
+	}
+	salt, err := hex.DecodeString(saltHex)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Invalid current password"})
+		return
+	}
+	if !hmac.Equal([]byte(passwordHash(currentPassword, salt)), []byte(storedHash)) {
+		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Invalid current password"})
+		return
+	}
+	newSalt := make([]byte, passwordSaltBytes)
+	_, _ = rand.Read(newSalt)
+	_, err = h.db.SQL.ExecContext(c.Request.Context(), `UPDATE auth_password_credentials SET password_salt = ?, password_hash = ? WHERE user_id = ?`, hex.EncodeToString(newSalt), passwordHash(newPassword, newSalt), user.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to update password"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 func (h *Handler) logout(c *gin.Context) {
 	if token, err := c.Cookie(h.cfg.AuthCookieName); err == nil && token != "" {

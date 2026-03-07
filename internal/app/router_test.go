@@ -228,6 +228,7 @@ func TestPasswordSignupAndLoginFlow(t *testing.T) {
 	signupRec := httptest.NewRecorder()
 	router.ServeHTTP(signupRec, signupReq)
 	assertStatus(t, signupRec.Code, http.StatusOK)
+
 	meAfterSignupReq := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
 	meAfterSignupReq.AddCookie(signupRec.Result().Cookies()[0])
 	meAfterSignupRec := httptest.NewRecorder()
@@ -238,6 +239,7 @@ func TestPasswordSignupAndLoginFlow(t *testing.T) {
 	if meAfterSignup["email"].(string) != "pw-user@example.com" {
 		t.Fatalf("unexpected me signup payload %#v", meAfterSignup)
 	}
+
 	cookie := signupRec.Result().Cookies()[0]
 	logoutReq := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
 	logoutReq.AddCookie(cookie)
@@ -251,6 +253,50 @@ func TestPasswordSignupAndLoginFlow(t *testing.T) {
 	loginRec := httptest.NewRecorder()
 	router.ServeHTTP(loginRec, loginReq)
 	assertStatus(t, loginRec.Code, http.StatusOK)
+
+	loginCookie := loginRec.Result().Cookies()[0]
+	badChangeBody, _ := json.Marshal(map[string]string{"current_password": "WrongPass123", "new_password": "NewStrongPass123"})
+	badChangeReq := httptest.NewRequest(http.MethodPost, "/auth/password/change", bytes.NewReader(badChangeBody))
+	badChangeReq.Header.Set("Content-Type", "application/json")
+	badChangeReq.AddCookie(loginCookie)
+	badChangeRec := httptest.NewRecorder()
+	router.ServeHTTP(badChangeRec, badChangeReq)
+	assertStatus(t, badChangeRec.Code, http.StatusUnauthorized)
+
+	changeBody, _ := json.Marshal(map[string]string{"current_password": "StrongPass123", "new_password": "NewStrongPass123"})
+	changeReq := httptest.NewRequest(http.MethodPost, "/auth/password/change", bytes.NewReader(changeBody))
+	changeReq.Header.Set("Content-Type", "application/json")
+	changeReq.AddCookie(loginCookie)
+	changeRec := httptest.NewRecorder()
+	router.ServeHTTP(changeRec, changeReq)
+	assertStatus(t, changeRec.Code, http.StatusOK)
+
+	logoutReq2 := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+	logoutReq2.AddCookie(loginCookie)
+	logoutRec2 := httptest.NewRecorder()
+	router.ServeHTTP(logoutRec2, logoutReq2)
+	assertStatus(t, logoutRec2.Code, http.StatusOK)
+
+	oldPasswordBody, _ := json.Marshal(map[string]string{"email": "pw-user@example.com", "password": "StrongPass123"})
+	oldPasswordReq := httptest.NewRequest(http.MethodPost, "/auth/password/login", bytes.NewReader(oldPasswordBody))
+	oldPasswordReq.Header.Set("Content-Type", "application/json")
+	oldPasswordRec := httptest.NewRecorder()
+	router.ServeHTTP(oldPasswordRec, oldPasswordReq)
+	assertStatus(t, oldPasswordRec.Code, http.StatusUnauthorized)
+
+	newPasswordBody, _ := json.Marshal(map[string]string{"email": "pw-user@example.com", "password": "NewStrongPass123"})
+	newPasswordReq := httptest.NewRequest(http.MethodPost, "/auth/password/login", bytes.NewReader(newPasswordBody))
+	newPasswordReq.Header.Set("Content-Type", "application/json")
+	newPasswordRec := httptest.NewRecorder()
+	router.ServeHTTP(newPasswordRec, newPasswordReq)
+	assertStatus(t, newPasswordRec.Code, http.StatusOK)
+
+	badBody, _ := json.Marshal(map[string]string{"email": "pw-user@example.com", "password": "WrongPass123"})
+	badReq := httptest.NewRequest(http.MethodPost, "/auth/password/login", bytes.NewReader(badBody))
+	badReq.Header.Set("Content-Type", "application/json")
+	badRec := httptest.NewRecorder()
+	router.ServeHTTP(badRec, badReq)
+	assertStatus(t, badRec.Code, http.StatusUnauthorized)
 }
 
 func TestPasswordSignupValidatesPasswordLength(t *testing.T) {
