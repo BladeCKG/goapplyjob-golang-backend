@@ -238,3 +238,26 @@ func TestFindSimilarRemoteCategoriesPrefersExactNormalizedRoleTitle(t *testing.T
 		t.Fatalf("expected exact normalized match, got %q / %q", title, function)
 	}
 }
+
+func TestNormalizeEmploymentTypeValueCollapsesToFullTime(t *testing.T) {
+	if got := normalizeEmploymentTypeValue("Full Time"); got != "full-time" {
+		t.Fatalf("expected full-time, got %#v", got)
+	}
+}
+
+func TestNormalizeLocationFieldsPrefersUnitedStatesWhenMultipleCountries(t *testing.T) {
+	location, city, states := normalizeLocationFields(
+		"ESP | FRA | Belgium, Wisconsin, USA | London, England, GBR",
+		nil,
+		[]any{},
+	)
+	if location != "United States" {
+		t.Fatalf("expected location United States, got %#v", location)
+	}
+	if city != "Belgium" {
+		t.Fatalf("expected city Belgium, got %#v", city)
+	}
+	if states != "[\"Wisconsin\"]" {
+		t.Fatalf("expected states json [\"Wisconsin\"], got %#v", states)
+	}
+}

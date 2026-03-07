@@ -28,6 +28,29 @@ var genericCategoryMatchTokens = map[string]struct{}{
 	"accountant": {}, "administrator": {}, "engineer": {}, "developer": {}, "manager": {}, "specialist": {}, "consultant": {}, "analyst": {}, "architect": {}, "designer": {}, "director": {}, "producer": {}, "writer": {}, "support": {}, "operations": {}, "web": {}, "remote": {}, "lead": {}, "staff": {},
 }
 
+var countryAliases = map[string]string{
+	"united states":  "United States",
+	"usa":            "United States",
+	"us":             "United States",
+	"u.s.":           "United States",
+	"u.s.a.":         "United States",
+	"uk":             "United Kingdom",
+	"gbr":            "United Kingdom",
+	"united kingdom": "United Kingdom",
+	"england":        "United Kingdom",
+	"deu":            "Germany",
+	"germany":        "Germany",
+	"fra":            "France",
+	"france":         "France",
+	"esp":            "Spain",
+	"spain":          "Spain",
+	"pol":            "Poland",
+	"poland":         "Poland",
+	"belgium":        "Belgium",
+	"switzerland":    "Switzerland",
+	"netherlands":    "Netherlands",
+}
+
 var normalizationReplacements = []struct {
 	pattern     *regexp.Regexp
 	replacement string
@@ -323,6 +346,157 @@ func min(a, b int) int {
 	return b
 }
 
+func normalizeEmploymentTypeValue(value any) any {
+	text, ok := value.(string)
+	if !ok {
+		return nil
+	}
+	normalized := strings.TrimSpace(strings.ToLower(text))
+	normalized = regexp.MustCompile(`[\s_]+`).ReplaceAllString(normalized, "-")
+	normalized = regexp.MustCompile(`-{2,}`).ReplaceAllString(normalized, "-")
+	normalized = strings.Trim(normalized, "-")
+	switch normalized {
+	case "", "null":
+		return nil
+	case "fulltime", "full-time", "full time":
+		return "full-time"
+	case "parttime", "part-time", "part time":
+		return "part-time"
+	default:
+		return normalized
+	}
+}
+
+func normalizeCountryName(value string) string {
+	normalized := regexp.MustCompile(`[^a-zA-Z.\s]`).ReplaceAllString(value, "")
+	normalized = strings.TrimSpace(strings.ToLower(regexp.MustCompile(`\s+`).ReplaceAllString(normalized, " ")))
+	return countryAliases[normalized]
+}
+
+func normalizeStateName(value any) string {
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	normalized := strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(text, " "))
+	return normalized
+}
+
+func normalizeLocationFields(rawLocation, rawCity, rawStates any) (any, any, any) {
+	states := []string{}
+	switch items := rawStates.(type) {
+	case []any:
+		for _, item := range items {
+			if state := normalizeStateName(item); state != "" && !containsString(states, state) {
+				states = append(states, state)
+			}
+		}
+	case []string:
+		for _, item := range items {
+			if state := normalizeStateName(item); state != "" && !containsString(states, state) {
+				states = append(states, state)
+			}
+		}
+	}
+	rawLocationText, _ := rawLocation.(string)
+	cityValue := normalizeStateName(rawCity)
+	if strings.TrimSpace(rawLocationText) == "" {
+		return nil, nilIfEmpty(cityValue), jsonStringOrNil(states)
+	}
+
+	type segment struct {
+		country string
+		state   string
+		city    string
+	}
+	parsedSegments := []segment{}
+	for _, chunk := range strings.Split(rawLocationText, "|") {
+		chunk = strings.TrimSpace(chunk)
+		if chunk == "" {
+			continue
+		}
+		parts := []string{}
+		for _, part := range strings.Split(chunk, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				parts = append(parts, part)
+			}
+		}
+		if len(parts) == 0 {
+			continue
+		}
+		country := ""
+		for idx := len(parts) - 1; idx >= 0; idx-- {
+			if candidate := normalizeCountryName(parts[idx]); candidate != "" {
+				country = candidate
+				break
+			}
+		}
+		if country == "" {
+			continue
+		}
+		seg := segment{country: country}
+		if len(parts) >= 2 {
+			seg.state = normalizeStateName(parts[len(parts)-2])
+		}
+		if len(parts) >= 3 {
+			seg.city = normalizeStateName(parts[0])
+		}
+		parsedSegments = append(parsedSegments, seg)
+	}
+
+	var chosen *segment
+	for _, seg := range parsedSegments {
+		if seg.country == "United States" {
+			chosen = &seg
+			break
+		}
+	}
+	if chosen == nil && len(parsedSegments) > 0 {
+		chosen = &parsedSegments[0]
+	}
+	chosenCountry := ""
+	chosenState := ""
+	if chosen != nil {
+		chosenCountry = chosen.country
+		chosenState = chosen.state
+		if cityValue == "" {
+			cityValue = chosen.city
+		}
+	}
+	if chosenCountry == "United States" && chosenState != "" && !containsString(states, chosenState) {
+		states = append(states, chosenState)
+	}
+	return nilIfEmpty(chosenCountry), nilIfEmpty(cityValue), jsonStringOrNil(states)
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func nilIfEmpty(value string) any {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
+}
+
+func jsonStringOrNil(values []string) any {
+	if len(values) == 0 {
+		return nil
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return nil
+	}
+	return string(encoded)
+}
+
 func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error) {
 	if batchSize <= 0 {
 		batchSize = 100
@@ -383,17 +557,26 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			categorizedTitle = stringFromPayload(inferredTitle)
 			categorizedFunction = stringFromPayload(inferredFunction)
 		}
+		normalizedLocation, normalizedLocationCity, normalizedUSStates := normalizeLocationFields(
+			payload["location"],
+			payload["locationCity"],
+			payload["locationUSStates"],
+		)
 		err = database.RetryLocked(8, 50*time.Millisecond, func() error {
 			_, execErr := s.DB.SQL.ExecContext(
 				ctx,
-				`INSERT INTO parsed_jobs (raw_us_job_id, external_job_id, created_at_source, url, categorized_job_title, categorized_job_function, role_title, updated_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+				`INSERT INTO parsed_jobs (raw_us_job_id, external_job_id, created_at_source, url, categorized_job_title, categorized_job_function, role_title, employment_type, location, location_city, location_us_states, updated_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				 ON CONFLICT(raw_us_job_id) DO UPDATE SET
 				   external_job_id = excluded.external_job_id,
 				   created_at_source = excluded.created_at_source,
 				   url = excluded.url,
 				   categorized_job_title = excluded.categorized_job_title,
 				   categorized_job_function = excluded.categorized_job_function,
+				   employment_type = excluded.employment_type,
+				   location = excluded.location,
+				   location_city = excluded.location_city,
+				   location_us_states = excluded.location_us_states,
 				   role_title = excluded.role_title,
 				   updated_at = excluded.updated_at`,
 				row.id,
@@ -403,6 +586,10 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				categorizedTitle,
 				categorizedFunction,
 				stringFromPayload(payload["roleTitle"]),
+				normalizeEmploymentTypeValue(payload["employmentType"]),
+				normalizedLocation,
+				normalizedLocationCity,
+				normalizedUSStates,
 				time.Now().UTC().Format(time.RFC3339Nano),
 			)
 			return execErr
