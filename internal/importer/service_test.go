@@ -178,4 +178,74 @@ func TestImportRawUSJobsTextProcessesWatcherPayloadBody(t *testing.T) {
 	}
 }
 
+func TestPickUnconsumedPayloadsReturnsNewestFirst(t *testing.T) {
+	db, err := database.Open("file:test_importer_order?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc := New(db)
+
+	now := time.Now().UTC()
+	for idx, createdAt := range []time.Time{now.Add(-2 * time.Minute), now.Add(-1 * time.Minute), now} {
+		_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO watcher_payloads (source_url, payload_type, body_text, created_at) VALUES (?, 'delta_xml', ?, ?)`,
+			"https://example.com/jobs.xml",
+			`<urlset></urlset>`,
+			createdAt.Format(time.RFC3339Nano),
+		)
+		if err != nil {
+			t.Fatalf("insert payload %d: %v", idx, err)
+		}
+	}
+
+	payloads, err := svc.PickUnconsumedPayloads(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payloads) != 2 {
+		t.Fatalf("expected two payloads, got %d", len(payloads))
+	}
+	if payloads[0].ID <= payloads[1].ID {
+		t.Fatalf("expected newest payload first, got ids %d then %d", payloads[0].ID, payloads[1].ID)
+	}
+}
+
+func TestReplacePayloadRowsKeepsRemainingRowsInOrder(t *testing.T) {
+	db, err := database.Open("file:test_importer_replace_rows?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc := New(db)
+
+	result, err := db.SQL.ExecContext(context.Background(), `INSERT INTO watcher_payloads (source_url, payload_type, body_text, created_at) VALUES (?, 'delta_xml', ?, ?)`,
+		"https://example.com/jobs.xml",
+		`<urlset></urlset>`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payloadID, _ := result.LastInsertId()
+
+	rows := []SitemapRow{
+		{URL: "https://example.com/new", PostDate: time.Date(2026, 2, 12, 18, 0, 0, 0, time.UTC)},
+		{URL: "https://example.com/old", PostDate: time.Date(2026, 2, 12, 17, 0, 0, 0, time.UTC)},
+	}
+	if err := svc.ReplacePayloadRows(payloadID, rows); err != nil {
+		t.Fatal(err)
+	}
+
+	var bodyText string
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT body_text FROM watcher_payloads WHERE id = ?`, payloadID).Scan(&bodyText); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(bodyText, "https://example.com/new") || !strings.Contains(bodyText, "https://example.com/old") {
+		t.Fatalf("unexpected payload body %q", bodyText)
+	}
+	if strings.Index(bodyText, "https://example.com/new") > strings.Index(bodyText, "https://example.com/old") {
+		t.Fatalf("expected newest row first in payload body %q", bodyText)
+	}
+}
+
 var _ = sql.ErrNoRows

@@ -25,13 +25,16 @@ jobs:
       - name: Run database migrations
         run: go run ./cmd/migrate
 
-      - name: Run every-3-hours workers
+      - name: Run every-3-hours watcher
         env:
           WATCH_RUN_ONCE: "true"
+        run: go run ./cmd/watcher
+
+      - name: Run every-3-hours import worker
+        env:
           RAW_IMPORT_RUN_ONCE: "true"
-        run: |
-          go run ./cmd/watcher
-          go run ./cmd/importer
+          RAW_IMPORT_BATCH_SIZE: "300"
+        run: go run ./cmd/importer
 
       - name: Run every-6-hours workers
         env:

@@ -32,6 +32,11 @@ type Stats struct {
 	FailedDB       int
 }
 
+type SitemapRow struct {
+	URL      string
+	PostDate time.Time
+}
+
 type Service struct {
 	DB *database.DB
 }
@@ -70,6 +75,25 @@ func iterSitemapRowsText(xmlText string) [][2]string {
 		}
 	}
 	return rows
+}
+
+func parseRowsFromXMLText(xmlText string) ([]SitemapRow, int) {
+	rows := iterSitemapRowsText(xmlText)
+	parsed := make([]SitemapRow, 0, len(rows))
+	skippedInvalid := 0
+	for _, row := range rows {
+		postDate, err := normalizeDBDatetime(row[1])
+		if err != nil {
+			skippedInvalid++
+			continue
+		}
+		parsed = append(parsed, SitemapRow{URL: row[0], PostDate: postDate})
+	}
+	return parsed, skippedInvalid
+}
+
+func ParseRowsForImport(xmlText string) ([]SitemapRow, int) {
+	return parseRowsFromXMLText(xmlText)
 }
 
 func iterSitemapRows(xmlPath string) ([][2]string, error) {
@@ -116,6 +140,20 @@ func rowsToXML(rows map[string]time.Time) string {
 			"  <url>",
 			"    <loc>"+escapeXML(row.url)+"</loc>",
 			"    <lastmod>"+row.postDate.Format(time.RFC3339)+"</lastmod>",
+			"  </url>",
+		)
+	}
+	parts = append(parts, rootCloseTag)
+	return strings.Join(parts, "\n") + "\n"
+}
+
+func rowsListToXML(rows []SitemapRow) string {
+	parts := []string{xmlDecl, namespaceURLSetOpen}
+	for _, row := range rows {
+		parts = append(parts,
+			"  <url>",
+			"    <loc>"+escapeXML(row.URL)+"</loc>",
+			"    <lastmod>"+row.PostDate.Format(time.RFC3339)+"</lastmod>",
 			"  </url>",
 		)
 	}
@@ -231,6 +269,16 @@ func (s *Service) ImportRawUSJobs(xmlPath string, batchSize int) (Stats, map[str
 }
 
 func (s *Service) ImportRawUSJobsText(xmlText string, batchSize int) (Stats, map[string]time.Time, map[string]time.Time, error) {
+	rows, skippedInvalid := parseRowsFromXMLText(xmlText)
+	stats, failedRows, succeededRows, err := s.ImportRawUSJobsRows(rows, batchSize)
+	if err != nil {
+		return stats, failedRows, succeededRows, err
+	}
+	stats.SkippedInvalid = skippedInvalid
+	return stats, failedRows, succeededRows, nil
+}
+
+func (s *Service) ImportRawUSJobsRows(rows []SitemapRow, batchSize int) (Stats, map[string]time.Time, map[string]time.Time, error) {
 	if batchSize <= 0 {
 		batchSize = 100
 	}
@@ -240,19 +288,13 @@ func (s *Service) ImportRawUSJobsText(xmlText string, batchSize int) (Stats, map
 	allRows := map[string]time.Time{}
 	failedRows := map[string]time.Time{}
 
-	rows := iterSitemapRowsText(xmlText)
 	for _, row := range rows {
 		stats.Seen++
-		postDate, err := normalizeDBDatetime(row[1])
-		if err != nil {
-			stats.SkippedInvalid++
-			continue
+		if current, ok := allRows[row.URL]; !ok || row.PostDate.After(current) {
+			allRows[row.URL] = row.PostDate
 		}
-		if current, ok := allRows[row[0]]; !ok || postDate.After(current) {
-			allRows[row[0]] = postDate
-		}
-		if current, ok := buffer[row[0]]; !ok || postDate.After(current) {
-			buffer[row[0]] = postDate
+		if current, ok := buffer[row.URL]; !ok || row.PostDate.After(current) {
+			buffer[row.URL] = row.PostDate
 		}
 		if len(buffer) >= batchSize {
 			inserted, updated, failedDB, failedBatch := s.flushBuffer(buffer)
@@ -285,7 +327,7 @@ func (s *Service) PickUnconsumedPayloads(limit int) ([]struct {
 	if limit <= 0 {
 		limit = 1
 	}
-	rows, err := s.DB.SQL.Query(`SELECT id, body_text FROM watcher_payloads WHERE payload_type = 'delta_xml' AND consumed_at IS NULL ORDER BY created_at ASC, id ASC LIMIT ?`, limit)
+	rows, err := s.DB.SQL.Query(`SELECT id, body_text FROM watcher_payloads WHERE payload_type = 'delta_xml' AND consumed_at IS NULL ORDER BY created_at DESC, id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -314,6 +356,20 @@ func (s *Service) MarkPayloadConsumed(payloadID int64) error {
 func (s *Service) ReplacePayloadBody(payloadID int64, failedRows map[string]time.Time) error {
 	_, err := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, rowsToXML(failedRows), payloadID)
 	return err
+}
+
+func (s *Service) ReplacePayloadRows(payloadID int64, rows []SitemapRow) error {
+	_, err := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, rowsListToXML(rows), payloadID)
+	return err
+}
+
+func FailedRowsToList(rows map[string]time.Time) []SitemapRow {
+	out := make([]SitemapRow, 0, len(rows))
+	for url, postDate := range rows {
+		out = append(out, SitemapRow{URL: url, PostDate: postDate})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].PostDate.After(out[j].PostDate) })
+	return out
 }
 
 func (s *Service) ProcessImportFile(xmlPath, importDir, importedPrefix string, batchSize int) (Stats, string, error) {
