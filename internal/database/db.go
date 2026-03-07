@@ -165,6 +165,21 @@ func (db *DB) Migrate(ctx context.Context) error {
             FOREIGN KEY(user_id) REFERENCES auth_users(id),
             FOREIGN KEY(pricing_plan_id) REFERENCES pricing_plans(id)
         );`,
+		`CREATE TABLE IF NOT EXISTS watcher_states (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_url TEXT NOT NULL UNIQUE,
+            sample_hash TEXT,
+            first_lastmod TEXT,
+            updated_at TEXT NOT NULL
+        );`,
+		`CREATE TABLE IF NOT EXISTS watcher_payloads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_url TEXT NOT NULL,
+            payload_type TEXT NOT NULL,
+            body_text TEXT NOT NULL,
+            consumed_at TEXT,
+            created_at TEXT NOT NULL
+        );`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.SQL.ExecContext(ctx, stmt); err != nil {

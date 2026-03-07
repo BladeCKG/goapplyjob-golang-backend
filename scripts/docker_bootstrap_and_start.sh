@@ -14,9 +14,6 @@ if [[ ! -f ".env" && -f ".env.example" ]]; then
   echo "Created .env from .env.example. Review values before production use."
 fi
 
-mkdir -p logs watcher_output
-if [[ ! -f "watcher_state.json" ]]; then
-  printf '{}' > watcher_state.json
-fi
+mkdir -p logs
 
 docker compose --profile workers up -d --build

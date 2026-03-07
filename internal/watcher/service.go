@@ -2,16 +2,17 @@ package watcher
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"net/url"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"goapplyjob-golang-backend/internal/database"
 )
 
 var (
@@ -27,8 +28,6 @@ type Config struct {
 	IntervalMinutes float64
 	SampleKB        int
 	TimeoutSeconds  float64
-	StateFile       string
-	OutputDir       string
 }
 
 type FetchSampleFunc func() ([]byte, error)
@@ -36,13 +35,14 @@ type FetchFullFunc func() ([]byte, error)
 
 type Service struct {
 	Config      Config
+	DB          *database.DB
 	FetchSample FetchSampleFunc
 	FetchFull   FetchFullFunc
 	status      map[string]any
 }
 
-func New(config Config) *Service {
-	svc := &Service{Config: config}
+func New(config Config, db *database.DB) *Service {
+	svc := &Service{Config: config, DB: db}
 	svc.status = map[string]any{
 		"enabled":                     config.Enabled,
 		"url":                         config.URL,
@@ -53,14 +53,12 @@ func New(config Config) *Service {
 		"last_change_at":              nil,
 		"last_sample_hash":            nil,
 		"last_error":                  nil,
-		"last_full_file":              nil,
-		"last_full_size":              nil,
 		"last_overlap_bytes":          0,
-		"last_delta_file":             nil,
 		"last_delta_source":           nil,
 		"last_delta_size":             0,
 		"last_new_sample_lastmod":     nil,
 		"last_previous_first_lastmod": nil,
+		"last_delta_payload_id":       nil,
 	}
 	svc.FetchSample = func() ([]byte, error) { return nil, errors.New("fetch sample not configured") }
 	svc.FetchFull = func() ([]byte, error) { return nil, errors.New("fetch full not configured") }
@@ -89,9 +87,7 @@ func (s *Service) RunOnce() error {
 	}
 
 	currentHash := sha256Hex(sample)
-	state, _ := s.loadState()
-	previousHash, _ := state["sample_hash"].(string)
-	previousFirstLastmod, _ := state["first_lastmod"].(string)
+	previousHash, previousFirstLastmod, _ := s.loadState(context.Background())
 	currentFirstLastmod := s.ExtractFirstLastmod(sample)
 
 	s.setStatus(map[string]any{
@@ -101,7 +97,7 @@ func (s *Service) RunOnce() error {
 	})
 
 	if currentHash == previousHash {
-		_ = s.saveState(currentHash, firstNonEmpty(currentFirstLastmod, previousFirstLastmod))
+		_ = s.saveState(context.Background(), currentHash, firstNonEmpty(currentFirstLastmod, previousFirstLastmod))
 		s.setStatus(map[string]any{"last_overlap_bytes": len(sample)})
 		return nil
 	}
@@ -112,14 +108,8 @@ func (s *Service) RunOnce() error {
 		return err
 	}
 
-	ext := s.inferFileExtension()
-	previousFullData, _ := s.loadLatestFullData(ext)
 	newSampleLastmod := s.ExtractLastLastmod(sample)
 	previousSource := "sample"
-	if previousFirstLastmod == "" && len(previousFullData) > 0 {
-		previousFirstLastmod = s.ExtractFirstLastmod(previousFullData)
-		previousSource = "full"
-	}
 
 	deltaData := fullData
 	deltaSource := "full_no_previous_lastmod"
@@ -133,66 +123,69 @@ func (s *Service) RunOnce() error {
 	if currentFirstLastmod == "" {
 		currentFirstLastmod = s.ExtractFirstLastmod(fullData)
 	}
-	_ = s.saveState(currentHash, firstNonEmpty(currentFirstLastmod, previousFirstLastmod))
+	_ = s.saveState(context.Background(), currentHash, firstNonEmpty(currentFirstLastmod, previousFirstLastmod))
 
-	var deltaFile any
+	var payloadID any
 	if len(deltaData) > 0 {
-		saved, err := s.saveLatestDelta(deltaData)
+		saved, err := s.saveDeltaPayload(context.Background(), string(deltaData))
 		if err != nil {
 			return err
 		}
-		deltaFile = saved
-	}
-	fullFile, err := s.saveFullData(fullData, ext)
-	if err != nil {
-		return err
+		payloadID = saved
 	}
 
 	s.setStatus(map[string]any{
 		"last_change_at":              utcNowISO(),
-		"last_full_file":              fullFile,
-		"last_full_size":              len(fullData),
 		"last_overlap_bytes":          overlapBytes,
-		"last_delta_file":             deltaFile,
 		"last_delta_source":           deltaSource,
 		"last_delta_size":             len(deltaData),
 		"last_new_sample_lastmod":     emptyToNil(newSampleLastmod),
 		"last_previous_first_lastmod": emptyToNil(previousFirstLastmod),
+		"last_delta_payload_id":       payloadID,
 	})
 	return nil
 }
 
-func (s *Service) loadState() (map[string]any, error) {
-	raw, err := os.ReadFile(s.Config.StateFile)
+func (s *Service) loadState(ctx context.Context) (string, string, error) {
+	if s.DB == nil {
+		return "", "", nil
+	}
+	var sampleHash, firstLastmod string
+	err := s.DB.SQL.QueryRowContext(
+		ctx,
+		`SELECT COALESCE(sample_hash, ''), COALESCE(first_lastmod, '')
+		 FROM watcher_states
+		 WHERE source_url = ?
+		 LIMIT 1`,
+		s.Config.URL,
+	).Scan(&sampleHash, &firstLastmod)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return map[string]any{}, nil
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", "", nil
 		}
-		return nil, err
+		return "", "", err
 	}
-	if strings.TrimSpace(string(raw)) == "" {
-		return map[string]any{}, nil
-	}
-	data := map[string]any{}
-	if err := json.Unmarshal(raw, &data); err != nil {
-		return map[string]any{}, nil
-	}
-	return data, nil
+	return sampleHash, firstLastmod, nil
 }
 
-func (s *Service) saveState(sampleHash, firstLastmod string) error {
-	payload, err := json.MarshalIndent(map[string]any{
-		"sample_hash":   sampleHash,
-		"first_lastmod": emptyToNil(firstLastmod),
-		"updated_at":    utcNowISO(),
-	}, "", "  ")
-	if err != nil {
-		return err
+func (s *Service) saveState(ctx context.Context, sampleHash, firstLastmod string) error {
+	if s.DB == nil {
+		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(s.Config.StateFile), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(s.Config.StateFile, payload, 0o644)
+	_, err := s.DB.SQL.ExecContext(
+		ctx,
+		`INSERT INTO watcher_states (source_url, sample_hash, first_lastmod, updated_at)
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT(source_url) DO UPDATE SET
+		   sample_hash = excluded.sample_hash,
+		   first_lastmod = excluded.first_lastmod,
+		   updated_at = excluded.updated_at`,
+		s.Config.URL,
+		sampleHash,
+		emptyToNil(firstLastmod),
+		utcNowISO(),
+	)
+	return err
 }
 
 func (s *Service) inferFileExtension() string {
@@ -200,45 +193,29 @@ func (s *Service) inferFileExtension() string {
 	if err != nil {
 		return ".xml"
 	}
-	ext := strings.ToLower(filepath.Ext(parsed.Path))
+	ext := strings.ToLower(parsed.Path)
 	if ext == "" {
 		return ".xml"
 	}
 	return ext
 }
 
-func (s *Service) saveLatestDelta(content []byte) (string, error) {
-	if err := os.MkdirAll(s.Config.OutputDir, 0o755); err != nil {
-		return "", err
+func (s *Service) saveDeltaPayload(ctx context.Context, bodyText string) (int64, error) {
+	if s.DB == nil {
+		return 0, nil
 	}
-	path := filepath.Join(s.Config.OutputDir, "latest_delta_"+utcNowCompact()+".xml")
-	if err := os.WriteFile(path, content, 0o644); err != nil {
-		return "", err
-	}
-	return path, nil
-}
-
-func (s *Service) saveFullData(content []byte, ext string) (string, error) {
-	if err := os.MkdirAll(s.Config.OutputDir, 0o755); err != nil {
-		return "", err
-	}
-	path := filepath.Join(s.Config.OutputDir, "latest"+ext)
-	if err := os.WriteFile(path, content, 0o644); err != nil {
-		return "", err
-	}
-	return path, nil
-}
-
-func (s *Service) loadLatestFullData(ext string) ([]byte, error) {
-	path := filepath.Join(s.Config.OutputDir, "latest"+ext)
-	raw, err := os.ReadFile(path)
+	result, err := s.DB.SQL.ExecContext(
+		ctx,
+		`INSERT INTO watcher_payloads (source_url, payload_type, body_text, created_at)
+		 VALUES (?, 'delta_xml', ?, ?)`,
+		s.Config.URL,
+		bodyText,
+		utcNowISO(),
+	)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, err
+		return 0, err
 	}
-	return raw, nil
+	return result.LastInsertId()
 }
 
 func (s *Service) ExtractFirstLastmod(data []byte) string {
@@ -311,10 +288,6 @@ func (s *Service) DeltaNewerThanLastmod(fullData []byte, previousFirstLastmod st
 
 func utcNowISO() string {
 	return time.Now().UTC().Format(time.RFC3339Nano)
-}
-
-func utcNowCompact() string {
-	return time.Now().UTC().Format("20060102T150405Z")
 }
 
 func sha256Hex(data []byte) string {

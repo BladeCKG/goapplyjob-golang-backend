@@ -16,10 +16,6 @@ if (-not (Test-Path ".env") -and (Test-Path ".env.example")) {
 }
 
 New-Item -ItemType Directory -Force -Path "logs" | Out-Null
-New-Item -ItemType Directory -Force -Path "watcher_output" | Out-Null
-if (-not (Test-Path "watcher_state.json")) {
-    "{}" | Out-File -FilePath "watcher_state.json" -Encoding utf8
-}
 
 if ($ForceRebuild) {
     go build ./cmd/api

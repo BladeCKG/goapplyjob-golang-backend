@@ -110,7 +110,7 @@ cd <backend-directory>
 What these scripts do:
 
 * create `.env` from `.env.example` if missing
-* ensure `logs/`, `watcher_output/`, and `watcher_state.json` exist
+* ensure `logs/` exists
 * start the Go API and watcher commands in background
 
 ### Docker Bootstrap (Linux + Windows)

@@ -1,24 +1,28 @@
 package watcher
 
 import (
-	"os"
-	"path/filepath"
+	"context"
 	"strings"
 	"testing"
+	"time"
+
+	"goapplyjob-golang-backend/internal/database"
 )
 
 func buildService(t *testing.T) *Service {
 	t.Helper()
-	dir := t.TempDir()
+	db, err := database.Open("file:watcher_test?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
 	return New(Config{
 		Enabled:         true,
 		URL:             "https://example.com/jobs.xml",
 		IntervalMinutes: 1,
 		SampleKB:        8,
 		TimeoutSeconds:  30,
-		StateFile:       filepath.Join(dir, "watcher_state.json"),
-		OutputDir:       filepath.Join(dir, "watcher_output"),
-	})
+	}, db)
 }
 
 func TestDeltaNewerThanLastmodReturnsOnlyNewerURLBlocks(t *testing.T) {
@@ -73,7 +77,7 @@ func TestRunOnceSkipsDeltaFileWhenDeltaIsEmpty(t *testing.T) {
 
 	service.FetchSample = func() ([]byte, error) { return sample, nil }
 	service.FetchFull = func() ([]byte, error) { return fullData, nil }
-	if err := os.WriteFile(service.Config.StateFile, []byte(`{"sample_hash":"old-hash","first_lastmod":"2026-02-12T10:00:00+00:00"}`), 0o644); err != nil {
+	if _, err := service.DB.SQL.ExecContext(context.Background(), `INSERT INTO watcher_states (source_url, sample_hash, first_lastmod, updated_at) VALUES (?, ?, ?, ?)`, service.Config.URL, "old-hash", "2026-02-12T10:00:00+00:00", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -81,8 +85,8 @@ func TestRunOnceSkipsDeltaFileWhenDeltaIsEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	status := service.Status()
-	if status["last_delta_file"] != nil {
-		t.Fatalf("expected nil delta file, got %#v", status["last_delta_file"])
+	if status["last_delta_payload_id"] != nil {
+		t.Fatalf("expected nil delta payload id, got %#v", status["last_delta_payload_id"])
 	}
 	if status["last_delta_size"].(int) != 0 {
 		t.Fatalf("expected zero delta size, got %#v", status["last_delta_size"])

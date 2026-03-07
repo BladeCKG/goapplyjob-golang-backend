@@ -60,12 +60,8 @@ func extractRowFromURLBlock(block string) (string, string, bool) {
 	return loc, lastmod, true
 }
 
-func iterSitemapRows(xmlPath string) ([][2]string, error) {
-	raw, err := os.ReadFile(xmlPath)
-	if err != nil {
-		return nil, err
-	}
-	blocks := extractCompleteURLBlocks(string(raw))
+func iterSitemapRowsText(xmlText string) [][2]string {
+	blocks := extractCompleteURLBlocks(xmlText)
 	rows := make([][2]string, 0, len(blocks))
 	for _, block := range blocks {
 		loc, lastmod, ok := extractRowFromURLBlock(block)
@@ -73,6 +69,15 @@ func iterSitemapRows(xmlPath string) ([][2]string, error) {
 			rows = append(rows, [2]string{loc, lastmod})
 		}
 	}
+	return rows
+}
+
+func iterSitemapRows(xmlPath string) ([][2]string, error) {
+	raw, err := os.ReadFile(xmlPath)
+	if err != nil {
+		return nil, err
+	}
+	rows := iterSitemapRowsText(string(raw))
 	return rows, nil
 }
 
@@ -218,6 +223,14 @@ func (s *Service) ImportRawUSJobs(xmlPath string, batchSize int) (Stats, map[str
 	if _, err := os.Stat(xmlPath); err != nil {
 		return Stats{}, nil, nil, err
 	}
+	raw, err := os.ReadFile(xmlPath)
+	if err != nil {
+		return Stats{}, nil, nil, err
+	}
+	return s.ImportRawUSJobsText(string(raw), batchSize)
+}
+
+func (s *Service) ImportRawUSJobsText(xmlText string, batchSize int) (Stats, map[string]time.Time, map[string]time.Time, error) {
 	if batchSize <= 0 {
 		batchSize = 100
 	}
@@ -227,10 +240,7 @@ func (s *Service) ImportRawUSJobs(xmlPath string, batchSize int) (Stats, map[str
 	allRows := map[string]time.Time{}
 	failedRows := map[string]time.Time{}
 
-	rows, err := iterSitemapRows(xmlPath)
-	if err != nil {
-		return stats, nil, nil, err
-	}
+	rows := iterSitemapRowsText(xmlText)
 	for _, row := range rows {
 		stats.Seen++
 		postDate, err := normalizeDBDatetime(row[1])
@@ -266,6 +276,44 @@ func (s *Service) ImportRawUSJobs(xmlPath string, batchSize int) (Stats, map[str
 		}
 	}
 	return stats, failedRows, succeededRows, nil
+}
+
+func (s *Service) PickUnconsumedPayloads(limit int) ([]struct {
+	ID       int64
+	BodyText string
+}, error) {
+	if limit <= 0 {
+		limit = 1
+	}
+	rows, err := s.DB.SQL.Query(`SELECT id, body_text FROM watcher_payloads WHERE payload_type = 'delta_xml' AND consumed_at IS NULL ORDER BY created_at ASC, id ASC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []struct {
+		ID       int64
+		BodyText string
+	}{}
+	for rows.Next() {
+		var item struct {
+			ID       int64
+			BodyText string
+		}
+		if err := rows.Scan(&item.ID, &item.BodyText); err == nil {
+			result = append(result, item)
+		}
+	}
+	return result, rows.Err()
+}
+
+func (s *Service) MarkPayloadConsumed(payloadID int64) error {
+	_, err := s.DB.SQL.Exec(`UPDATE watcher_payloads SET consumed_at = ? WHERE id = ?`, time.Now().UTC().Format(time.RFC3339Nano), payloadID)
+	return err
+}
+
+func (s *Service) ReplacePayloadBody(payloadID int64, failedRows map[string]time.Time) error {
+	_, err := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, rowsToXML(failedRows), payloadID)
+	return err
 }
 
 func (s *Service) ProcessImportFile(xmlPath, importDir, importedPrefix string, batchSize int) (Stats, string, error) {

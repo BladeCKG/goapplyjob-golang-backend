@@ -44,18 +44,10 @@ func TestExtractRowFromURLBlockHandlesNamespace(t *testing.T) {
 }
 
 func TestIterSitemapRowsReturnsOnlyCompleteURLTags(t *testing.T) {
-	dir := t.TempDir()
-	xmlPath := filepath.Join(dir, "latest_delta_broken.xml")
-	if err := os.WriteFile(xmlPath, []byte(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+	rows := iterSitemapRowsText(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 <url><loc>https://example.com/a</loc><lastmod>2026-02-12T18:00:00+00:00</lastmod></url>
 <url><loc>https://example.com/b</loc><lastmod>2026-02-12T17:00:00+00:00</lastmod></url>
-<url><loc>https://example.com/c</loc>`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	rows, err := iterSitemapRows(xmlPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+<url><loc>https://example.com/c</loc>`)
 	if len(rows) != 2 || rows[0][0] != "https://example.com/a" || rows[1][0] != "https://example.com/b" {
 		t.Fatalf("unexpected rows %#v", rows)
 	}
@@ -144,6 +136,45 @@ func TestImportRawUSJobsReturnsFailedRowsAndSuccessesSeparately(t *testing.T) {
 	}
 	if stats.FailedDB != 2 || len(failedRows) != 2 || len(succeededRows) != 0 {
 		t.Fatalf("unexpected failure split stats=%#v failed=%#v succeeded=%#v", stats, failedRows, succeededRows)
+	}
+}
+
+func TestImportRawUSJobsTextProcessesWatcherPayloadBody(t *testing.T) {
+	db, err := database.Open("file:test_importer_payloads?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc := New(db)
+
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO watcher_payloads (source_url, payload_type, body_text, created_at) VALUES (?, 'delta_xml', ?, ?)`,
+		"https://example.com/jobs.xml",
+		`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://example.com/a</loc><lastmod>2026-02-12T18:00:00+00:00</lastmod></url>
+</urlset>`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payloads, err := svc.PickUnconsumedPayloads(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payloads) != 1 {
+		t.Fatalf("expected one payload, got %d", len(payloads))
+	}
+	stats, failedRows, succeededRows, err := svc.ImportRawUSJobsText(payloads[0].BodyText, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Inserted != 1 || len(failedRows) != 0 || len(succeededRows) != 1 {
+		t.Fatalf("unexpected payload import results stats=%#v failed=%#v succeeded=%#v", stats, failedRows, succeededRows)
+	}
+	if err := svc.MarkPayloadConsumed(payloads[0].ID); err != nil {
+		t.Fatal(err)
 	}
 }
 
