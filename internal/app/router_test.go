@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,7 +46,11 @@ func TestAuthAndJobsFlow(t *testing.T) {
 	insertJob(t, db, 1, "https://example.com/a", "Austin", "Texas", 120, 150, true, time.Date(2026, 2, 11, 0, 0, 0, 0, time.UTC))
 	insertJob(t, db, 2, "https://example.com/b", "Seattle", "Washington", 80, 100, false, time.Date(2026, 2, 10, 0, 0, 0, 0, time.UTC))
 
-	code := requestLoginCode(t, router, "user@example.com")
+	login := requestLoginCodePayload(t, router, "user@example.com")
+	if login.DebugLink == "" {
+		t.Fatal("expected debug link")
+	}
+	code := login.DebugCode
 	cookie := verifyLoginCode(t, router, "user@example.com", code)
 
 	meReq := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
@@ -70,6 +75,30 @@ func TestAuthAndJobsFlow(t *testing.T) {
 	items := body["items"].([]any)
 	if len(items) != 1 {
 		t.Fatalf("expected one job, got %d", len(items))
+	}
+}
+
+func TestMagicLinkAuthFlow(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	login := requestLoginCodePayload(t, router, "magic@example.com")
+	if login.DebugLink == "" {
+		t.Fatal("expected debug link")
+	}
+	token := magicTokenFromLink(t, login.DebugLink)
+	cookie := verifyLoginLink(t, router, token)
+
+	meReq := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	meReq.AddCookie(cookie)
+	meRec := httptest.NewRecorder()
+	router.ServeHTTP(meRec, meReq)
+	assertStatus(t, meRec.Code, http.StatusOK)
+
+	var meBody map[string]any
+	decodeBody(t, meRec.Body.Bytes(), &meBody)
+	if meBody["email"] != "magic@example.com" {
+		t.Fatalf("unexpected me payload %#v", meBody)
 	}
 }
 
@@ -806,7 +835,17 @@ func insertEmploymentTypeJob(t *testing.T, db *database.DB, rawID int, employmen
 	}
 }
 
+type loginCodePayload struct {
+	DebugCode string
+	DebugLink string
+}
+
 func requestLoginCode(t *testing.T, router http.Handler, email string) string {
+	t.Helper()
+	return requestLoginCodePayload(t, router, email).DebugCode
+}
+
+func requestLoginCodePayload(t *testing.T, router http.Handler, email string) loginCodePayload {
 	t.Helper()
 	body, _ := json.Marshal(map[string]string{"email": email})
 	req := httptest.NewRequest(http.MethodPost, "/auth/login/request-code", bytes.NewReader(body))
@@ -816,7 +855,14 @@ func requestLoginCode(t *testing.T, router http.Handler, email string) string {
 	assertStatus(t, rec.Code, http.StatusOK)
 	var payload map[string]any
 	decodeBody(t, rec.Body.Bytes(), &payload)
-	return payload["debug_code"].(string)
+	result := loginCodePayload{}
+	if value, ok := payload["debug_code"].(string); ok {
+		result.DebugCode = value
+	}
+	if value, ok := payload["debug_link"].(string); ok {
+		result.DebugLink = value
+	}
+	return result
 }
 
 func verifyLoginCode(t *testing.T, router http.Handler, email, code string) *http.Cookie {
@@ -828,6 +874,26 @@ func verifyLoginCode(t *testing.T, router http.Handler, email, code string) *htt
 	router.ServeHTTP(rec, req)
 	assertStatus(t, rec.Code, http.StatusOK)
 	return rec.Result().Cookies()[0]
+}
+
+func verifyLoginLink(t *testing.T, router http.Handler, token string) *http.Cookie {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"token": token})
+	req := httptest.NewRequest(http.MethodPost, "/auth/login/verify-link", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+	return rec.Result().Cookies()[0]
+}
+
+func magicTokenFromLink(t *testing.T, link string) string {
+	t.Helper()
+	parts := strings.SplitN(link, "token=", 2)
+	if len(parts) != 2 || parts[1] == "" {
+		t.Fatalf("missing token in debug link %q", link)
+	}
+	return parts[1]
 }
 
 func decodeBody(t *testing.T, body []byte, dest any) {

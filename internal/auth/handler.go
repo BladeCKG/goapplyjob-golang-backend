@@ -45,6 +45,7 @@ func NewHandler(cfg config.Config, db *database.DB) *Handler {
 func (h *Handler) Register(router gin.IRouter) {
 	router.POST("/auth/login/request-code", h.requestCode)
 	router.POST("/auth/login/verify-code", h.verifyCode)
+	router.POST("/auth/login/verify-link", h.verifyLink)
 	router.POST("/auth/password/signup", h.passwordSignup)
 	router.POST("/auth/password/login", h.passwordLogin)
 	router.GET("/auth/me", h.me)
@@ -104,6 +105,7 @@ func (h *Handler) requestCode(c *gin.Context) {
 	}
 
 	code := generateCode()
+	magicToken := randomToken()
 	now := utcNow()
 	expiresAt := now.Add(time.Duration(max(h.cfg.AuthCodeTTLMinutes, 1)) * time.Minute)
 	tx, err := h.db.SQL.BeginTx(c.Request.Context(), nil)
@@ -121,14 +123,28 @@ func (h *Handler) requestCode(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to store login code"})
 		return
 	}
+	if _, err := tx.ExecContext(c.Request.Context(), `INSERT INTO auth_verification_codes (user_id, code_hash, expires_at, created_at) VALUES (?, ?, ?, ?)`, userID, hashText(magicToken), expiresAt.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to store login code"})
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to store login code"})
 		return
 	}
 
+	magicLink := buildMagicLoginURL(h.cfg, magicToken)
+	if err := sendVerificationEmail(h.cfg, email, code, max(h.cfg.AuthCodeTTLMinutes, 1), magicLink); err != nil {
+		logVerificationEmailFailure(email, err)
+		if !h.cfg.AuthDebugReturnCode {
+			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to send code"})
+			return
+		}
+	}
+
 	response := gin.H{"ok": true}
 	if h.cfg.AuthDebugReturnCode {
 		response["debug_code"] = code
+		response["debug_link"] = magicLink
 	}
 	c.JSON(http.StatusOK, response)
 }
@@ -169,6 +185,69 @@ func (h *Handler) verifyCode(c *gin.Context) {
 	var codeID int64
 	if err := tx.QueryRowContext(c.Request.Context(), `SELECT id FROM auth_verification_codes WHERE user_id = ? AND code_hash = ? AND consumed_at IS NULL AND expires_at > ? ORDER BY created_at DESC LIMIT 1`, userID, hashText(code), utcNow().Format(time.RFC3339Nano)).Scan(&codeID); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Invalid email or code"})
+		return
+	}
+
+	now := utcNow()
+	if _, err := tx.ExecContext(c.Request.Context(), `UPDATE auth_verification_codes SET consumed_at = ? WHERE id = ?`, now.Format(time.RFC3339Nano), codeID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create session"})
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create session"})
+		return
+	}
+
+	if err := h.ensureDefaultFreeSubscription(c, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create session"})
+		return
+	}
+	sessionToken, err := h.createSessionForUser(c, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create session"})
+		return
+	}
+	h.setAuthCookie(c, sessionToken)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handler) verifyLink(c *gin.Context) {
+	var payload struct {
+		Token string `json:"token"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid request"})
+		return
+	}
+	token := strings.TrimSpace(payload.Token)
+	if token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Token is required"})
+		return
+	}
+
+	tx, err := h.db.SQL.BeginTx(c.Request.Context(), nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create session"})
+		return
+	}
+	defer tx.Rollback()
+
+	var (
+		codeID int64
+		userID int64
+	)
+	if err := tx.QueryRowContext(
+		c.Request.Context(),
+		`SELECT avc.id, u.id
+		 FROM auth_verification_codes avc
+		 JOIN auth_users u ON u.id = avc.user_id
+		 WHERE avc.code_hash = ? AND avc.consumed_at IS NULL AND avc.expires_at > ?
+		 ORDER BY avc.created_at DESC
+		 LIMIT 1`,
+		hashText(token),
+		utcNow().Format(time.RFC3339Nano),
+	).Scan(&codeID, &userID); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Invalid or expired sign-in link"})
 		return
 	}
 

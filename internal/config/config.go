@@ -11,11 +11,18 @@ type Config struct {
 	DatabaseURL                   string
 	AuthCodeTTLMinutes            int
 	AuthSessionTTLMin             int
+	AuthMagicLinkBaseURL          string
 	AuthCookieName                string
 	AuthCookieSecure              bool
 	AuthCookieSameSite            string
 	AuthCookieDomain              string
 	AuthDebugReturnCode           bool
+	SMTPHost                      string
+	SMTPPort                      int
+	SMTPUser                      string
+	SMTPPass                      string
+	SMTPFrom                      string
+	SMTPTLS                       bool
 	PublicJobsMaxPerPage          int
 	PublicJobsMaxTotal            int
 	PaymentSuccessURL             string
@@ -52,11 +59,18 @@ func Load() Config {
 		DatabaseURL:                   getenv("DATABASE_URL", "file:page_extract.db?_foreign_keys=on"),
 		AuthCodeTTLMinutes:            getenvInt("AUTH_CODE_TTL_MINUTES", 10),
 		AuthSessionTTLMin:             getenvInt("AUTH_SESSION_TTL_MINUTES", 60*24*7),
+		AuthMagicLinkBaseURL:          getenv("AUTH_MAGIC_LINK_BASE_URL", "http://localhost:3000/auth/verify"),
 		AuthCookieName:                getenv("AUTH_COOKIE_NAME", "session_token"),
 		AuthCookieSecure:              getenvBool("AUTH_COOKIE_SECURE", false),
 		AuthCookieSameSite:            getenv("AUTH_COOKIE_SAMESITE", "lax"),
 		AuthCookieDomain:              os.Getenv("AUTH_COOKIE_DOMAIN"),
 		AuthDebugReturnCode:           getenvBool("AUTH_DEBUG_RETURN_CODE", false),
+		SMTPHost:                      getenv("SMTP_HOST", ""),
+		SMTPPort:                      getenvInt("SMTP_PORT", 587),
+		SMTPUser:                      getenv("SMTP_USER", ""),
+		SMTPPass:                      getenv("SMTP_PASS", ""),
+		SMTPFrom:                      getenv("SMTP_FROM", ""),
+		SMTPTLS:                       getenvBool("SMTP_TLS", true),
 		PublicJobsMaxPerPage:          getenvInt("PUBLIC_JOBS_MAX_PER_PAGE", 10),
 		PublicJobsMaxTotal:            getenvInt("PUBLIC_JOBS_MAX_TOTAL", 50),
 		PaymentSuccessURL:             getenv("PAYMENT_SUCCESS_URL", "http://localhost:3000/billing/success"),
