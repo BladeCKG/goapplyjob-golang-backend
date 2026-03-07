@@ -107,15 +107,24 @@ func TestCoinPaymentsVerifyWebhookSignatureAcceptsValidSignature(t *testing.T) {
 
 func TestCoinPaymentsParseWebhookMapsStatusAndIdentifiers(t *testing.T) {
 	gateway := NewCoinPaymentsGateway(config.Config{})
-	paid := gateway.ParseWebhook(map[string]any{"invoice": "55", "txn_id": "cp_1", "status": "100"})
-	if paid.OrderID != "55" || paid.ProviderPaymentID != "cp_1" || paid.Status != PaymentPaid {
+	paid := gateway.ParseWebhook(map[string]any{
+		"type":    "invoicePaid",
+		"invoice": map[string]any{"invoiceNumber": "55", "id": "cp_inv_1"},
+	})
+	if paid.OrderID != "55" || paid.ProviderPaymentID != "cp_inv_1" || paid.Status != PaymentPaid {
 		t.Fatalf("unexpected paid webhook %#v", paid)
 	}
-	failed := gateway.ParseWebhook(map[string]any{"invoice": "56", "txn_id": "cp_2", "status": "-1"})
+	failed := gateway.ParseWebhook(map[string]any{
+		"type":    "invoiceCancelled",
+		"invoice": map[string]any{"invoiceNumber": "56", "id": "cp_inv_2"},
+	})
 	if failed.Status != PaymentFailed {
 		t.Fatalf("unexpected failed webhook %#v", failed)
 	}
-	pending := gateway.ParseWebhook(map[string]any{"invoice": "57", "txn_id": "cp_3", "status": "1"})
+	pending := gateway.ParseWebhook(map[string]any{
+		"type":    "invoicePending",
+		"invoice": map[string]any{"invoiceNumber": "57", "id": "cp_inv_3"},
+	})
 	if pending.Status != PaymentPending {
 		t.Fatalf("unexpected pending webhook %#v", pending)
 	}

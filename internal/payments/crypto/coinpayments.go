@@ -77,17 +77,42 @@ func (g *CoinPaymentsGateway) VerifyWebhookSignature(payload map[string]any, hea
 }
 
 func (g *CoinPaymentsGateway) ParseWebhook(payload map[string]any) WebhookParseResult {
-	status := PaymentPending
-	switch strings.TrimSpace(fmt.Sprintf("%v", payload["status"])) {
-	case "100", "2":
-		status = PaymentPaid
-	case "-1":
-		status = PaymentFailed
+	eventType := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", payload["type"])))
+	invoice, _ := payload["invoice"].(map[string]any)
+	status := g.mapEventType(eventType)
+	if status == "" {
+		status = PaymentPending
+		switch strings.TrimSpace(fmt.Sprintf("%v", firstAny(invoice["status"], payload["status"]))) {
+		case "100", "2":
+			status = PaymentPaid
+		case "-1":
+			status = PaymentFailed
+		default:
+			switch strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", firstAny(invoice["statusText"], payload["statusText"], payload["status_text"])))) {
+			case "failed", "cancelled", "canceled", "error", "refunded", "expired":
+				status = PaymentFailed
+			case "complete", "confirmed", "finished", "paid":
+				status = PaymentPaid
+			}
+		}
 	}
 	return WebhookParseResult{
-		OrderID:           fmt.Sprintf("%v", firstAny(payload["invoice"], payload["invoiceNumber"], payload["custom"], "")),
-		ProviderPaymentID: fmt.Sprintf("%v", firstAny(payload["txn_id"], payload["id"], "")),
+		OrderID:           fmt.Sprintf("%v", firstAny(invoice["invoiceNumber"], invoice["invoiceId"], invoice["id"], payload["invoiceNumber"], payload["invoiceId"], payload["invoice"], "")),
+		ProviderPaymentID: fmt.Sprintf("%v", firstAny(invoice["id"], payload["id"], payload["txn_id"], "")),
 		Status:            status,
+	}
+}
+
+func (g *CoinPaymentsGateway) mapEventType(eventType string) PaymentStatus {
+	switch eventType {
+	case "invoicepaid", "invoicecompleted":
+		return PaymentPaid
+	case "invoicecancelled", "invoicetimedout", "invoicepaymenttimedout":
+		return PaymentFailed
+	case "invoicecreated", "invoicepending", "invoicepaymentcreated":
+		return PaymentPending
+	default:
+		return ""
 	}
 }
 
