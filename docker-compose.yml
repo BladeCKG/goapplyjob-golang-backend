@@ -2,34 +2,46 @@ services:
   api:
     build:
       context: .
-    image: goapplyjob-golang-backend
+    image: goapplyjob-backend
     ports:
       - "8080:8080"
     env_file:
       - .env
+    restart: unless-stopped
     volumes:
       - ./page_extract.db:/app/page_extract.db
+      - ./logs:/app/logs
+      - ./watcher_output:/app/watcher_output
+      - ./watcher_state.json:/app/watcher_state.json
 
   watcher:
     build:
       context: .
-    image: goapplyjob-golang-backend
+    image: goapplyjob-backend
     profiles:
       - workers
     env_file:
       - .env
+    restart: unless-stopped
     command: ["/app/api"]
     volumes:
       - ./page_extract.db:/app/page_extract.db
+      - ./logs:/app/logs
+      - ./watcher_output:/app/watcher_output
+      - ./watcher_state.json:/app/watcher_state.json
 
   importer:
     build:
       context: .
-    image: goapplyjob-golang-backend
+    image: goapplyjob-backend
     profiles:
       - workers
     env_file:
       - .env
+    restart: unless-stopped
     command: ["/app/api"]
     volumes:
       - ./page_extract.db:/app/page_extract.db
+      - ./logs:/app/logs
+      - ./watcher_output:/app/watcher_output
+      - ./watcher_state.json:/app/watcher_state.json

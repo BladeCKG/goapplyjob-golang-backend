@@ -88,6 +88,48 @@ Optional env:
 SKIPPABLE_RECHECK_BATCH_SIZE=100
 ```
 
+### Fresh Environment Bootstrap (Linux + Windows)
+
+Start the current backend commands in one step:
+
+Linux:
+
+```bash
+cd <backend-directory>
+chmod +x scripts/bootstrap_and_start.sh
+./scripts/bootstrap_and_start.sh
+```
+
+Windows PowerShell:
+
+```powershell
+cd <backend-directory>
+.\scripts\bootstrap_and_start.ps1
+```
+
+What these scripts do:
+
+* create `.env` from `.env.example` if missing
+* ensure `logs/`, `watcher_output/`, and `watcher_state.json` exist
+* start the Go API and watcher commands in background
+
+### Docker Bootstrap (Linux + Windows)
+
+Linux:
+
+```bash
+cd <backend-directory>
+chmod +x scripts/docker_bootstrap_and_start.sh
+./scripts/docker_bootstrap_and_start.sh
+```
+
+Windows PowerShell:
+
+```powershell
+cd <backend-directory>
+.\scripts\docker_bootstrap_and_start.ps1
+```
+
 ### Adding new database migrations
 
 This expects `goose` to be installed and it can be found from the `$PATH`:
