@@ -165,6 +165,21 @@ Notes:
 * `DATABASE_URL` is wired from Render Postgres.
 * `AUTH_COOKIE_SECURE=true` is already set in `render.yaml`.
 
+### GitHub Actions Worker Runner
+
+This repo includes `.github/workflows/workers-cron.yml` for scheduled worker execution in GitHub Actions.
+
+Schedule:
+
+* every hour: `watcher` and `importer`
+* every 3 hours: `parsedfreshness`
+* manual `workflow_dispatch`: runs all configured worker steps immediately
+
+Required repository secrets:
+
+* `DATABASE_URL`
+* `WATCH_URL`
+
 ### Adding new database migrations
 
 This expects `goose` to be installed and it can be found from the `$PATH`:

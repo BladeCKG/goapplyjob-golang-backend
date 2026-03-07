@@ -1,0 +1,47 @@
+name: Backend Workers Cron
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+jobs:
+  run-workers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      WATCH_URL: ${{ secrets.WATCH_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run hourly workers
+        env:
+          WATCH_RUN_ONCE: "true"
+          RAW_IMPORT_RUN_ONCE: "true"
+        run: |
+          go run ./cmd/watcher
+          go run ./cmd/importer
+
+      - name: Run every-3-hours workers
+        env:
+          PARSED_JOB_RUN_ONCE: "true"
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            go run ./cmd/parsedfreshness
+            exit 0
+          fi
+
+          HOUR="$(date -u +%H)"
+          if [ $((10#$HOUR % 3)) -eq 0 ]; then
+            go run ./cmd/parsedfreshness
+          else
+            echo "Skipping 3-hour workers at hour=$HOUR (UTC)."
+          fi
