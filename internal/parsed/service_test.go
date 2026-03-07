@@ -48,7 +48,7 @@ func TestNaiveAndAwareDatetimesAreComparedSafely(t *testing.T) {
 	}
 }
 
-func TestProcessPendingClearsStalePayloadWhenSourceCreatedAtIsOlderThanPostDate(t *testing.T) {
+func TestProcessPendingKeepsParsingWhenSourceCreatedAtIsOlderThanPostDate(t *testing.T) {
 	db, err := database.Open("file:test_parsed_stale?mode=memory&cache=shared")
 	if err != nil {
 		t.Fatal(err)
@@ -85,14 +85,22 @@ func TestProcessPendingClearsStalePayloadWhenSourceCreatedAtIsOlderThanPostDate(
 	}
 
 	var isReady, isParsed int
-	var rawJSON any
-	if err := db.SQL.QueryRowContext(context.Background(), `SELECT is_ready, is_parsed, raw_json FROM raw_us_jobs WHERE url = ?`, "https://example.com/jobs/1").Scan(&isReady, &isParsed, &rawJSON); err != nil {
+	var rawJSONText string
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT is_ready, is_parsed, raw_json FROM raw_us_jobs WHERE url = ?`, "https://example.com/jobs/1").Scan(&isReady, &isParsed, &rawJSONText); err != nil {
 		t.Fatal(err)
 	}
-	if isReady != 0 || isParsed != 0 {
-		t.Fatalf("expected stale row to be reset, got is_ready=%d is_parsed=%d", isReady, isParsed)
+	if isReady != 1 || isParsed != 1 {
+		t.Fatalf("expected row to stay ready and parsed, got is_ready=%d is_parsed=%d", isReady, isParsed)
 	}
-	if rawJSON != nil {
-		t.Fatalf("expected stale row raw_json to be cleared, got %#v", rawJSON)
+	if rawJSONText == "" {
+		t.Fatal("expected raw payload to remain populated")
+	}
+
+	var parsedCount int
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM parsed_jobs WHERE raw_us_job_id = 1`).Scan(&parsedCount); err != nil {
+		t.Fatal(err)
+	}
+	if parsedCount != 1 {
+		t.Fatalf("expected parsed row to be created, got %d", parsedCount)
 	}
 }

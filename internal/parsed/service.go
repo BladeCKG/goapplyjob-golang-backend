@@ -64,21 +64,20 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	if batchSize <= 0 {
 		batchSize = 100
 	}
-	rows, err := s.DB.SQL.QueryContext(ctx, `SELECT id, post_date, raw_json FROM raw_us_jobs WHERE is_ready = 1 AND is_parsed = 0 ORDER BY id ASC LIMIT ?`, batchSize)
+	rows, err := s.DB.SQL.QueryContext(ctx, `SELECT id, raw_json FROM raw_us_jobs WHERE is_ready = 1 AND is_parsed = 0 ORDER BY id ASC LIMIT ?`, batchSize)
 	if err != nil {
 		return 0, err
 	}
 	defer rows.Close()
 
 	type rawRow struct {
-		id       int64
-		postDate string
-		rawJSON  sql.NullString
+		id      int64
+		rawJSON sql.NullString
 	}
 	pending := make([]rawRow, 0, batchSize)
 	for rows.Next() {
 		var row rawRow
-		if err := rows.Scan(&row.id, &row.postDate, &row.rawJSON); err != nil {
+		if err := rows.Scan(&row.id, &row.rawJSON); err != nil {
 			return 0, err
 		}
 		pending = append(pending, row)
@@ -89,10 +88,6 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 
 	processed := 0
 	for _, row := range pending {
-		postDate, err := parseDBDatetime(row.postDate)
-		if err != nil {
-			continue
-		}
 		payload := map[string]any{}
 		if !row.rawJSON.Valid || row.rawJSON.String == "" {
 			if _, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = 1 WHERE id = ?`, row.id); err != nil {
@@ -109,14 +104,6 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			continue
 		}
 		sourceCreatedAt := parseDT(payload["created_at"])
-		if isSourceOlderThanPostDate(sourceCreatedAt, postDate) {
-			if _, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_ready = 0, raw_json = NULL, is_parsed = 0 WHERE id = ?`, row.id); err != nil {
-				return processed, err
-			}
-			processed++
-			continue
-		}
-
 		if _, err := s.DB.SQL.ExecContext(
 			ctx,
 			`INSERT INTO parsed_jobs (raw_us_job_id, created_at_source, url, categorized_job_title, role_title, updated_at)
