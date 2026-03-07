@@ -187,7 +187,24 @@ func (h *Handler) jobDetail(c *gin.Context) {
 }
 
 func (h *Handler) listJobs(c *gin.Context) {
-	isPreview := h.auth.OptionalCurrentUser(c) == nil
+	currentUser := h.auth.OptionalCurrentUser(c)
+	hasFullAccess := false
+	if currentUser != nil {
+		var activeID int64
+		err := h.db.SQL.QueryRowContext(
+			c.Request.Context(),
+			`SELECT s.id
+			 FROM user_subscriptions s
+			 JOIN pricing_plans p ON p.id = s.pricing_plan_id
+			 WHERE s.user_id = ? AND s.is_active = 1 AND s.ends_at > ? AND p.is_active = 1
+			 ORDER BY s.ends_at DESC
+			 LIMIT 1`,
+			currentUser.ID,
+			time.Now().UTC().Format(time.RFC3339Nano),
+		).Scan(&activeID)
+		hasFullAccess = err == nil
+	}
+	isPreview := !hasFullAccess
 	page := max(parseIntDefault(c.Query("page"), 1), 1)
 	perPage := max(parseIntDefault(c.Query("per_page"), 20), 1)
 	if perPage > 100 {
@@ -277,12 +294,13 @@ func (h *Handler) listJobs(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"page":           pageOut,
-		"per_page":       perPageOut,
-		"total":          rawTotal,
-		"is_preview":     isPreview,
-		"requires_login": isPreview && rawTotal > len(items),
-		"items":          items,
+		"page":             pageOut,
+		"per_page":         perPageOut,
+		"total":            rawTotal,
+		"is_preview":       isPreview,
+		"requires_login":   currentUser == nil && isPreview && rawTotal > len(items),
+		"requires_upgrade": currentUser != nil && isPreview && rawTotal > len(items),
+		"items":            items,
 	})
 }
 

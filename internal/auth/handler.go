@@ -25,6 +25,7 @@ const (
 	passwordHashIterations = 120000
 	passwordSaltBytes      = 16
 	passwordMinLength      = 8
+	freePlanCode           = "free"
 )
 
 type Handler struct {
@@ -181,6 +182,10 @@ func (h *Handler) verifyCode(c *gin.Context) {
 		return
 	}
 
+	if err := h.ensureDefaultFreeSubscription(c, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create session"})
+		return
+	}
 	sessionToken, err := h.createSessionForUser(c, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create session"})
@@ -234,6 +239,10 @@ func (h *Handler) passwordSignup(c *gin.Context) {
 		return
 	}
 
+	if err := h.ensureDefaultFreeSubscription(c, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create session"})
+		return
+	}
 	sessionToken, err := h.createSessionForUser(c, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create session"})
@@ -384,6 +393,62 @@ func (h *Handler) createSessionForUser(c *gin.Context, userID int64) (string, er
 		return "", err
 	}
 	return sessionToken, nil
+}
+
+func (h *Handler) ensureDefaultFreeSubscription(c *gin.Context, userID int64) error {
+	now := utcNow()
+	_, err := h.db.SQL.ExecContext(
+		c.Request.Context(),
+		`INSERT INTO pricing_plans (code, name, billing_cycle, duration_days, price_usd, is_active, created_at)
+		 VALUES (?, ?, ?, ?, ?, 1, ?)
+		 ON CONFLICT(code) DO UPDATE SET
+		   name = excluded.name,
+		   billing_cycle = excluded.billing_cycle,
+		   duration_days = excluded.duration_days,
+		   price_usd = excluded.price_usd,
+		   is_active = 1`,
+		freePlanCode,
+		"Free",
+		"free",
+		max(h.cfg.FreePlanDurationDays, 1),
+		0,
+		now.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return err
+	}
+
+	var activeCount int
+	if err := h.db.SQL.QueryRowContext(
+		c.Request.Context(),
+		`SELECT COUNT(1)
+		 FROM user_subscriptions s
+		 JOIN pricing_plans p ON p.id = s.pricing_plan_id
+		 WHERE s.user_id = ? AND s.is_active = 1 AND s.ends_at > ? AND p.is_active = 1`,
+		userID,
+		now.Format(time.RFC3339Nano),
+	).Scan(&activeCount); err != nil {
+		return err
+	}
+	if activeCount > 0 {
+		return nil
+	}
+
+	var planID int64
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT id FROM pricing_plans WHERE code = ? AND is_active = 1 LIMIT 1`, freePlanCode).Scan(&planID); err != nil {
+		return err
+	}
+	endsAt := now.Add(time.Duration(max(h.cfg.FreePlanDurationDays, 1)) * 24 * time.Hour)
+	_, err = h.db.SQL.ExecContext(
+		c.Request.Context(),
+		`INSERT INTO user_subscriptions (user_id, pricing_plan_id, starts_at, ends_at, is_active, created_at) VALUES (?, ?, ?, ?, 1, ?)`,
+		userID,
+		planID,
+		now.Format(time.RFC3339Nano),
+		endsAt.Format(time.RFC3339Nano),
+		now.Format(time.RFC3339Nano),
+	)
+	return err
 }
 
 func (h *Handler) setAuthCookie(c *gin.Context, sessionToken string) {

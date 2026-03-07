@@ -3,7 +3,10 @@ package app
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha512"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -29,6 +32,9 @@ func TestJobsPublicAccess(t *testing.T) {
 	decodeBody(t, rec.Body.Bytes(), &body)
 	if body["is_preview"] != true {
 		t.Fatalf("expected preview mode, got %#v", body["is_preview"])
+	}
+	if body["requires_upgrade"] != false {
+		t.Fatalf("expected no upgrade requirement, got %#v", body["requires_upgrade"])
 	}
 }
 
@@ -92,6 +98,9 @@ func TestJobsPublicPreviewIsLimited(t *testing.T) {
 	decodeBody(t, rec1.Body.Bytes(), &page1)
 	if int(page1["total"].(float64)) != 7 || int(page1["page"].(float64)) != 1 || int(page1["per_page"].(float64)) != 3 || len(page1["items"].([]any)) != 3 {
 		t.Fatalf("unexpected preview page1 %#v", page1)
+	}
+	if page1["requires_login"] != true || page1["requires_upgrade"] != false {
+		t.Fatalf("unexpected preview access flags %#v", page1)
 	}
 
 	req2 := httptest.NewRequest(http.MethodGet, "/jobs?per_page=100&page=2", nil)
@@ -210,6 +219,9 @@ func TestPricingFlow(t *testing.T) {
 
 	var payload map[string]any
 	decodeBody(t, subscribeRec.Body.Bytes(), &payload)
+	if payload["crypto_payment"] == nil {
+		t.Fatalf("expected crypto payment payload %#v", payload)
+	}
 	paymentID := int(payload["payment_id"].(float64))
 
 	confirmReq := httptest.NewRequest(http.MethodPost, "/pricing/payments/"+strconv.Itoa(paymentID)+"/confirm", nil)
@@ -217,6 +229,90 @@ func TestPricingFlow(t *testing.T) {
 	confirmRec := httptest.NewRecorder()
 	router.ServeHTTP(confirmRec, confirmReq)
 	assertStatus(t, confirmRec.Code, http.StatusOK)
+}
+
+func TestDefaultFreeSubscriptionAndUpgradePreview(t *testing.T) {
+	cfg := config.Load()
+	cfg.DatabaseURL = "file:test_upgrade_preview?mode=memory&cache=shared"
+	cfg.AuthDebugReturnCode = true
+	cfg.PublicJobsMaxPerPage = 3
+	db, err := database.Open(cfg.DatabaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	router := NewRouter(cfg, db)
+
+	for idx := 0; idx < 7; idx++ {
+		insertJob(t, db, idx+100, "https://example.com/free-"+strconv.Itoa(idx), "City-"+strconv.Itoa(idx), "State", 100, 110, idx%2 == 0, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC))
+	}
+
+	code := requestLoginCode(t, router, "upgrade-user@example.com")
+	cookie := verifyLoginCode(t, router, "upgrade-user@example.com", code)
+
+	var activeCount int
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT COUNT(1) FROM user_subscriptions WHERE is_active = 1`).Scan(&activeCount); err != nil {
+		t.Fatal(err)
+	}
+	if activeCount != 1 {
+		t.Fatalf("expected one active free subscription, got %d", activeCount)
+	}
+
+	_, err = db.SQL.ExecContext(context.Background(), `UPDATE user_subscriptions SET ends_at = ?, is_active = 0`, time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?per_page=100&page=1", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	if body["is_preview"] != true || body["requires_login"] != false || body["requires_upgrade"] != true {
+		t.Fatalf("unexpected upgrade preview payload %#v", body)
+	}
+}
+
+func TestCryptoWebhookRequiresSignatureAndActivatesSubscription(t *testing.T) {
+	cfg := config.Load()
+	cfg.DatabaseURL = "file:test_crypto_webhook_paid?mode=memory&cache=shared"
+	cfg.AuthDebugReturnCode = true
+	cfg.NowPaymentsIPNSecret = "secret-token"
+	db, err := database.Open(cfg.DatabaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	router := NewRouter(cfg, db)
+
+	code := requestLoginCode(t, router, "crypto-user@example.com")
+	cookie := verifyLoginCode(t, router, "crypto-user@example.com", code)
+
+	body, _ := json.Marshal(map[string]any{"plan_code": "monthly", "provider": "crypto", "payment_method": "crypto"})
+	subscribeReq := httptest.NewRequest(http.MethodPost, "/pricing/subscribe", bytes.NewReader(body))
+	subscribeReq.Header.Set("Content-Type", "application/json")
+	subscribeReq.AddCookie(cookie)
+	subscribeRec := httptest.NewRecorder()
+	router.ServeHTTP(subscribeRec, subscribeReq)
+	assertStatus(t, subscribeRec.Code, http.StatusOK)
+	var subscribeBody map[string]any
+	decodeBody(t, subscribeRec.Body.Bytes(), &subscribeBody)
+	paymentID := int(subscribeBody["payment_id"].(float64))
+
+	webhookPayload := map[string]any{"order_id": strconv.Itoa(paymentID), "payment_id": "np_1", "payment_status": "finished"}
+	rawPayload, _ := json.Marshal(webhookPayload)
+	mac := hmac.New(sha512.New, []byte("secret-token"))
+	_, _ = mac.Write(rawPayload)
+	signature := fmt.Sprintf("%x", mac.Sum(nil))
+
+	webhookReq := httptest.NewRequest(http.MethodPost, "/pricing/webhooks/crypto", bytes.NewReader(rawPayload))
+	webhookReq.Header.Set("Content-Type", "application/json")
+	webhookReq.Header.Set("x-nowpayments-sig", signature)
+	webhookRec := httptest.NewRecorder()
+	router.ServeHTTP(webhookRec, webhookReq)
+	assertStatus(t, webhookRec.Code, http.StatusOK)
 }
 
 func TestPasswordSignupAndLoginFlow(t *testing.T) {
