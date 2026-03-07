@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"time"
 
-	"weezel/example-gin/pkg/ginmiddleware"
+	"goapplyjob-golang-backend/pkg/ginmiddleware"
 
-	l "weezel/example-gin/pkg/logger"
+	l "goapplyjob-golang-backend/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"

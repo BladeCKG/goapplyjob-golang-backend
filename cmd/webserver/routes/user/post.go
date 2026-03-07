@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"weezel/example-gin/pkg/generated/sqlc"
+	"goapplyjob-golang-backend/pkg/generated/sqlc"
 
-	l "weezel/example-gin/pkg/logger"
+	l "goapplyjob-golang-backend/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 )

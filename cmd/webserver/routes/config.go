@@ -1,9 +1,9 @@
 package routes
 
 import (
-	"weezel/example-gin/cmd/webserver/routes/user"
-	"weezel/example-gin/pkg/generated/sqlc"
-	httpserver "weezel/example-gin/pkg/http/server"
+	"goapplyjob-golang-backend/cmd/webserver/routes/user"
+	"goapplyjob-golang-backend/pkg/generated/sqlc"
+	httpserver "goapplyjob-golang-backend/pkg/http/server"
 )
 
 // Add routes to our web server

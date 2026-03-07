@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
-	l "weezel/example-gin/pkg/logger"
+	l "goapplyjob-golang-backend/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 )

@@ -3,7 +3,7 @@ package user
 import (
 	"context"
 
-	"weezel/example-gin/pkg/generated/sqlc"
+	"goapplyjob-golang-backend/pkg/generated/sqlc"
 
 	"github.com/gin-gonic/gin"
 )

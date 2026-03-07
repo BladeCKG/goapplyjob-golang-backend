@@ -8,10 +8,10 @@ import (
 	"os"
 	"strings"
 
-	"weezel/example-gin/pkg/config"
-	"weezel/example-gin/pkg/postgres"
+	"goapplyjob-golang-backend/pkg/config"
+	"goapplyjob-golang-backend/pkg/postgres"
 
-	l "weezel/example-gin/pkg/logger"
+	l "goapplyjob-golang-backend/pkg/logger"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"

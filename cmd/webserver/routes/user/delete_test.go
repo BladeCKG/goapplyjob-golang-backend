@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"weezel/example-gin/pkg/generated/sqlc"
+	"goapplyjob-golang-backend/pkg/generated/sqlc"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgtype"

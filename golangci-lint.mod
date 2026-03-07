@@ -1,4 +1,4 @@
-module weezel/example-gin/golangci-lint
+module goapplyjob-golang-backend/golangci-lint
 
 go 1.24.3
 

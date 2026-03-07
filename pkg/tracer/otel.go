@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	l "weezel/example-gin/pkg/logger"
+	l "goapplyjob-golang-backend/pkg/logger"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"

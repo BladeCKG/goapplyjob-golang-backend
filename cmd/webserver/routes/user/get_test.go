@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"weezel/example-gin/pkg/generated/sqlc"
+	"goapplyjob-golang-backend/pkg/generated/sqlc"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/go-cmp/cmp"

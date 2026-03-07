@@ -9,15 +9,15 @@ import (
 	"os/signal"
 	"syscall"
 
-	"weezel/example-gin/cmd/webserver/routes"
-	"weezel/example-gin/pkg/config"
-	"weezel/example-gin/pkg/generated/sqlc"
-	httpserver "weezel/example-gin/pkg/http/server"
-	"weezel/example-gin/pkg/postgres"
-	"weezel/example-gin/pkg/profiling"
-	"weezel/example-gin/pkg/tracer"
+	"goapplyjob-golang-backend/cmd/webserver/routes"
+	"goapplyjob-golang-backend/pkg/config"
+	"goapplyjob-golang-backend/pkg/generated/sqlc"
+	httpserver "goapplyjob-golang-backend/pkg/http/server"
+	"goapplyjob-golang-backend/pkg/postgres"
+	"goapplyjob-golang-backend/pkg/profiling"
+	"goapplyjob-golang-backend/pkg/tracer"
 
-	l "weezel/example-gin/pkg/logger"
+	l "goapplyjob-golang-backend/pkg/logger"
 )
 
 var serviceName = cmp.Or(os.Getenv("APP_NAME"), "example-gin")

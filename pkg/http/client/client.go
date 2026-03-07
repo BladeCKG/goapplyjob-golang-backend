@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	l "weezel/example-gin/pkg/logger"
+	l "goapplyjob-golang-backend/pkg/logger"
 )
 
 type Option func(h *HTTPClient)

@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"weezel/example-gin/pkg/config"
+	"goapplyjob-golang-backend/pkg/config"
 
-	l "weezel/example-gin/pkg/logger"
+	l "goapplyjob-golang-backend/pkg/logger"
 
 	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5"
