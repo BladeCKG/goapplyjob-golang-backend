@@ -120,6 +120,31 @@ func ExtractJob(htmlText, companyHTML string) map[string]any {
 	}
 }
 
+func ExtractJobFromHTML(htmlText string, fallbackJobURL string) map[string]any {
+	payload := ExtractJob(htmlText, "")
+	if len(payload) == 0 {
+		return payload
+	}
+	if strings.TrimSpace(stringValue(payload["url"])) == "" && strings.TrimSpace(fallbackJobURL) != "" {
+		payload["url"] = fallbackJobURL
+	}
+	requirements, cleanedDescription := extractRoleRequirementsAndCleanDescription(stringValue(payload["roleDescription"]))
+	if requirements != nil {
+		payload["roleRequirements"] = requirements
+	}
+	if cleanedDescription != nil {
+		payload["roleDescription"] = cleanedDescription
+	}
+	if company, _ := payload["company"].(map[string]any); company == nil || len(company) == 0 {
+		jobPosting := findJobPostingLD(htmlText)
+		companyPayload := fallbackCompanyFromJobPosting(jobPosting, htmlText)
+		if companyPayload != nil {
+			payload["company"] = toRawCompanyShape(companyPayload)
+		}
+	}
+	return payload
+}
+
 func findJobPostingLD(htmlText string) map[string]any {
 	for _, match := range scriptLDPattern.FindAllStringSubmatch(htmlText, -1) {
 		raw := strings.TrimSpace(match[1])
@@ -302,6 +327,65 @@ func extractBuiltinSummaryText(htmlText string) string {
 	return ""
 }
 
+func normalizeHeadingText(value string) string {
+	replacer := strings.NewReplacer("\u2019", "'", "\u2018", "'", "\u2032", "'")
+	normalized := replacer.Replace(value)
+	normalized = strings.ToLower(strings.TrimSpace(spacePattern.ReplaceAllString(normalized, " ")))
+	return normalized
+}
+
+func extractRoleRequirementsAndCleanDescription(descriptionText string) (any, any) {
+	if strings.TrimSpace(descriptionText) == "" {
+		return nil, nil
+	}
+	lines := strings.Split(descriptionText, "\n")
+	cleanedLines := make([]string, 0, len(lines))
+	requirementLines := []string{}
+	capturing := false
+	requirementHeadingPattern := regexp.MustCompile(`(?i)(requirement|qualification|what you'll bring|what you bring|must have|who you are|experience you have|skills and qualifications)`)
+	stopHeadingPattern := regexp.MustCompile(`(?i)(about|responsibilit|what you'll do|what you will do|benefit|perks|compensation|salary|about the role|company)`)
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		normalized := normalizeHeadingText(trimmed)
+		if requirementHeadingPattern.MatchString(normalized) && len(trimmed) <= 80 {
+			capturing = true
+			continue
+		}
+		if capturing && stopHeadingPattern.MatchString(normalized) && len(trimmed) <= 80 {
+			capturing = false
+		}
+		if capturing {
+			requirementLines = append(requirementLines, trimmed)
+			continue
+		}
+		cleanedLines = append(cleanedLines, trimmed)
+	}
+	if len(requirementLines) == 0 {
+		return nil, strings.Join(cleanedLines, "\n")
+	}
+	return strings.Join(dedupeLines(requirementLines), "\n"), strings.Join(cleanedLines, "\n")
+}
+
+func dedupeLines(lines []string) []string {
+	out := []string{}
+	seen := map[string]struct{}{}
+	for _, line := range lines {
+		key := strings.ToLower(strings.TrimSpace(line))
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, strings.TrimSpace(line))
+	}
+	return out
+}
+
 func extractJSONLDSkills(jobPosting map[string]any) []string {
 	out := []string{}
 	seen := map[string]struct{}{}
@@ -370,6 +454,74 @@ func extractCompanyInfo(companyHTML, companySameAs string) map[string]any {
 		"company_match_key":           companyMatchKey,
 		"source_company_profile_url":  valueOrNil(canonicalURL),
 		"source_company_profile_init": mapOrNil(initPayload),
+		"updated_at":                  time.Now().UTC().Format(time.RFC3339Nano),
+	}
+}
+
+func extractIndustrySpecialitiesFromJobPosting(jobPosting map[string]any) any {
+	values := []string{}
+	var add func(any)
+	add = func(value any) {
+		switch item := value.(type) {
+		case string:
+			parts := []string{item}
+			if strings.Contains(item, ",") {
+				parts = strings.Split(item, ",")
+			}
+			for _, part := range parts {
+				part = strings.TrimSpace(part)
+				if part != "" {
+					values = append(values, part)
+				}
+			}
+		case []any:
+			for _, entry := range item {
+				add(entry)
+			}
+		}
+	}
+	add(jobPosting["industry"])
+	deduped := dedupeLines(values)
+	if len(deduped) == 0 {
+		return nil
+	}
+	return deduped
+}
+
+func normalizeEmployeeRange(value string) any {
+	digits := regexp.MustCompile(`[^0-9]`).ReplaceAllString(value, "")
+	if digits == "" {
+		return nil
+	}
+	return digits
+}
+
+func fallbackCompanyFromJobPosting(jobPosting map[string]any, jobPageHTML string) map[string]any {
+	hiringOrg, _ := jobPosting["hiringOrganization"].(map[string]any)
+	companyName := stringValue(hiringOrg["name"])
+	companySameAs := stringValue(hiringOrg["sameAs"])
+	companySlug := companySlugFromURL(companySameAs)
+	var foundedYear any
+	if value := matchOne(jobPageHTML, `(?is)Year Founded:\s*([0-9]{4})`); value != "" {
+		foundedYear = value
+	}
+	employeeRange := normalizeEmployeeRange(matchOne(jobPageHTML, `(?is)([0-9][0-9,]*)\s+employees`))
+	return map[string]any{
+		"external_company_id":         nil,
+		"name":                        valueOrNil(companyName),
+		"slug":                        valueOrNil(companySlug),
+		"tagline":                     nil,
+		"founded_year":                foundedYear,
+		"home_page_url":               nil,
+		"linkedin_url":                nil,
+		"employee_range":              employeeRange,
+		"profile_pic_url":             valueOrNil(stringValue(hiringOrg["logo"])),
+		"industry_specialities":       extractIndustrySpecialitiesFromJobPosting(jobPosting),
+		"source_name":                 "builtin",
+		"source_company_slug":         valueOrNil(companySlug),
+		"company_match_key":           buildCompanyMatchKey(companyName, "", ""),
+		"source_company_profile_url":  valueOrNil(companySameAs),
+		"source_company_profile_init": nil,
 		"updated_at":                  time.Now().UTC().Format(time.RFC3339Nano),
 	}
 }

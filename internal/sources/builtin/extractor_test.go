@@ -1,6 +1,9 @@
 package builtin
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestExtractJobBuildsBuiltInRawJobShape(t *testing.T) {
 	htmlText := `
@@ -121,5 +124,39 @@ func TestExtractJobBuildsBuiltInRawJobShape(t *testing.T) {
 	states, _ := payload["locationUSStates"].([]string)
 	if len(states) != 2 || states[0] != "NY" || states[1] != "TX" {
 		t.Fatalf("unexpected state list %#v", payload["locationUSStates"])
+	}
+}
+
+func TestExtractRoleRequirementsAndCleanDescription(t *testing.T) {
+	requirements, cleaned := extractRoleRequirementsAndCleanDescription("What You'll Do\nBuild systems\nRequirements\n5+ years of Python\nStrong SQL skills\nBenefits\nRemote-first")
+	if requirements == nil || !strings.Contains(requirements.(string), "5+ years of Python") {
+		t.Fatalf("expected requirements extraction, got %#v", requirements)
+	}
+	if cleaned == nil || strings.Contains(cleaned.(string), "5+ years of Python") {
+		t.Fatalf("expected cleaned description without requirements, got %#v", cleaned)
+	}
+}
+
+func TestExtractIndustrySpecialitiesFromJobPostingHandlesListAndCSV(t *testing.T) {
+	values, _ := extractIndustrySpecialitiesFromJobPosting(map[string]any{
+		"industry": []any{"Software", "AI, Analytics", "software", "Cloud"},
+	}).([]string)
+	if len(values) != 4 || values[1] != "AI" || values[2] != "Analytics" {
+		t.Fatalf("unexpected industries %#v", values)
+	}
+}
+
+func TestFallbackCompanyFromJobPosting(t *testing.T) {
+	company := fallbackCompanyFromJobPosting(map[string]any{
+		"hiringOrganization": map[string]any{
+			"name":   "AAA",
+			"sameAs": "https://builtin.com/company/aaa",
+		},
+	}, `<html><body><span>Year Founded: 1902</span><p>We have 14,000 employees in 21 states.</p></body></html>`)
+	if company["name"] != "AAA" || company["slug"] != "aaa" {
+		t.Fatalf("unexpected fallback company %#v", company)
+	}
+	if company["founded_year"] != "1902" || company["employee_range"] != "14000" {
+		t.Fatalf("unexpected fallback company values %#v", company)
 	}
 }
