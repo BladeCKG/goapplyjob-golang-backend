@@ -244,66 +244,71 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 	}
 	inserted, updated, failedDB := 0, 0, 0
 	failedRows := map[string]SitemapRow{}
+	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+		tx, err := s.DB.SQL.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
 
-	tx, err := s.DB.SQL.Begin()
-	if err != nil {
 		for url, row := range buffer {
-			failedRows[url] = row
-		}
-		return 0, 0, len(buffer), failedRows
-	}
-	defer tx.Rollback()
+			postDate := row.PostDate
+			var existingID int64
+			var existingPostDate string
+			err := tx.QueryRow(`SELECT id, post_date FROM raw_us_jobs WHERE source = ? AND url = ? LIMIT 1`, source, url).Scan(&existingID, &existingPostDate)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				failedDB++
+				failedRows[url] = row
+				continue
+			}
+			rawJSONText := any(nil)
+			isReady := 0
+			if row.RawJSON != nil {
+				body, _ := json.Marshal(row.RawJSON)
+				rawJSONText = string(body)
+				isReady = 1
+			}
+			if errors.Is(err, sql.ErrNoRows) {
+				if _, err := tx.Exec(`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, retry_count, raw_json) VALUES (?, ?, ?, ?, 0, 0, ?)`, source, url, postDate.Format(time.RFC3339), isReady, rawJSONText); err != nil {
+					failedDB++
+					failedRows[url] = row
+					continue
+				}
+				inserted++
+				continue
+			}
 
-	for url, row := range buffer {
-		postDate := row.PostDate
-		var existingID int64
-		var existingPostDate string
-		err := tx.QueryRow(`SELECT id, post_date FROM raw_us_jobs WHERE source = ? AND url = ? LIMIT 1`, source, url).Scan(&existingID, &existingPostDate)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			failedDB++
-			failedRows[url] = row
-			continue
-		}
-		rawJSONText := any(nil)
-		isReady := 0
-		if row.RawJSON != nil {
-			body, _ := json.Marshal(row.RawJSON)
-			rawJSONText = string(body)
-			isReady = 1
-		}
-		if errors.Is(err, sql.ErrNoRows) {
+			existingDT, err := normalizeDBDatetime(existingPostDate)
+			if err == nil && !postDate.After(existingDT) {
+				continue
+			}
+			if _, err := tx.Exec(`DELETE FROM parsed_jobs WHERE raw_us_job_id = ?`, existingID); err != nil {
+				failedDB++
+				failedRows[url] = row
+				continue
+			}
+			if _, err := tx.Exec(`DELETE FROM raw_us_jobs WHERE id = ?`, existingID); err != nil {
+				failedDB++
+				failedRows[url] = row
+				continue
+			}
 			if _, err := tx.Exec(`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, retry_count, raw_json) VALUES (?, ?, ?, ?, 0, 0, ?)`, source, url, postDate.Format(time.RFC3339), isReady, rawJSONText); err != nil {
 				failedDB++
 				failedRows[url] = row
 				continue
 			}
-			inserted++
-			continue
+			updated++
 		}
 
-		existingDT, err := normalizeDBDatetime(existingPostDate)
-		if err == nil && !postDate.After(existingDT) {
-			continue
-		}
-		if _, err := tx.Exec(`DELETE FROM parsed_jobs WHERE raw_us_job_id = ?`, existingID); err != nil {
-			failedDB++
+		return tx.Commit()
+	})
+	if err != nil && database.IsLockedError(err) {
+		for url, row := range buffer {
 			failedRows[url] = row
-			continue
 		}
-		if _, err := tx.Exec(`DELETE FROM raw_us_jobs WHERE id = ?`, existingID); err != nil {
-			failedDB++
-			failedRows[url] = row
-			continue
-		}
-		if _, err := tx.Exec(`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, retry_count, raw_json) VALUES (?, ?, ?, ?, 0, 0, ?)`, source, url, postDate.Format(time.RFC3339), isReady, rawJSONText); err != nil {
-			failedDB++
-			failedRows[url] = row
-			continue
-		}
-		updated++
+		return 0, 0, len(buffer), failedRows
 	}
-
-	if err := tx.Commit(); err != nil {
+	if err != nil {
 		for url, row := range buffer {
 			failedRows[url] = row
 		}
@@ -401,7 +406,12 @@ func (s *Service) PickUnconsumedPayloads(limit int, enabledSources map[string]st
 	}
 	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
 	args = append(args, limit)
-	rows, err := s.DB.SQL.Query(query, args...)
+	var rows *sql.Rows
+	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+		var queryErr error
+		rows, queryErr = s.DB.SQL.Query(query, args...)
+		return queryErr
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -436,12 +446,20 @@ func sortedSourceNames(values map[string]struct{}) []string {
 }
 
 func (s *Service) DeletePayload(payloadID int64) error {
-	_, err := s.DB.SQL.Exec(`DELETE FROM watcher_payloads WHERE id = ?`, payloadID)
+	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+		_, execErr := s.DB.SQL.Exec(`DELETE FROM watcher_payloads WHERE id = ?`, payloadID)
+		return execErr
+	})
 	return err
 }
 
 func (s *Service) DeleteConsumedPayloads() (int64, error) {
-	result, err := s.DB.SQL.Exec(`DELETE FROM watcher_payloads WHERE consumed_at IS NOT NULL`)
+	var result sql.Result
+	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+		var execErr error
+		result, execErr = s.DB.SQL.Exec(`DELETE FROM watcher_payloads WHERE consumed_at IS NOT NULL`)
+		return execErr
+	})
 	if err != nil {
 		return 0, err
 	}
@@ -453,17 +471,26 @@ func (s *Service) DeleteConsumedPayloads() (int64, error) {
 }
 
 func (s *Service) MarkPayloadConsumed(payloadID int64) error {
-	_, err := s.DB.SQL.Exec(`UPDATE watcher_payloads SET consumed_at = ? WHERE id = ?`, time.Now().UTC().Format(time.RFC3339Nano), payloadID)
+	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+		_, execErr := s.DB.SQL.Exec(`UPDATE watcher_payloads SET consumed_at = ? WHERE id = ?`, time.Now().UTC().Format(time.RFC3339Nano), payloadID)
+		return execErr
+	})
 	return err
 }
 
 func (s *Service) ReplacePayloadBody(payloadID int64, failedRows map[string]time.Time) error {
-	_, err := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, rowsToXML(failedRows), payloadID)
+	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+		_, execErr := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, rowsToXML(failedRows), payloadID)
+		return execErr
+	})
 	return err
 }
 
 func (s *Service) ReplacePayloadRows(payloadID int64, rows []SitemapRow) error {
-	_, err := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, rowsListToXML(rows), payloadID)
+	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+		_, execErr := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, rowsListToXML(rows), payloadID)
+		return execErr
+	})
 	return err
 }
 
@@ -481,7 +508,10 @@ func (s *Service) ReplaceBuiltinPayloadRows(payloadID int64, rows []SitemapRow) 
 		})
 	}
 	body, _ := json.Marshal(payload)
-	_, err := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, string(body), payloadID)
+	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+		_, execErr := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, string(body), payloadID)
+		return execErr
+	})
 	return err
 }
 
@@ -490,7 +520,10 @@ func (s *Service) ReplaceSourcePayloadRows(payloadID int64, source string, rows 
 	if !ok || plugin.SerializeImportRows == nil {
 		return errors.New("unsupported source payload serializer")
 	}
-	_, err := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, plugin.SerializeImportRows(rows), payloadID)
+	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+		_, execErr := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, plugin.SerializeImportRows(rows), payloadID)
+		return execErr
+	})
 	return err
 }
 

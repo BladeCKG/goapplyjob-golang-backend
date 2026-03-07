@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/sources/plugins"
@@ -136,11 +137,17 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		}
 		switch {
 		case statusCode == statusNotFound:
-			if _, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_skippable = 1, retry_count = retry_count + 1 WHERE id = ?`, job.id); err != nil {
+			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_skippable = 1, retry_count = retry_count + 1 WHERE id = ?`, job.id)
+				return err
+			}); err != nil {
 				return processed, err
 			}
 		case strings.TrimSpace(html) == "":
-			if _, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET retry_count = retry_count + 1 WHERE id = ?`, job.id); err != nil {
+			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET retry_count = retry_count + 1 WHERE id = ?`, job.id)
+				return err
+			}); err != nil {
 				return processed, err
 			}
 		default:
@@ -161,7 +168,10 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			if err != nil {
 				return processed, err
 			}
-			if _, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_ready = 1, raw_json = ? WHERE id = ?`, string(rawJSON), job.id); err != nil {
+			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_ready = 1, raw_json = ? WHERE id = ?`, string(rawJSON), job.id)
+				return err
+			}); err != nil {
 				return processed, err
 			}
 		}

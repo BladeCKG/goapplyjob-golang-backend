@@ -377,30 +377,37 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			categorizedTitle = stringFromPayload(inferredTitle)
 			categorizedFunction = stringFromPayload(inferredFunction)
 		}
-		if _, err := s.DB.SQL.ExecContext(
-			ctx,
-			`INSERT INTO parsed_jobs (raw_us_job_id, external_job_id, created_at_source, url, categorized_job_title, categorized_job_function, role_title, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-			 ON CONFLICT(raw_us_job_id) DO UPDATE SET
-			   external_job_id = excluded.external_job_id,
-			   created_at_source = excluded.created_at_source,
-			   url = excluded.url,
-			   categorized_job_title = excluded.categorized_job_title,
-			   categorized_job_function = excluded.categorized_job_function,
-			   role_title = excluded.role_title,
-			   updated_at = excluded.updated_at`,
-			row.id,
-			stringFromPayload(payload["id"]),
-			formatNullableTime(sourceCreatedAt),
-			stringFromPayload(payload["url"]),
-			categorizedTitle,
-			categorizedFunction,
-			stringFromPayload(payload["roleTitle"]),
-			time.Now().UTC().Format(time.RFC3339Nano),
-		); err != nil {
+		err = database.RetryLocked(8, 50*time.Millisecond, func() error {
+			_, execErr := s.DB.SQL.ExecContext(
+				ctx,
+				`INSERT INTO parsed_jobs (raw_us_job_id, external_job_id, created_at_source, url, categorized_job_title, categorized_job_function, role_title, updated_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+				 ON CONFLICT(raw_us_job_id) DO UPDATE SET
+				   external_job_id = excluded.external_job_id,
+				   created_at_source = excluded.created_at_source,
+				   url = excluded.url,
+				   categorized_job_title = excluded.categorized_job_title,
+				   categorized_job_function = excluded.categorized_job_function,
+				   role_title = excluded.role_title,
+				   updated_at = excluded.updated_at`,
+				row.id,
+				stringFromPayload(payload["id"]),
+				formatNullableTime(sourceCreatedAt),
+				stringFromPayload(payload["url"]),
+				categorizedTitle,
+				categorizedFunction,
+				stringFromPayload(payload["roleTitle"]),
+				time.Now().UTC().Format(time.RFC3339Nano),
+			)
+			return execErr
+		})
+		if err != nil {
 			return processed, err
 		}
-		if _, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = 1 WHERE id = ?`, row.id); err != nil {
+		if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+			_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = 1 WHERE id = ?`, row.id)
+			return err
+		}); err != nil {
 			return processed, err
 		}
 		processed++
