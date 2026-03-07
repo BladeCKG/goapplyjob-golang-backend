@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -199,6 +200,8 @@ func (h *Handler) subscribe(c *gin.Context) {
 		return
 	}
 	paymentID, _ := result.LastInsertId()
+	successURL = appendQueryParam(successURL, "payment_id", strconv.FormatInt(paymentID, 10))
+	cancelURL = appendQueryParam(cancelURL, "payment_id", strconv.FormatInt(paymentID, 10))
 
 	checkoutID, checkoutURL, providerPayload, err := h.createCryptoInvoice(planName, priceUSD, payload.PayCurrency, successURL, cancelURL, paymentID, user)
 	if err != nil {
@@ -581,6 +584,18 @@ func (h *Handler) createCryptoInvoice(planName string, priceUSD int, payCurrency
 		return "", "", nil, err
 	}
 	return result.ProviderInvoiceID, result.InvoiceURL, result.ProviderPayload, nil
+}
+
+func appendQueryParam(rawURL, key, value string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	query := parsed.Query()
+	query.Del(key)
+	query.Set(key, value)
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }
 
 func (h *Handler) planDefinitions() []struct {
