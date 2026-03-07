@@ -3,6 +3,7 @@ package builtin
 import (
 	"encoding/json"
 	"html"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -324,18 +325,22 @@ func extractCompanyInfo(companyHTML, companySameAs string) map[string]any {
 	if match := metaDescriptionPattern.FindStringSubmatch(companyHTML); len(match) == 2 {
 		tagline = html.UnescapeString(strings.TrimSpace(match[1]))
 	}
+	websiteURL := valueOrNil(matchAnchorHref(companyHTML, `(?i)View Website`))
+	companyMatchKey := buildCompanyMatchKey(firstNonEmpty(stringValue(initPayload["companyName"]), extractTitle(companyHTML)), "", stringValue(websiteURL))
 	return map[string]any{
 		"external_company_id":         valueOrNil(initPayload["companyId"]),
 		"name":                        firstNonEmpty(stringValue(initPayload["companyName"]), extractTitle(companyHTML)),
 		"slug":                        firstNonEmpty(stringValue(initPayload["companyAlias"]), companySlugFromURL(canonicalURL)),
 		"tagline":                     valueOrNil(tagline),
 		"founded_year":                valueOrNil(matchOne(companyHTML, `(?is)Year Founded:\s*([0-9]{4})`)),
-		"home_page_url":               valueOrNil(matchAnchorHref(companyHTML, `(?i)View Website`)),
-		"linkedin_url":                valueOrNil(matchHref(companyHTML, `linkedin\.com/company/`)),
+		"home_page_url":               websiteURL,
+		"linkedin_url":                nil,
 		"employee_range":              valueOrNil(matchOne(companyHTML, `(?is)([0-9][0-9,]*)\s+Total Employees`)),
 		"profile_pic_url":             valueOrNil(matchOne(companyHTML, `(?is)<img[^>]*src=['"]([^'"]+)['"]`)),
 		"industry_specialities":       nil,
 		"source_name":                 "builtin",
+		"source_company_slug":         valueOrNil(firstNonEmpty(stringValue(initPayload["companyAlias"]), companySlugFromURL(canonicalURL))),
+		"company_match_key":           companyMatchKey,
 		"source_company_profile_url":  valueOrNil(canonicalURL),
 		"source_company_profile_init": mapOrNil(initPayload),
 		"updated_at":                  time.Now().UTC().Format(time.RFC3339Nano),
@@ -375,6 +380,8 @@ func toRawCompanyShape(parsedCompany map[string]any) any {
 		"linkedInDescriptionGermany":  nil,
 		"industrySpecialitiesGermany": nil,
 		"sponsorsUKSkilledWorkerVisa": nil,
+		"sourceCompanySlug":           parsedCompany["source_company_slug"],
+		"companyMatchKey":             parsedCompany["company_match_key"],
 	}
 }
 
@@ -669,6 +676,74 @@ func companySlugFromURL(value string) string {
 		return ""
 	}
 	return strings.TrimSpace(match[1])
+}
+
+func normalizeNameForKey(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = strings.ReplaceAll(normalized, "&", " and ")
+	normalized = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(normalized, "-")
+	normalized = regexp.MustCompile(`-{2,}`).ReplaceAllString(normalized, "-")
+	return strings.Trim(normalized, "-")
+}
+
+func hostFromURL(rawURL string) string {
+	if strings.TrimSpace(rawURL) == "" {
+		return ""
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(strings.Trim(parsed.Hostname(), "."))
+	host = strings.TrimPrefix(host, "www.")
+	return host
+}
+
+func domainFromURL(rawURL string) string {
+	host := hostFromURL(rawURL)
+	if host == "" {
+		return ""
+	}
+	parts := strings.Split(host, ".")
+	if len(parts) <= 2 {
+		return host
+	}
+	secondLevelCC := map[string]struct{}{"co": {}, "com": {}, "org": {}, "net": {}, "gov": {}, "edu": {}, "ac": {}}
+	if len(parts[len(parts)-1]) == 2 {
+		if _, ok := secondLevelCC[parts[len(parts)-2]]; ok && len(parts) >= 3 {
+			return strings.Join(parts[len(parts)-3:], ".")
+		}
+	}
+	return strings.Join(parts[len(parts)-2:], ".")
+}
+
+func buildCompanyMatchKey(name, linkedinURL, homePageURL string) any {
+	linkedinDomain := domainFromURL(linkedinURL)
+	if linkedinDomain != "" {
+		parsed, _ := url.Parse(linkedinURL)
+		path := strings.Trim(strings.ToLower(parsed.Path), "/")
+		if path != "" {
+			return []string{"linkedin:" + linkedinDomain + "/" + path}
+		}
+		return []string{"linkedin:" + linkedinDomain}
+	}
+	keys := []string{}
+	homeDomain := domainFromURL(homePageURL)
+	fullHost := hostFromURL(homePageURL)
+	if homeDomain != "" {
+		keys = append(keys, "domain:"+homeDomain)
+	}
+	if fullHost != "" && fullHost != homeDomain {
+		keys = append(keys, "subdomain:"+fullHost)
+	}
+	if len(keys) > 0 {
+		return keys
+	}
+	normalizedName := normalizeNameForKey(name)
+	if normalizedName != "" {
+		return []string{"name:" + normalizedName}
+	}
+	return nil
 }
 
 func matchOne(text, pattern string) string {

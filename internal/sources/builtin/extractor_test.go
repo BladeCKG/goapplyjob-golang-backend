@@ -99,6 +99,13 @@ func TestExtractJobBuildsBuiltInRawJobShape(t *testing.T) {
 	if company["slug"] != "acme" {
 		t.Fatalf("expected raw company slug, got %#v", company["slug"])
 	}
+	if payload["isOnLinkedIn"] != false {
+		t.Fatalf("expected BuiltIn job to not be marked as LinkedIn, got %#v", payload["isOnLinkedIn"])
+	}
+	matchKeys, _ := company["companyMatchKey"].([]string)
+	if len(matchKeys) != 2 || matchKeys[0] != "domain:example.com" || matchKeys[1] != "subdomain:acme.example.com" {
+		t.Fatalf("unexpected company match key %#v", company["companyMatchKey"])
+	}
 	salaryRange, _ := payload["salaryRange"].(map[string]any)
 	if salaryRange["min"] != 180000 || salaryRange["salaryType"] != "per year" {
 		t.Fatalf("unexpected salary range %#v", salaryRange)
