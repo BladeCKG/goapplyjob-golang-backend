@@ -173,7 +173,7 @@ func TestImportRawUSJobsTextProcessesWatcherPayloadBody(t *testing.T) {
 	if stats.Inserted != 1 || len(failedRows) != 0 || len(succeededRows) != 1 {
 		t.Fatalf("unexpected payload import results stats=%#v failed=%#v succeeded=%#v", stats, failedRows, succeededRows)
 	}
-	if err := svc.MarkPayloadConsumed(payloads[0].ID); err != nil {
+	if err := svc.DeletePayload(payloads[0].ID); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -245,6 +245,48 @@ func TestReplacePayloadRowsKeepsRemainingRowsInOrder(t *testing.T) {
 	}
 	if strings.Index(bodyText, "https://example.com/new") > strings.Index(bodyText, "https://example.com/old") {
 		t.Fatalf("expected newest row first in payload body %q", bodyText)
+	}
+}
+
+func TestDeleteConsumedPayloadsRemovesLegacyRows(t *testing.T) {
+	db, err := database.Open("file:test_importer_delete_consumed?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc := New(db)
+
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO watcher_payloads (source_url, payload_type, body_text, consumed_at, created_at) VALUES (?, 'delta_xml', ?, ?, ?)`,
+		"https://example.com/jobs.xml",
+		`<urlset></urlset>`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO watcher_payloads (source_url, payload_type, body_text, created_at) VALUES (?, 'delta_xml', ?, ?)`,
+		"https://example.com/jobs.xml",
+		`<urlset></urlset>`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deleted, err := svc.DeleteConsumedPayloads()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 1 {
+		t.Fatalf("expected one deleted payload, got %d", deleted)
+	}
+	var remaining int
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM watcher_payloads`).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 1 {
+		t.Fatalf("expected one remaining payload, got %d", remaining)
 	}
 }
 

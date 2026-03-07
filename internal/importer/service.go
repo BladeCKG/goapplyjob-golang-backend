@@ -348,6 +348,23 @@ func (s *Service) PickUnconsumedPayloads(limit int) ([]struct {
 	return result, rows.Err()
 }
 
+func (s *Service) DeletePayload(payloadID int64) error {
+	_, err := s.DB.SQL.Exec(`DELETE FROM watcher_payloads WHERE id = ?`, payloadID)
+	return err
+}
+
+func (s *Service) DeleteConsumedPayloads() (int64, error) {
+	result, err := s.DB.SQL.Exec(`DELETE FROM watcher_payloads WHERE consumed_at IS NOT NULL`)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return affected, nil
+}
+
 func (s *Service) MarkPayloadConsumed(payloadID int64) error {
 	_, err := s.DB.SQL.Exec(`UPDATE watcher_payloads SET consumed_at = ? WHERE id = ?`, time.Now().UTC().Format(time.RFC3339Nano), payloadID)
 	return err

@@ -18,6 +18,11 @@ func main() {
 	}
 	defer db.Close()
 	svc := importer.New(db)
+	if deleted, err := svc.DeleteConsumedPayloads(); err != nil {
+		log.Fatal(err)
+	} else if deleted > 0 {
+		log.Printf("importer removed legacy consumed payloads=%d", deleted)
+	}
 	intervalMinutes := config.GetenvFloat("RAW_IMPORT_INTERVAL_MINUTES", 1)
 	if intervalMinutes < 0 {
 		intervalMinutes = 1
@@ -48,7 +53,7 @@ func main() {
 			}
 			payloadRows, skippedInvalid := importer.ParseRowsForImport(payload.BodyText)
 			if len(payloadRows) == 0 {
-				if err := svc.MarkPayloadConsumed(payload.ID); err != nil {
+				if err := svc.DeletePayload(payload.ID); err != nil {
 					log.Fatal(err)
 				}
 				log.Printf("importer consumed empty payload_id=%d skipped_invalid=%d", payload.ID, skippedInvalid)
@@ -78,7 +83,7 @@ func main() {
 				log.Printf("importer partial payload_id=%d seen=%d inserted=%d updated=%d skipped_invalid=%d failed_db=%d remaining_rows=%d remaining_budget=%d", payload.ID, stats.Seen, stats.Inserted, stats.Updated, stats.SkippedInvalid, stats.FailedDB, len(remainingRows), remainingRowsBudget)
 				continue
 			}
-			if err := svc.MarkPayloadConsumed(payload.ID); err != nil {
+			if err := svc.DeletePayload(payload.ID); err != nil {
 				log.Fatal(err)
 			}
 			log.Printf("importer imported payload_id=%d seen=%d inserted=%d updated=%d skipped_invalid=%d failed_db=%d", payload.ID, stats.Seen, stats.Inserted, stats.Updated, stats.SkippedInvalid, stats.FailedDB)
