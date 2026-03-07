@@ -21,12 +21,13 @@ type Config struct {
 	PaymentSuccessURL             string
 	PaymentCancelURL              string
 	FreePlanDurationDays          int
+	CryptoPaymentProvider         string
+	CryptoIPNCallbackURL          string
 	NowPaymentsAPIBaseURL         string
 	NowPaymentsAPIKey             string
 	NowPaymentsDefaultPayCurrency string
 	NowPaymentsCurrencyCandidates string
 	NowPaymentsIPNSecret          string
-	NowPaymentsIPNCallbackURL     string
 }
 
 func Load() Config {
@@ -46,12 +47,13 @@ func Load() Config {
 		PaymentSuccessURL:             getenv("PAYMENT_SUCCESS_URL", "http://localhost:3000/billing/success"),
 		PaymentCancelURL:              getenv("PAYMENT_CANCEL_URL", "http://localhost:3000/billing/cancel"),
 		FreePlanDurationDays:          getenvInt("FREE_PLAN_DURATION_DAYS", 7),
+		CryptoPaymentProvider:         getenv("CRYPTO_PAYMENT_PROVIDER", "nowpayments"),
+		CryptoIPNCallbackURL:          getenv("CRYPTO_IPN_CALLBACK_URL", "http://localhost:8000/pricing/webhooks/crypto"),
 		NowPaymentsAPIBaseURL:         getenv("NOWPAYMENTS_API_BASE_URL", "https://api.nowpayments.io/v1"),
 		NowPaymentsAPIKey:             getenv("NOWPAYMENTS_API_KEY", ""),
 		NowPaymentsDefaultPayCurrency: getenv("NOWPAYMENTS_DEFAULT_PAY_CURRENCY", "usdttrc20"),
 		NowPaymentsCurrencyCandidates: getenv("NOWPAYMENTS_CURRENCY_CANDIDATES", "btc,eth,ltc,usdttrc20,usdterc20,usdtbsc,usdc"),
 		NowPaymentsIPNSecret:          getenv("NOWPAYMENTS_IPN_SECRET", ""),
-		NowPaymentsIPNCallbackURL:     getenv("NOWPAYMENTS_IPN_CALLBACK_URL", "http://localhost:8000/pricing/webhooks/crypto"),
 	}
 }
 

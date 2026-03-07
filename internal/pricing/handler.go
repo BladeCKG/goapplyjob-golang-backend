@@ -1,15 +1,12 @@
 package pricing
 
 import (
-	"crypto/hmac"
-	"crypto/sha512"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +14,7 @@ import (
 	"goapplyjob-golang-backend/internal/auth"
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
+	paymentcrypto "goapplyjob-golang-backend/internal/payments/crypto"
 
 	"github.com/gin-gonic/gin"
 )
@@ -26,8 +24,6 @@ type Handler struct {
 	db   *database.DB
 	auth *auth.Handler
 }
-
-var fallbackNowPaymentsCurrencies = []string{"btc", "eth", "ltc", "usdttrc20"}
 
 var basePlanDefinitions = []struct {
 	Code         string
@@ -171,6 +167,7 @@ func (h *Handler) subscribe(c *gin.Context) {
 			"payment_method": "free",
 			"payment_status": "paid",
 			"checkout_url":   nil,
+			"invoice_url":    nil,
 			"crypto_payment": nil,
 		})
 		return
@@ -184,7 +181,11 @@ func (h *Handler) subscribe(c *gin.Context) {
 	if cancelURL == "" {
 		cancelURL = h.cfg.PaymentCancelURL
 	}
-	checkoutID, checkoutURL, providerPayload := h.createCheckoutPayload(payload.Provider, planName, priceUSD, payload.PayCurrency, successURL, cancelURL)
+	checkoutID, checkoutURL, providerPayload, err := h.createCryptoInvoice(planName, priceUSD, payload.PayCurrency, successURL, cancelURL, user.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create payment"})
+		return
+	}
 	payloadBytes, _ := json.Marshal(providerPayload)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	result, err := h.db.SQL.ExecContext(
@@ -215,6 +216,7 @@ func (h *Handler) subscribe(c *gin.Context) {
 		"payment_method": payload.PaymentMethod,
 		"payment_status": "pending",
 		"checkout_url":   checkoutURL,
+		"invoice_url":    checkoutURL,
 		"crypto_payment": extractCryptoPayment(providerPayload, checkoutURL),
 	})
 }
@@ -278,18 +280,33 @@ func (h *Handler) cryptoWebhook(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid webhook payload"})
 		return
 	}
-	if err := h.verifyNowPaymentsSignature(c.GetHeader("x-nowpayments-sig"), payload); err != nil {
+	gateway, err := paymentcrypto.GetGateway(h.cfg)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Invalid crypto gateway"})
+		return
+	}
+	headers := map[string]string{}
+	for key, values := range c.Request.Header {
+		if len(values) > 0 {
+			headers[strings.ToLower(key)] = values[0]
+		}
+	}
+	if err := gateway.VerifyWebhookSignature(payload, headers); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": err.Error()})
 		return
 	}
-
-	paymentID, providerCheckoutID := lookupNowPaymentsRefs(payload)
+	info := gateway.ParseWebhook(payload)
+	paymentID := int64(0)
+	if strings.TrimSpace(info.OrderID) != "" {
+		fmt.Sscanf(info.OrderID, "%d", &paymentID)
+	}
+	providerCheckoutID := info.ProviderPaymentID
 	paymentRowID, userID, planID, durationDays, err := h.lookupPaymentForWebhook(c, paymentID, providerCheckoutID)
 	if err == nil {
-		switch mapNowPaymentsStatus(fmt.Sprintf("%v", firstNonEmpty(payload["payment_status"], payload["status"], "pending"))) {
-		case "paid":
+		switch info.Status {
+		case paymentcrypto.PaymentPaid:
 			_ = h.activatePlan(c, userID, planID, durationDays, paymentRowID)
-		case "failed":
+		case paymentcrypto.PaymentFailed:
 			_, _ = h.db.SQL.ExecContext(c.Request.Context(), `UPDATE pricing_payments SET status = 'failed' WHERE id = ?`, paymentRowID)
 		}
 	}
@@ -431,6 +448,7 @@ func (h *Handler) renderPaymentStatus(c *gin.Context, userID int64) {
 	}
 	if checkoutURL.Valid {
 		response["checkout_url"] = checkoutURL.String
+		response["invoice_url"] = checkoutURL.String
 	}
 	if paidAt.Valid {
 		response["paid_at"] = paidAt.String
@@ -445,48 +463,21 @@ func (h *Handler) renderPaymentStatus(c *gin.Context, userID int64) {
 }
 
 func (h *Handler) listCryptoCurrencies(c *gin.Context) {
-	amountUSD := 0.0
-	hasAmountUSD := false
+	var amountUSD *float64
 	if raw := strings.TrimSpace(c.Query("amount_usd")); raw != "" {
-		var err error
-		amountUSD, err = strconv.ParseFloat(raw, 64)
-		if err == nil {
-			hasAmountUSD = true
+		if parsed, err := strconv.ParseFloat(raw, 64); err == nil {
+			amountUSD = &parsed
 		}
 	}
-
-	providerCodes := h.fetchNowPaymentsCurrencies()
-	candidateCodes := h.currencyCandidates()
-	if len(providerCodes) > 0 {
-		filtered := []string{}
-		for _, code := range candidateCodes {
-			if slices.Contains(providerCodes, code) {
-				filtered = append(filtered, code)
-			}
-		}
-		if len(filtered) > 0 {
-			candidateCodes = filtered
-		}
+	gateway, err := paymentcrypto.GetGateway(h.cfg)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Invalid crypto gateway"})
+		return
 	}
-
-	out := make([]gin.H, 0, len(candidateCodes))
-	for _, code := range candidateCodes {
-		minUSD := h.fetchCurrencyMinUSD(code)
-		if hasAmountUSD && minUSD != nil && amountUSD < *minUSD {
-			continue
-		}
-		out = append(out, gin.H{"code": code, "min_usd": minUSD})
-	}
-	if len(out) == 0 {
-		items := []string{strings.ToLower(strings.TrimSpace(h.cfg.NowPaymentsDefaultPayCurrency))}
-		for _, item := range fallbackNowPaymentsCurrencies {
-			if item != "" && !slices.Contains(items, item) {
-				items = append(items, item)
-			}
-		}
-		for _, item := range items {
-			out = append(out, gin.H{"code": item, "min_usd": nil})
-		}
+	options := gateway.ListCurrencies(amountUSD)
+	out := make([]gin.H, 0, len(options))
+	for _, item := range options {
+		out = append(out, gin.H{"code": item.Code, "min_usd": item.MinUSD})
 	}
 	c.JSON(http.StatusOK, gin.H{"items": out})
 }
@@ -527,31 +518,25 @@ func validateProviderMethod(provider, paymentMethod string) error {
 	return nil
 }
 
-func (h *Handler) createCheckoutPayload(provider, planName string, priceUSD int, payCurrency, successURL, cancelURL string) (string, string, map[string]any) {
-	if provider != "crypto" || h.cfg.NowPaymentsAPIKey == "" {
-		checkoutID := "nowpayments_local"
-		payCode := strings.ToLower(strings.TrimSpace(payCurrency))
-		if payCode == "" {
-			payCode = strings.ToLower(strings.TrimSpace(h.cfg.NowPaymentsDefaultPayCurrency))
-		}
-		if payCode == "" {
-			payCode = "usdttrc20"
-		}
-		return checkoutID, successURL, map[string]any{
-			"mode":                     "local_stub",
-			"provider":                 "nowpayments",
-			"pay_currency":             payCode,
-			"pay_amount":               float64(priceUSD),
-			"invoice_url":              successURL,
-			"expiration_estimate_date": time.Now().UTC().Add(15 * time.Minute).Format(time.RFC3339Nano),
-		}
+func (h *Handler) createCryptoInvoice(planName string, priceUSD int, payCurrency, successURL, cancelURL string, paymentID int64) (string, string, map[string]any, error) {
+	gateway, err := paymentcrypto.GetGateway(h.cfg)
+	if err != nil {
+		return "", "", nil, err
 	}
-	return "nowpayments_remote", successURL, map[string]any{
-		"order_description": planName,
-		"price_amount":      float64(priceUSD),
-		"price_currency":    "usd",
-		"cancel_url":        cancelURL,
+	callbackURL := strings.TrimSpace(h.cfg.CryptoIPNCallbackURL)
+	result, err := gateway.CreateInvoice(paymentcrypto.CheckoutRequest{
+		OrderID:     fmt.Sprintf("%d", paymentID),
+		AmountUSD:   float64(priceUSD),
+		Description: fmt.Sprintf("GoApplyJob %s plan", planName),
+		SuccessURL:  successURL,
+		CancelURL:   cancelURL,
+		CallbackURL: callbackURL,
+		PayCurrency: payCurrency,
+	})
+	if err != nil {
+		return "", "", nil, err
 	}
+	return result.ProviderCheckoutID, result.CheckoutURL, result.ProviderPayload, nil
 }
 
 func (h *Handler) planDefinitions() []struct {
@@ -570,23 +555,6 @@ func (h *Handler) planDefinitions() []struct {
 	}{}, basePlanDefinitions...)
 	plans[0].DurationDays = max(h.cfg.FreePlanDurationDays, 1)
 	return plans
-}
-
-func (h *Handler) verifyNowPaymentsSignature(signature string, payload map[string]any) error {
-	if strings.TrimSpace(h.cfg.NowPaymentsIPNSecret) == "" {
-		return nil
-	}
-	if strings.TrimSpace(signature) == "" {
-		return errors.New("Missing NOWPayments signature")
-	}
-	message, _ := json.Marshal(payload)
-	mac := hmac.New(sha512.New, []byte(h.cfg.NowPaymentsIPNSecret))
-	_, _ = mac.Write(message)
-	expected := fmt.Sprintf("%x", mac.Sum(nil))
-	if !hmac.Equal([]byte(strings.ToLower(expected)), []byte(strings.ToLower(strings.TrimSpace(signature)))) {
-		return errors.New("Invalid NOWPayments signature")
-	}
-	return nil
 }
 
 func lookupNowPaymentsRefs(payload map[string]any) (int64, string) {
@@ -627,23 +595,13 @@ func (h *Handler) lookupPaymentForWebhook(c *gin.Context, paymentID int64, provi
 	return rowID, userID, planID, durationDays, err
 }
 
-func mapNowPaymentsStatus(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "confirmed", "finished", "sending":
-		return "paid"
-	case "failed", "expired", "refunded":
-		return "failed"
-	default:
-		return "pending"
-	}
-}
-
 func extractCryptoPayment(providerPayload map[string]any, checkoutURL any) any {
 	if len(providerPayload) == 0 {
 		return nil
 	}
 	return gin.H{
 		"payment_id":               firstNonEmpty(providerPayload["payment_id"], providerPayload["id"]),
+		"invoice_id":               firstNonEmpty(providerPayload["invoice_id"], providerPayload["id"]),
 		"pay_currency":             providerPayload["pay_currency"],
 		"pay_amount":               providerPayload["pay_amount"],
 		"pay_address":              providerPayload["pay_address"],
@@ -656,6 +614,13 @@ func extractCryptoPayment(providerPayload map[string]any, checkoutURL any) any {
 	}
 }
 
+func nullStringValue(value sql.NullString) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.String
+}
+
 func firstNonEmpty(values ...any) any {
 	for _, value := range values {
 		if text, ok := value.(string); ok && strings.TrimSpace(text) != "" {
@@ -664,43 +629,6 @@ func firstNonEmpty(values ...any) any {
 		if value != nil && value != "<nil>" {
 			return value
 		}
-	}
-	return nil
-}
-
-func nullStringValue(value sql.NullString) any {
-	if !value.Valid {
-		return nil
-	}
-	return value.String
-}
-
-func (h *Handler) currencyCandidates() []string {
-	raw := strings.TrimSpace(h.cfg.NowPaymentsCurrencyCandidates)
-	if raw == "" {
-		raw = "btc,eth,ltc,usdttrc20,usdterc20,usdtbsc,usdc"
-	}
-	values := []string{}
-	for _, item := range strings.Split(raw, ",") {
-		code := strings.ToLower(strings.TrimSpace(item))
-		if code != "" && !slices.Contains(values, code) {
-			values = append(values, code)
-		}
-	}
-	slices.Sort(values)
-	return values
-}
-
-func (h *Handler) fetchNowPaymentsCurrencies() []string {
-	if strings.TrimSpace(h.cfg.NowPaymentsAPIKey) == "" {
-		return nil
-	}
-	return nil
-}
-
-func (h *Handler) fetchCurrencyMinUSD(currencyCode string) *float64 {
-	if strings.TrimSpace(h.cfg.NowPaymentsAPIKey) == "" {
-		return nil
 	}
 	return nil
 }
