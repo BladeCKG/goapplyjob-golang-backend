@@ -47,6 +47,12 @@ type Service struct {
 }
 
 const sourceName = "remoterocketship"
+const (
+	sourceBuiltin           = "builtin"
+	payloadTypeXML          = "delta_xml"
+	payloadTypeJSON         = "delta"
+	defaultPayloadsPerCycle = 50
+)
 
 func New(db *database.DB) *Service { return &Service{DB: db} }
 
@@ -96,6 +102,30 @@ func parseRowsFromXMLText(xmlText string) ([]SitemapRow, int) {
 
 func ParseRowsForImport(xmlText string) ([]SitemapRow, int) {
 	return parseRowsFromXMLText(xmlText)
+}
+
+func ParseRowsForBuiltinPayload(payloadText string) ([]SitemapRow, int) {
+	var payload []map[string]any
+	if err := json.Unmarshal([]byte(payloadText), &payload); err != nil {
+		return nil, 1
+	}
+	rows := make([]SitemapRow, 0, len(payload))
+	skipped := 0
+	for _, item := range payload {
+		rowURL, _ := item["url"].(string)
+		postDateRaw, _ := item["post_date"].(string)
+		if strings.TrimSpace(rowURL) == "" || strings.TrimSpace(postDateRaw) == "" {
+			skipped++
+			continue
+		}
+		postDate, err := normalizeDBDatetime(postDateRaw)
+		if err != nil {
+			skipped++
+			continue
+		}
+		rows = append(rows, SitemapRow{URL: rowURL, PostDate: postDate})
+	}
+	return rows, skipped
 }
 
 func iterSitemapRows(xmlPath string) ([][2]string, error) {
@@ -323,27 +353,33 @@ func (s *Service) ImportRawUSJobsRows(rows []SitemapRow, batchSize int) (Stats, 
 }
 
 func (s *Service) PickUnconsumedPayloads(limit int) ([]struct {
-	ID       int64
-	BodyText string
+	ID          int64
+	Source      string
+	PayloadType string
+	BodyText    string
 }, error) {
 	if limit <= 0 {
 		limit = 1
 	}
-	rows, err := s.DB.SQL.Query(`SELECT id, body_text FROM watcher_payloads WHERE source = ? AND payload_type = 'delta_xml' AND consumed_at IS NULL ORDER BY created_at DESC, id DESC LIMIT ?`, sourceName, limit)
+	rows, err := s.DB.SQL.Query(`SELECT id, source, payload_type, body_text FROM watcher_payloads WHERE consumed_at IS NULL ORDER BY created_at DESC, id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	result := []struct {
-		ID       int64
-		BodyText string
+		ID          int64
+		Source      string
+		PayloadType string
+		BodyText    string
 	}{}
 	for rows.Next() {
 		var item struct {
-			ID       int64
-			BodyText string
+			ID          int64
+			Source      string
+			PayloadType string
+			BodyText    string
 		}
-		if err := rows.Scan(&item.ID, &item.BodyText); err == nil {
+		if err := rows.Scan(&item.ID, &item.Source, &item.PayloadType, &item.BodyText); err == nil {
 			result = append(result, item)
 		}
 	}
@@ -379,6 +415,24 @@ func (s *Service) ReplacePayloadBody(payloadID int64, failedRows map[string]time
 
 func (s *Service) ReplacePayloadRows(payloadID int64, rows []SitemapRow) error {
 	_, err := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, rowsListToXML(rows), payloadID)
+	return err
+}
+
+func (s *Service) ReplaceBuiltinPayloadRows(payloadID int64, rows []SitemapRow) error {
+	payload := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		payload = append(payload, map[string]any{
+			"url":          row.URL,
+			"post_date":    row.PostDate.Format(time.RFC3339Nano),
+			"is_ready":     false,
+			"is_skippable": false,
+			"is_parsed":    false,
+			"retry_count":  0,
+			"raw_json":     nil,
+		})
+	}
+	body, _ := json.Marshal(payload)
+	_, err := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, string(body), payloadID)
 	return err
 }
 

@@ -166,6 +166,9 @@ func TestImportRawUSJobsTextProcessesWatcherPayloadBody(t *testing.T) {
 	if len(payloads) != 1 {
 		t.Fatalf("expected one payload, got %d", len(payloads))
 	}
+	if payloads[0].PayloadType != "delta_xml" {
+		t.Fatalf("expected delta_xml payload, got %#v", payloads[0].PayloadType)
+	}
 	stats, failedRows, succeededRows, err := svc.ImportRawUSJobsText(payloads[0].BodyText, 100)
 	if err != nil {
 		t.Fatal(err)
@@ -207,6 +210,19 @@ func TestPickUnconsumedPayloadsReturnsNewestFirst(t *testing.T) {
 	}
 	if payloads[0].ID <= payloads[1].ID {
 		t.Fatalf("expected newest payload first, got ids %d then %d", payloads[0].ID, payloads[1].ID)
+	}
+}
+
+func TestParseRowsForBuiltinPayload(t *testing.T) {
+	rows, skipped := ParseRowsForBuiltinPayload(`[
+		{"url":"https://builtin.com/job/a/1","post_date":"2026-02-12T18:00:00Z"},
+		{"url":"https://builtin.com/job/b/2","post_date":"2026-02-12T17:00:00Z"}
+	]`)
+	if skipped != 0 || len(rows) != 2 {
+		t.Fatalf("unexpected builtin rows skipped=%d rows=%#v", skipped, rows)
+	}
+	if rows[0].URL != "https://builtin.com/job/a/1" {
+		t.Fatalf("unexpected first builtin row %#v", rows[0])
 	}
 }
 

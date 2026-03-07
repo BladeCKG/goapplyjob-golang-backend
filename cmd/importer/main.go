@@ -35,7 +35,7 @@ func main() {
 	if batchSize < 1 {
 		batchSize = 1
 	}
-	payloadsPerCycle := config.GetenvInt("RAW_IMPORT_PAYLOADS_PER_CYCLE", 5)
+	payloadsPerCycle := config.GetenvInt("RAW_IMPORT_PAYLOADS_PER_CYCLE", 50)
 	if payloadsPerCycle < 1 {
 		payloadsPerCycle = 1
 	}
@@ -51,12 +51,19 @@ func main() {
 			if remainingRowsBudget <= 0 {
 				break
 			}
-			payloadRows, skippedInvalid := importer.ParseRowsForImport(payload.BodyText)
+			var payloadRows []importer.SitemapRow
+			var skippedInvalid int
+			switch {
+			case payload.PayloadType == "delta_xml":
+				payloadRows, skippedInvalid = importer.ParseRowsForImport(payload.BodyText)
+			case payload.PayloadType == "delta" && payload.Source == "builtin":
+				payloadRows, skippedInvalid = importer.ParseRowsForBuiltinPayload(payload.BodyText)
+			default:
+				log.Printf("importer skipping unsupported payload_id=%d source=%s payload_type=%s", payload.ID, payload.Source, payload.PayloadType)
+				continue
+			}
 			if len(payloadRows) == 0 {
-				if err := svc.DeletePayload(payload.ID); err != nil {
-					log.Fatal(err)
-				}
-				log.Printf("importer consumed empty payload_id=%d skipped_invalid=%d", payload.ID, skippedInvalid)
+				log.Printf("importer kept empty payload_id=%d skipped_invalid=%d", payload.ID, skippedInvalid)
 				continue
 			}
 
@@ -77,7 +84,13 @@ func main() {
 			remainingRowsBudget -= toProcessCount
 
 			if len(remainingRows) > 0 {
-				if err := svc.ReplacePayloadRows(payload.ID, remainingRows); err != nil {
+				var err error
+				if payload.PayloadType == "delta" && payload.Source == "builtin" {
+					err = svc.ReplaceBuiltinPayloadRows(payload.ID, remainingRows)
+				} else {
+					err = svc.ReplacePayloadRows(payload.ID, remainingRows)
+				}
+				if err != nil {
 					log.Fatal(err)
 				}
 				log.Printf("importer partial payload_id=%d seen=%d inserted=%d updated=%d skipped_invalid=%d failed_db=%d remaining_rows=%d remaining_budget=%d", payload.ID, stats.Seen, stats.Inserted, stats.Updated, stats.SkippedInvalid, stats.FailedDB, len(remainingRows), remainingRowsBudget)
