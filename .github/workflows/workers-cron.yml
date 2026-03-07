@@ -2,7 +2,7 @@ name: Backend Workers Cron
 
 on:
   schedule:
-    - cron: "0 * * * *"
+    - cron: "0 */3 * * *"
   workflow_dispatch:
 
 jobs:
@@ -33,7 +33,7 @@ jobs:
           go run ./cmd/watcher
           go run ./cmd/importer
 
-      - name: Run every-3-hours workers
+      - name: Run every-6-hours workers
         env:
           PARSED_JOB_RUN_ONCE: "true"
         run: |
@@ -43,8 +43,8 @@ jobs:
           fi
 
           HOUR="$(date -u +%H)"
-          if [ $((10#$HOUR % 3)) -eq 0 ]; then
+          if [ $((10#$HOUR % 6)) -eq 0 ]; then
             go run ./cmd/parsedfreshness
           else
-            echo "Skipping 3-hour workers at hour=$HOUR (UTC)."
+            echo "Skipping 6-hour workers at hour=$HOUR (UTC)."
           fi
