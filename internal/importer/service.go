@@ -3,26 +3,16 @@ package importer
 import (
 	"database/sql"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
-	"strings"
 	"time"
 
 	"goapplyjob-golang-backend/internal/database"
+	rr "goapplyjob-golang-backend/internal/sources/remoterocketship"
 )
-
-const (
-	xmlDecl             = `<?xml version="1.0" encoding="UTF-8"?>`
-	namespaceURLSetOpen = `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`
-	rootCloseTag        = `</urlset>`
-)
-
-var urlBlockPattern = regexp.MustCompile(`(?is)<url(?:\s[^>]*)?>.*?</url>`)
 
 type Stats struct {
 	Seen           int
@@ -44,50 +34,22 @@ type Service struct {
 func New(db *database.DB) *Service { return &Service{DB: db} }
 
 func extractCompleteURLBlocks(xmlText string) []string {
-	return urlBlockPattern.FindAllString(xmlText, -1)
-}
-
-type xmlURL struct {
-	Loc     string `xml:"loc"`
-	LastMod string `xml:"lastmod"`
+	return rr.ExtractCompleteURLBlocks(xmlText)
 }
 
 func extractRowFromURLBlock(block string) (string, string, bool) {
-	var row xmlURL
-	if err := xml.Unmarshal([]byte(block), &row); err != nil {
-		return "", "", false
-	}
-	loc := strings.TrimSpace(row.Loc)
-	lastmod := strings.TrimSpace(row.LastMod)
-	if loc == "" || lastmod == "" {
-		return "", "", false
-	}
-	return loc, lastmod, true
+	return rr.ExtractRowFromURLBlock(block)
 }
 
 func iterSitemapRowsText(xmlText string) [][2]string {
-	blocks := extractCompleteURLBlocks(xmlText)
-	rows := make([][2]string, 0, len(blocks))
-	for _, block := range blocks {
-		loc, lastmod, ok := extractRowFromURLBlock(block)
-		if ok {
-			rows = append(rows, [2]string{loc, lastmod})
-		}
-	}
-	return rows
+	return rr.IterSitemapRowsText(xmlText)
 }
 
 func parseRowsFromXMLText(xmlText string) ([]SitemapRow, int) {
-	rows := iterSitemapRowsText(xmlText)
+	rows, skippedInvalid := rr.ParseRowsFromXMLText(xmlText)
 	parsed := make([]SitemapRow, 0, len(rows))
-	skippedInvalid := 0
 	for _, row := range rows {
-		postDate, err := normalizeDBDatetime(row[1])
-		if err != nil {
-			skippedInvalid++
-			continue
-		}
-		parsed = append(parsed, SitemapRow{URL: row[0], PostDate: postDate})
+		parsed = append(parsed, SitemapRow{URL: row.URL, PostDate: row.PostDate})
 	}
 	return parsed, skippedInvalid
 }
@@ -125,45 +87,15 @@ func mergeRows(target map[string]time.Time, incoming map[string]time.Time) {
 }
 
 func rowsToXML(rows map[string]time.Time) string {
-	type pair struct {
-		url      string
-		postDate time.Time
-	}
-	ordered := make([]pair, 0, len(rows))
-	for url, postDate := range rows {
-		ordered = append(ordered, pair{url: url, postDate: postDate})
-	}
-	sort.Slice(ordered, func(i, j int) bool { return ordered[i].postDate.After(ordered[j].postDate) })
-	parts := []string{xmlDecl, namespaceURLSetOpen}
-	for _, row := range ordered {
-		parts = append(parts,
-			"  <url>",
-			"    <loc>"+escapeXML(row.url)+"</loc>",
-			"    <lastmod>"+row.postDate.Format(time.RFC3339)+"</lastmod>",
-			"  </url>",
-		)
-	}
-	parts = append(parts, rootCloseTag)
-	return strings.Join(parts, "\n") + "\n"
+	return rr.RowsMapToXML(rows)
 }
 
 func rowsListToXML(rows []SitemapRow) string {
-	parts := []string{xmlDecl, namespaceURLSetOpen}
+	sourceRows := make([]rr.SitemapRow, 0, len(rows))
 	for _, row := range rows {
-		parts = append(parts,
-			"  <url>",
-			"    <loc>"+escapeXML(row.URL)+"</loc>",
-			"    <lastmod>"+row.PostDate.Format(time.RFC3339)+"</lastmod>",
-			"  </url>",
-		)
+		sourceRows = append(sourceRows, rr.SitemapRow{URL: row.URL, PostDate: row.PostDate})
 	}
-	parts = append(parts, rootCloseTag)
-	return strings.Join(parts, "\n") + "\n"
-}
-
-func escapeXML(value string) string {
-	replacer := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", `'`, "&apos;")
-	return replacer.Replace(value)
+	return rr.RowsListToXML(sourceRows)
 }
 
 func atomicWriteText(path, content string) error {

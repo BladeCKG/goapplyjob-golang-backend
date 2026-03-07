@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"net/url"
 	"strings"
 
 	"goapplyjob-golang-backend/internal/database"
+	rr "goapplyjob-golang-backend/internal/sources/remoterocketship"
 )
 
 const statusNotFound = 404
@@ -29,30 +29,14 @@ func New(db *database.DB) *Service {
 		ReadHTML: func(string) (string, int, error) {
 			return "", 0, errors.New("read html not configured")
 		},
-		ParseHTML: func(string) (map[string]any, error) {
-			return nil, errors.New("parse html not configured")
+		ParseHTML: func(html string) (map[string]any, error) {
+			return rr.ParseHTML(html), nil
 		},
 	}
 }
 
 func toTargetJobURL(rawURL string) string {
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return rawURL
-	}
-	pathParts := strings.FieldsFunc(parsed.Path, func(r rune) bool { return r == '/' })
-	if len(pathParts) >= 2 && pathParts[1] == "company" {
-		pathParts = pathParts[1:]
-	}
-	trailingSlash := ""
-	if strings.HasSuffix(parsed.Path, "/") {
-		trailingSlash = "/"
-	}
-	parsed.Path = "/"
-	if len(pathParts) > 0 {
-		parsed.Path = "/" + strings.Join(pathParts, "/") + trailingSlash
-	}
-	return parsed.String()
+	return rr.ToTargetJobURL(rawURL)
 }
 
 func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error) {

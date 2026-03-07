@@ -1,25 +1,15 @@
 package watcher
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"net/url"
-	"regexp"
 	"strings"
 	"time"
 
 	"goapplyjob-golang-backend/internal/database"
-)
-
-var (
-	lastmodPattern     = regexp.MustCompile(`(?is)<lastmod>\s*([^<]+?)\s*</lastmod>`)
-	urlOpenPattern     = regexp.MustCompile(`(?is)<url(?:\s|>)`)
-	urlBlockPattern    = regexp.MustCompile(`(?is)<url(?:\s[^>]*)?>.*?</url>`)
-	urlSetClosePattern = regexp.MustCompile(`(?is)</urlset\s*>`)
+	rr "goapplyjob-golang-backend/internal/sources/remoterocketship"
 )
 
 type Config struct {
@@ -133,7 +123,7 @@ func (s *Service) RunOnce() error {
 	newSampleLastmod := s.ExtractLastLastmod(sample)
 	previousDT := s.parseLastmod(previousFirstLastmod)
 	sampleLastDT := s.parseLastmod(newSampleLastmod)
-	hasCompleteSampleBlocks := urlBlockPattern.Find(sample) != nil
+	hasCompleteSampleBlocks := len(rr.ExtractCompleteURLBlocks(string(sample))) > 0
 	useSampleDelta := previousFirstLastmod != "" &&
 		!previousDT.IsZero() &&
 		!sampleLastDT.IsZero() &&
@@ -273,71 +263,19 @@ func (s *Service) saveDeltaPayload(ctx context.Context, bodyText string) (int64,
 }
 
 func (s *Service) ExtractFirstLastmod(data []byte) string {
-	match := lastmodPattern.FindSubmatch(data)
-	if len(match) < 2 {
-		return ""
-	}
-	return strings.TrimSpace(string(match[1]))
+	return rr.ExtractFirstLastmod(data)
 }
 
 func (s *Service) ExtractLastLastmod(data []byte) string {
-	matches := lastmodPattern.FindAllSubmatch(data, -1)
-	if len(matches) == 0 {
-		return ""
-	}
-	return strings.TrimSpace(string(matches[len(matches)-1][1]))
+	return rr.ExtractLastLastmod(data)
 }
 
 func (s *Service) parseLastmod(value string) time.Time {
-	if value == "" {
-		return time.Time{}
-	}
-	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
-		return parsed
-	}
-	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
-		return parsed
-	}
-	return time.Time{}
+	return rr.ParseLastmod(value)
 }
 
 func (s *Service) DeltaNewerThanLastmod(fullData []byte, previousFirstLastmod string) []byte {
-	previousDT := s.parseLastmod(previousFirstLastmod)
-	if previousDT.IsZero() {
-		return fullData
-	}
-
-	blocks := make([][]byte, 0)
-	for _, match := range urlBlockPattern.FindAll(fullData, -1) {
-		blockLastmod := s.ExtractFirstLastmod(match)
-		blockDT := s.parseLastmod(blockLastmod)
-		if blockDT.IsZero() {
-			continue
-		}
-		if blockDT.After(previousDT) {
-			blocks = append(blocks, bytes.Clone(match))
-		} else {
-			break
-		}
-	}
-	if len(blocks) == 0 {
-		return []byte{}
-	}
-
-	firstURL := urlOpenPattern.FindIndex(fullData)
-	if firstURL == nil {
-		return bytes.Join(blocks, nil)
-	}
-	suffix := []byte{}
-	if match := urlSetClosePattern.Find(fullData); len(match) > 0 {
-		suffix = match
-	}
-
-	output := make([]byte, 0, len(fullData))
-	output = append(output, fullData[:firstURL[0]]...)
-	output = append(output, bytes.Join(blocks, nil)...)
-	output = append(output, suffix...)
-	return output
+	return rr.DeltaNewerThanLastmod(fullData, previousFirstLastmod)
 }
 
 func utcNowISO() string {
@@ -345,8 +283,7 @@ func utcNowISO() string {
 }
 
 func sha256Hex(data []byte) string {
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:])
+	return rr.SHA256Hex(data)
 }
 
 func emptyToNil(value string) any {

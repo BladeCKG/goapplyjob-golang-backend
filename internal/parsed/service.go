@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"goapplyjob-golang-backend/internal/database"
+	rr "goapplyjob-golang-backend/internal/sources/remoterocketship"
 )
 
 type Service struct {
@@ -17,34 +18,15 @@ type Service struct {
 func New(db *database.DB) *Service { return &Service{DB: db} }
 
 func parseDT(value any) *time.Time {
-	raw, ok := value.(string)
-	if !ok || raw == "" {
-		return nil
-	}
-	if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
-		return &parsed
-	}
-	if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
-		return &parsed
-	}
-	return nil
+	return rr.ParseDT(value)
 }
 
 func normalizeDT(value *time.Time) *time.Time {
-	if value == nil {
-		return nil
-	}
-	normalized := value.UTC()
-	return &normalized
+	return rr.NormalizeDT(value)
 }
 
 func isSourceOlderThanPostDate(sourceCreatedAt, postDate *time.Time) bool {
-	source := normalizeDT(sourceCreatedAt)
-	post := normalizeDT(postDate)
-	if source == nil || post == nil {
-		return false
-	}
-	return source.Before(*post)
+	return rr.IsSourceOlderThanPostDate(sourceCreatedAt, postDate)
 }
 
 func parseDBDatetime(value string) (*time.Time, error) {
