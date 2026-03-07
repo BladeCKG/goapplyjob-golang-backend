@@ -217,9 +217,11 @@ func (h *Handler) listJobs(c *gin.Context) {
 		parts := make([]string, 0, len(titles))
 		for _, title := range titles {
 			normalizedTitle := strings.ToLower(strings.TrimSpace(title))
-			parts = append(parts, `(p.categorized_job_title LIKE ? OR lower(trim(COALESCE(p.categorized_job_function, ''))) = ?)`)
-			args = append(args, "%"+title+"%")
+			parts = append(parts, `(lower(trim(COALESCE(p.role_title, ''))) = ? OR lower(trim(COALESCE(p.categorized_job_function, ''))) = ? OR p.categorized_job_title LIKE ? OR p.role_title LIKE ?)`)
 			args = append(args, normalizedTitle)
+			args = append(args, normalizedTitle)
+			args = append(args, "%"+title+"%")
+			args = append(args, "%"+title+"%")
 		}
 		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 	}

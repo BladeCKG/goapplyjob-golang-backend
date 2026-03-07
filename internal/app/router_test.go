@@ -267,6 +267,26 @@ func TestJobsTitleFilterMatchesExactFunction(t *testing.T) {
 	}
 }
 
+func TestJobsTitleFilterMatchesRoleTitleVariants(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJobWithFunction(t, db, 71, "Engineering Leadership", "platform", "backend")
+	insertJobWithFunction(t, db, 72, "Infrastructure", "infra", "Senior Backend Platform Engineer")
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?job_title=backend", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	items := body["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("expected exact and partial role title matches, got %#v", body)
+	}
+}
+
 func TestPricingFlow(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
