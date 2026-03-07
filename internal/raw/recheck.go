@@ -2,25 +2,18 @@ package raw
 
 import (
 	"context"
+	"log"
 	"net/http"
 )
 
 type StatusFunc func(string) (int, error)
 
 func defaultStatusFunc(url string) (int, error) {
-	resp, err := http.Head(url)
+	resp, err := http.Get(url)
 	if err != nil {
 		return 0, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusMethodNotAllowed {
-		getResp, err := http.Get(url)
-		if err != nil {
-			return 0, err
-		}
-		defer getResp.Body.Close()
-		return getResp.StatusCode, nil
-	}
 	return resp.StatusCode, nil
 }
 
@@ -63,7 +56,9 @@ func (s *Service) RecheckSkippable(ctx context.Context, batchSize int) (int, int
 		for _, job := range jobs {
 			lastID = job.id
 			checkedTotal++
-			statusCode, err := statusFn(toTargetJobURL(job.url))
+			targetURL := toTargetJobURL(job.url)
+			statusCode, err := statusFn(targetURL)
+			log.Printf("recheck-skippable checked job_id=%d status=%d url=%s", job.id, statusCode, targetURL)
 			if err != nil {
 				continue
 			}
@@ -76,6 +71,7 @@ func (s *Service) RecheckSkippable(ctx context.Context, batchSize int) (int, int
 				return checkedTotal, clearedTotal, err
 			}
 			clearedTotal++
+			log.Printf("recheck-skippable cleared job_id=%d", jobID)
 		}
 	}
 	return checkedTotal, clearedTotal, nil
