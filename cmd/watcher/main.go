@@ -26,6 +26,7 @@ func main() {
 		BuiltinBaseURL:       config.Getenv("WATCH_BUILTIN_BASE_URL", "https://builtin.com/jobs/remote?country=USA&allLocations=true&page={page}"),
 		BuiltinMaxPage:       config.GetenvInt("WATCH_BUILTIN_MAX_PAGE", 1000),
 		BuiltinPagesPerCycle: config.GetenvInt("WATCH_BUILTIN_PAGES_PER_CYCLE", 25),
+		EnabledSources:       config.GetenvCSVSet("ENABLED_SOURCES", "remoterocketship"),
 	}, db)
 	runOnce := config.GetenvBool("WATCH_RUN_ONCE", false)
 	if err := svc.RunForever(runOnce); err != nil {

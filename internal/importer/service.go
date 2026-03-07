@@ -352,7 +352,7 @@ func (s *Service) ImportRawUSJobsRows(rows []SitemapRow, batchSize int) (Stats, 
 	return stats, failedRows, succeededRows, nil
 }
 
-func (s *Service) PickUnconsumedPayloads(limit int) ([]struct {
+func (s *Service) PickUnconsumedPayloads(limit int, enabledSources map[string]struct{}) ([]struct {
 	ID          int64
 	Source      string
 	PayloadType string
@@ -361,7 +361,20 @@ func (s *Service) PickUnconsumedPayloads(limit int) ([]struct {
 	if limit <= 0 {
 		limit = 1
 	}
-	rows, err := s.DB.SQL.Query(`SELECT id, source, payload_type, body_text FROM watcher_payloads WHERE consumed_at IS NULL ORDER BY created_at DESC, id DESC LIMIT ?`, limit)
+	query := `SELECT id, source, payload_type, body_text FROM watcher_payloads WHERE consumed_at IS NULL`
+	args := make([]any, 0, len(enabledSources)+1)
+	if len(enabledSources) > 0 {
+		placeholders := make([]string, 0, len(enabledSources))
+		sources := sortedSourceNames(enabledSources)
+		for _, source := range sources {
+			placeholders = append(placeholders, "?")
+			args = append(args, source)
+		}
+		query += ` AND source IN (` + strings.Join(placeholders, ", ") + `)`
+	}
+	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.DB.SQL.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -384,6 +397,15 @@ func (s *Service) PickUnconsumedPayloads(limit int) ([]struct {
 		}
 	}
 	return result, rows.Err()
+}
+
+func sortedSourceNames(values map[string]struct{}) []string {
+	out := make([]string, 0, len(values))
+	for value := range values {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (s *Service) DeletePayload(payloadID int64) error {

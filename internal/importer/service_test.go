@@ -159,7 +159,7 @@ func TestImportRawUSJobsTextProcessesWatcherPayloadBody(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	payloads, err := svc.PickUnconsumedPayloads(1)
+	payloads, err := svc.PickUnconsumedPayloads(1, map[string]struct{}{sourceName: {}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestPickUnconsumedPayloadsReturnsNewestFirst(t *testing.T) {
 		}
 	}
 
-	payloads, err := svc.PickUnconsumedPayloads(2)
+	payloads, err := svc.PickUnconsumedPayloads(2, map[string]struct{}{sourceName: {}, sourceBuiltin: {}})
 	if err != nil {
 		t.Fatal(err)
 	}

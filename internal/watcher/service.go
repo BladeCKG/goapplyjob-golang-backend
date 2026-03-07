@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +42,7 @@ type Config struct {
 	BuiltinBaseURL       string
 	BuiltinMaxPage       int
 	BuiltinPagesPerCycle int
+	EnabledSources       map[string]struct{}
 }
 
 type FetchSampleFunc func() ([]byte, error)
@@ -62,6 +64,7 @@ func New(config Config, db *database.DB) *Service {
 		"url":                         config.URL,
 		"interval_minutes":            config.IntervalMinutes,
 		"sample_kb":                   config.SampleKB,
+		"enabled_sources":             sortedSourceNames(config.EnabledSources),
 		"running":                     false,
 		"last_check_at":               nil,
 		"last_change_at":              nil,
@@ -103,6 +106,10 @@ func (s *Service) RunForever(runOnce bool) error {
 		s.setStatus(map[string]any{"last_error": "No source configured"})
 		return nil
 	}
+	if len(s.Config.EnabledSources) == 0 {
+		s.setStatus(map[string]any{"last_error": "No source enabled"})
+		return nil
+	}
 
 	s.setStatus(map[string]any{"running": true})
 	defer s.setStatus(map[string]any{"running": false})
@@ -123,12 +130,12 @@ func (s *Service) RunForever(runOnce bool) error {
 }
 
 func (s *Service) RunOnce() error {
-	if strings.TrimSpace(s.Config.URL) != "" {
+	if strings.TrimSpace(s.Config.URL) != "" && s.isSourceEnabled(sourceName) {
 		if err := s.runOnceRemoteRocketship(); err != nil {
 			return err
 		}
 	}
-	if strings.TrimSpace(s.Config.BuiltinBaseURL) != "" {
+	if strings.TrimSpace(s.Config.BuiltinBaseURL) != "" && s.isSourceEnabled(sourceBuiltin) {
 		if err := s.runOnceBuiltin(); err != nil {
 			return err
 		}
@@ -629,4 +636,24 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func (s *Service) isSourceEnabled(source string) bool {
+	if len(s.Config.EnabledSources) == 0 {
+		return false
+	}
+	_, ok := s.Config.EnabledSources[strings.ToLower(strings.TrimSpace(source))]
+	return ok
+}
+
+func sortedSourceNames(values map[string]struct{}) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	out := make([]string, 0, len(values))
+	for value := range values {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }

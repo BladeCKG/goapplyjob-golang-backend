@@ -200,6 +200,22 @@ func GetenvFloat(key string, fallback float64) float64 {
 	return parsed
 }
 
+func GetenvCSVSet(key, fallback string) map[string]struct{} {
+	raw := os.Getenv(key)
+	if strings.TrimSpace(raw) == "" {
+		raw = fallback
+	}
+	values := map[string]struct{}{}
+	for _, part := range strings.Split(raw, ",") {
+		value := strings.ToLower(strings.TrimSpace(part))
+		if value == "" {
+			continue
+		}
+		values[value] = struct{}{}
+	}
+	return values
+}
+
 func GetenvBool(key string, fallback bool) bool {
 	value := os.Getenv(key)
 	if value == "" {

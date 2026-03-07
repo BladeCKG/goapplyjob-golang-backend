@@ -114,6 +114,14 @@ What these scripts do:
 * run `go run ./cmd/migrate`
 * start the Go API and watcher commands in background
 
+Source selection is runtime-configurable through `ENABLED_SOURCES`.
+Examples:
+
+```env
+ENABLED_SOURCES=remoterocketship
+ENABLED_SOURCES=remoterocketship,builtin
+```
+
 ### Docker Bootstrap (Linux + Windows)
 
 Linux:
@@ -159,6 +167,7 @@ Steps:
 Required manual env vars:
 
 * `WATCH_URL`
+* `ENABLED_SOURCES`
 * `SMTP_HOST`
 * `SMTP_USER`
 * `SMTP_PASS`

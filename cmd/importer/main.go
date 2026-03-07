@@ -39,10 +39,11 @@ func main() {
 	if payloadsPerCycle < 1 {
 		payloadsPerCycle = 1
 	}
+	enabledSources := config.GetenvCSVSet("ENABLED_SOURCES", "remoterocketship")
 	runOnce := config.GetenvBool("RAW_IMPORT_RUN_ONCE", false)
 
 	for {
-		payloads, err := svc.PickUnconsumedPayloads(payloadsPerCycle)
+		payloads, err := svc.PickUnconsumedPayloads(payloadsPerCycle, enabledSources)
 		if err != nil {
 			log.Fatal(err)
 		}

@@ -27,6 +27,9 @@ func buildService(t *testing.T) *Service {
 		BuiltinBaseURL:       "",
 		BuiltinMaxPage:       1000,
 		BuiltinPagesPerCycle: 25,
+		EnabledSources: map[string]struct{}{
+			sourceName: {},
+		},
 	}, db)
 }
 
@@ -162,6 +165,7 @@ func TestBuiltinScansNextPagesThenUpperPages(t *testing.T) {
 	service.Config.BuiltinBaseURL = "https://builtin.com/jobs?page={page}"
 	service.Config.BuiltinMaxPage = 1000
 	service.Config.BuiltinPagesPerCycle = 4
+	service.Config.EnabledSources = map[string]struct{}{sourceBuiltin: {}}
 	service.FetchText = func(rawURL string) (string, error) {
 		page := rawURL[strings.LastIndex(rawURL, "=")+1:]
 		switch page {
