@@ -323,7 +323,7 @@ func (s *Service) runOnceBuiltin() error {
 
 	nextSavedPage := currentPage
 	if nextSavedPage < 1 {
-		nextSavedPage = s.Config.BuiltinMaxPage
+		nextSavedPage = 1
 	}
 	return s.saveStatePayload(sourceBuiltin, map[string]any{
 		"next_page":                   nextSavedPage,

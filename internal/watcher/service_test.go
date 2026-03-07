@@ -223,6 +223,37 @@ func TestBuiltinScansNextPagesThenUpperPages(t *testing.T) {
 	}
 }
 
+func TestBuiltinKeepsNextPageAtOneAfterFullScan(t *testing.T) {
+	service := buildService(t)
+	service.Config.URL = ""
+	service.Config.BuiltinBaseURL = "https://builtin.com/jobs?page={page}"
+	service.Config.BuiltinMaxPage = 2
+	service.Config.BuiltinPagesPerCycle = 5
+	service.Config.EnabledSources = map[string]struct{}{sourceBuiltin: {}}
+	service.FetchText = func(rawURL string) (string, error) {
+		page := rawURL[strings.LastIndex(rawURL, "=")+1:]
+		switch page {
+		case "2":
+			return builtinPageHTML("https://builtin.com/job/two/2", 2, "2026-02-18T00:00:00+00:00"), nil
+		case "1":
+			return builtinPageHTML("https://builtin.com/job/one/1", 1, "2026-02-17T00:00:00+00:00"), nil
+		default:
+			return "No job results", nil
+		}
+	}
+
+	if err := service.runOnceBuiltin(); err != nil {
+		t.Fatal(err)
+	}
+	state, err := service.loadStatePayload(sourceBuiltin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intFromAny(state["next_page"], 0) != 1 {
+		t.Fatalf("expected next_page=1 after full scan, got %#v", state["next_page"])
+	}
+}
+
 func builtinPageHTML(jobURL string, jobID int, publishedDate string) string {
 	return `<html><head><script type="application/ld+json">{"@graph":[{"@type":"ItemList","itemListElement":[{"@type":"ListItem","position":1,"url":"` + jobURL + `","name":"Role","description":"Desc"}]}]}</script></head><body><script>logBuiltinTrackEvent('job_board_view', {'jobs':[{'id':` + strconv.Itoa(jobID) + `,'published_date':'` + publishedDate + `'}],'filters':{}});</script></body></html>`
 }
