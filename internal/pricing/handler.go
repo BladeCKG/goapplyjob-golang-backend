@@ -181,26 +181,17 @@ func (h *Handler) subscribe(c *gin.Context) {
 	if cancelURL == "" {
 		cancelURL = h.cfg.PaymentCancelURL
 	}
-	checkoutID, checkoutURL, providerPayload, err := h.createCryptoInvoice(planName, priceUSD, payload.PayCurrency, successURL, cancelURL, user.ID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create payment"})
-		return
-	}
-	payloadBytes, _ := json.Marshal(providerPayload)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	result, err := h.db.SQL.ExecContext(
 		c.Request.Context(),
 		`INSERT INTO pricing_payments
 		(user_id, pricing_plan_id, provider, payment_method, currency, amount_minor, status, provider_checkout_id, checkout_url, provider_payload, created_at)
-		VALUES (?, ?, ?, ?, 'USD', ?, 'pending', ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, 'USD', ?, 'pending', NULL, NULL, '{}', ?)`,
 		user.ID,
 		planID,
 		payload.Provider,
 		payload.PaymentMethod,
 		priceUSD*100,
-		checkoutID,
-		checkoutURL,
-		string(payloadBytes),
 		now,
 	)
 	if err != nil {
@@ -208,6 +199,27 @@ func (h *Handler) subscribe(c *gin.Context) {
 		return
 	}
 	paymentID, _ := result.LastInsertId()
+
+	checkoutID, checkoutURL, providerPayload, err := h.createCryptoInvoice(planName, priceUSD, payload.PayCurrency, successURL, cancelURL, paymentID, user)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create payment"})
+		return
+	}
+	payloadBytes, _ := json.Marshal(providerPayload)
+	_, err = h.db.SQL.ExecContext(
+		c.Request.Context(),
+		`UPDATE pricing_payments
+		 SET provider_checkout_id = ?, checkout_url = ?, provider_payload = ?
+		 WHERE id = ?`,
+		checkoutID,
+		checkoutURL,
+		string(payloadBytes),
+		paymentID,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create payment"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"ok":             true,
 		"payment_id":     paymentID,
@@ -543,20 +555,27 @@ func validateProviderMethod(provider, paymentMethod string) error {
 	return nil
 }
 
-func (h *Handler) createCryptoInvoice(planName string, priceUSD int, payCurrency, successURL, cancelURL string, paymentID int64) (string, string, map[string]any, error) {
+func (h *Handler) createCryptoInvoice(planName string, priceUSD int, payCurrency, successURL, cancelURL string, paymentID int64, user *auth.User) (string, string, map[string]any, error) {
 	gateway, err := paymentcrypto.GetGateway(h.cfg)
 	if err != nil {
 		return "", "", nil, err
 	}
 	callbackURL := strings.TrimSpace(h.cfg.CryptoIPNCallbackURL)
+	email := strings.TrimSpace(user.Email)
+	nameGuess := email
+	if parts := strings.SplitN(email, "@", 2); len(parts) == 2 {
+		nameGuess = parts[0]
+	}
 	result, err := gateway.CreateInvoice(paymentcrypto.InvoiceRequest{
-		OrderID:     fmt.Sprintf("%d", paymentID),
-		AmountUSD:   float64(priceUSD),
-		Description: fmt.Sprintf("GoApplyJob %s plan", planName),
-		SuccessURL:  successURL,
-		CancelURL:   cancelURL,
-		CallbackURL: callbackURL,
-		PayCurrency: payCurrency,
+		OrderID:       fmt.Sprintf("%d", paymentID),
+		AmountUSD:     float64(priceUSD),
+		Description:   fmt.Sprintf("GoApplyJob %s plan", planName),
+		SuccessURL:    successURL,
+		CancelURL:     cancelURL,
+		CallbackURL:   callbackURL,
+		PayCurrency:   payCurrency,
+		CustomerEmail: email,
+		CustomerName:  nameGuess,
 	})
 	if err != nil {
 		return "", "", nil, err

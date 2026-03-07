@@ -9,13 +9,15 @@ const (
 )
 
 type InvoiceRequest struct {
-	OrderID     string
-	AmountUSD   float64
-	Description string
-	SuccessURL  string
-	CancelURL   string
-	CallbackURL string
-	PayCurrency string
+	OrderID       string
+	AmountUSD     float64
+	Description   string
+	SuccessURL    string
+	CancelURL     string
+	CallbackURL   string
+	PayCurrency   string
+	CustomerEmail string
+	CustomerName  string
 }
 
 type InvoiceResult struct {

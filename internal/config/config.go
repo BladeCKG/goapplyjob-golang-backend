@@ -27,6 +27,13 @@ type Config struct {
 	CoinPaymentsClientID          string
 	CoinPaymentsClientSecret      string
 	CoinPaymentsWebhookURL        string
+	MaxelPayEnv                   string
+	MaxelPayAPIBaseURL            string
+	MaxelPayAPIKey                string
+	MaxelPaySecretKey             string
+	MaxelPaySiteName              string
+	MaxelPaySiteURL               string
+	MaxelPayWebhookURL            string
 	NowPaymentsAPIBaseURL         string
 	NowPaymentsAPIKey             string
 	NowPaymentsDefaultPayCurrency string
@@ -57,6 +64,13 @@ func Load() Config {
 		CoinPaymentsClientID:          getenv("COINPAYMENTS_CLIENT_ID", ""),
 		CoinPaymentsClientSecret:      getenv("COINPAYMENTS_CLIENT_SECRET", ""),
 		CoinPaymentsWebhookURL:        getenv("COINPAYMENTS_WEBHOOK_URL", "http://localhost:8000/pricing/webhooks/crypto"),
+		MaxelPayEnv:                   getenv("MAXELPAY_ENV", "prod"),
+		MaxelPayAPIBaseURL:            getenv("MAXELPAY_API_BASE_URL", "https://api.maxelpay.com/v1"),
+		MaxelPayAPIKey:                getenv("MAXELPAY_API_KEY", ""),
+		MaxelPaySecretKey:             getenv("MAXELPAY_SECRET_KEY", ""),
+		MaxelPaySiteName:              getenv("MAXELPAY_SITE_NAME", "GoApplyJob"),
+		MaxelPaySiteURL:               getenv("MAXELPAY_SITE_URL", "http://localhost:3000"),
+		MaxelPayWebhookURL:            getenv("MAXELPAY_WEBHOOK_URL", "http://localhost:8000/pricing/webhooks/crypto"),
 		NowPaymentsAPIBaseURL:         getenv("NOWPAYMENTS_API_BASE_URL", "https://api.nowpayments.io/v1"),
 		NowPaymentsAPIKey:             getenv("NOWPAYMENTS_API_KEY", ""),
 		NowPaymentsDefaultPayCurrency: getenv("NOWPAYMENTS_DEFAULT_PAY_CURRENCY", "usdttrc20"),
