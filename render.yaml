@@ -29,6 +29,8 @@ services:
         value: oxapay
       - key: WATCH_URL
         sync: false
+      - key: ENABLED_SOURCES
+        sync: false
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
@@ -71,6 +73,8 @@ services:
         value: "true"
       - key: WATCH_URL
         sync: false
+      - key: ENABLED_SOURCES
+        sync: false
       - key: WATCH_INTERVAL_MINUTES
         value: "1"
       - key: WATCH_SAMPLE_KB
@@ -99,6 +103,8 @@ services:
           property: connectionString
       - key: RAW_IMPORT_INTERVAL_MINUTES
         value: "1"
+      - key: ENABLED_SOURCES
+        sync: false
       - key: RAW_IMPORT_BATCH_SIZE
         value: "1000"
       - key: RAW_IMPORT_PAYLOADS_PER_CYCLE

@@ -122,6 +122,15 @@ ENABLED_SOURCES=remoterocketship
 ENABLED_SOURCES=remoterocketship,builtin
 ```
 
+For a fresh start:
+
+```bash
+rm -f page_extract.db
+cp .env.example .env
+```
+
+Then set `ENABLED_SOURCES` in `.env` before starting workers so the first watcher/import cycle only creates the sources you want.
+
 ### Docker Bootstrap (Linux + Windows)
 
 Linux:
@@ -197,6 +206,7 @@ Required repository secrets:
 
 * `DATABASE_URL`
 * `WATCH_URL`
+* `ENABLED_SOURCES`
 
 ### Adding new database migrations
 
