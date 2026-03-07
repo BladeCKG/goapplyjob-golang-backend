@@ -141,6 +141,12 @@ func copyTable(ctx context.Context, sourceDB, targetDB *sql.DB, tableName string
 		}
 		buffer = append(buffer, row)
 		if len(buffer) >= batchSize {
+			if tableName == "parsed_jobs" {
+				buffer, err = filterParsedJobsForFKs(ctx, targetDB, buffer)
+				if err != nil {
+					return total, err
+				}
+			}
 			if err := upsertBatch(ctx, targetDB, tableName, sharedColumns, buffer); err != nil {
 				return total, err
 			}
@@ -152,12 +158,59 @@ func copyTable(ctx context.Context, sourceDB, targetDB *sql.DB, tableName string
 		return total, err
 	}
 	if len(buffer) > 0 {
+		if tableName == "parsed_jobs" {
+			buffer, err = filterParsedJobsForFKs(ctx, targetDB, buffer)
+			if err != nil {
+				return total, err
+			}
+		}
 		if err := upsertBatch(ctx, targetDB, tableName, sharedColumns, buffer); err != nil {
 			return total, err
 		}
 		total += len(buffer)
 	}
 	return total, nil
+}
+
+func filterParsedJobsForFKs(ctx context.Context, targetDB *sql.DB, rows []map[string]any) ([]map[string]any, error) {
+	if len(rows) == 0 {
+		return rows, nil
+	}
+	rawIDs := make([]int64, 0, len(rows))
+	companyIDs := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if rawID, ok := toInt64(row["raw_us_job_id"]); ok {
+			rawIDs = append(rawIDs, rawID)
+		}
+		if companyID, ok := toInt64(row["company_id"]); ok {
+			companyIDs = append(companyIDs, companyID)
+		}
+	}
+	existingRawIDs, err := existingIDs(ctx, targetDB, "raw_us_jobs", rawIDs)
+	if err != nil {
+		return nil, err
+	}
+	existingCompanyIDs, err := existingIDs(ctx, targetDB, "parsed_companies", companyIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]map[string]any, 0, len(rows))
+	for _, row := range rows {
+		rawID, ok := toInt64(row["raw_us_job_id"])
+		if !ok {
+			continue
+		}
+		if _, exists := existingRawIDs[rawID]; !exists {
+			continue
+		}
+		if companyID, ok := toInt64(row["company_id"]); ok {
+			if _, exists := existingCompanyIDs[companyID]; !exists {
+				row["company_id"] = nil
+			}
+		}
+		out = append(out, row)
+	}
+	return out, nil
 }
 
 func upsertBatch(ctx context.Context, db *sql.DB, tableName string, columns []string, rows []map[string]any) error {
@@ -350,6 +403,33 @@ func postgresTableNames(ctx context.Context, db *sql.DB) ([]string, error) {
 	return out, rows.Err()
 }
 
+func existingIDs(ctx context.Context, db *sql.DB, tableName string, ids []int64) (map[int64]struct{}, error) {
+	out := map[int64]struct{}{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	args := make([]any, 0, len(ids))
+	parts := make([]string, 0, len(ids))
+	for i, id := range ids {
+		parts = append(parts, fmt.Sprintf("$%d", i+1))
+		args = append(args, id)
+	}
+	query := fmt.Sprintf("SELECT id FROM %s WHERE id IN (%s)", tableName, strings.Join(parts, ", "))
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = struct{}{}
+	}
+	return out, rows.Err()
+}
+
 func targetMaxID(ctx context.Context, db *sql.DB, tableName string) (int64, error) {
 	query := fmt.Sprintf("SELECT COALESCE(MAX(id), 0) FROM %s", tableName)
 	var maxID int64
@@ -375,6 +455,21 @@ func normalizeSQLiteValue(value any) any {
 		return string(v)
 	default:
 		return v
+	}
+}
+
+func toInt64(value any) (int64, bool) {
+	switch v := value.(type) {
+	case int64:
+		return v, true
+	case int32:
+		return int64(v), true
+	case int:
+		return int64(v), true
+	case float64:
+		return int64(v), true
+	default:
+		return 0, false
 	}
 }
 
