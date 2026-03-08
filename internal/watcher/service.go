@@ -38,19 +38,21 @@ var (
 )
 
 type Config struct {
-	Enabled                   bool
-	URL                       string
-	IntervalMinutes           float64
-	SampleKB                  int
-	TimeoutSeconds            float64
-	BuiltinBaseURL            string
-	BuiltinMaxPage            int
-	BuiltinPagesPerCycle      int
-	BuiltinCheckpointPages    int
-	WorkableAPIURL            string
-	WorkablePageLimit         int
-	HiringCafeSitemapIndexURL string
-	EnabledSources            map[string]struct{}
+	Enabled                 bool
+	URL                     string
+	IntervalMinutes         float64
+	SampleKB                int
+	TimeoutSeconds          float64
+	BuiltinBaseURL          string
+	BuiltinMaxPage          int
+	BuiltinPagesPerCycle    int
+	BuiltinCheckpointPages  int
+	WorkableAPIURL          string
+	WorkablePageLimit       int
+	HiringCafeSearchAPIURL  string
+	HiringCafeTotalCountURL string
+	HiringCafePageSize      int
+	EnabledSources          map[string]struct{}
 }
 
 type FetchSampleFunc func() ([]byte, error)
@@ -68,24 +70,26 @@ type Service struct {
 func New(config Config, db *database.DB) *Service {
 	svc := &Service{Config: config, DB: db}
 	svc.status = map[string]any{
-		"enabled":                      config.Enabled,
-		"url":                          config.URL,
-		"interval_minutes":             config.IntervalMinutes,
-		"sample_kb":                    config.SampleKB,
-		"enabled_sources":              sortedSourceNames(config.EnabledSources),
-		"workable_api_url":             config.WorkableAPIURL,
-		"hiringcafe_sitemap_index_url": config.HiringCafeSitemapIndexURL,
-		"running":                      false,
-		"last_check_at":                nil,
-		"last_change_at":               nil,
-		"last_sample_hash":             nil,
-		"last_error":                   nil,
-		"last_overlap_bytes":           0,
-		"last_delta_source":            nil,
-		"last_delta_size":              0,
-		"last_new_sample_lastmod":      nil,
-		"last_previous_first_lastmod":  nil,
-		"last_delta_payload_id":        nil,
+		"enabled":                     config.Enabled,
+		"url":                         config.URL,
+		"interval_minutes":            config.IntervalMinutes,
+		"sample_kb":                   config.SampleKB,
+		"enabled_sources":             sortedSourceNames(config.EnabledSources),
+		"workable_api_url":            config.WorkableAPIURL,
+		"hiringcafe_search_api_url":   config.HiringCafeSearchAPIURL,
+		"hiringcafe_total_count_url":  config.HiringCafeTotalCountURL,
+		"hiringcafe_page_size":        config.HiringCafePageSize,
+		"running":                     false,
+		"last_check_at":               nil,
+		"last_change_at":              nil,
+		"last_sample_hash":            nil,
+		"last_error":                  nil,
+		"last_overlap_bytes":          0,
+		"last_delta_source":           nil,
+		"last_delta_size":             0,
+		"last_new_sample_lastmod":     nil,
+		"last_previous_first_lastmod": nil,
+		"last_delta_payload_id":       nil,
 	}
 	svc.FetchSample = func() ([]byte, error) { return nil, errors.New("fetch sample not configured") }
 	svc.FetchFull = func() ([]byte, error) { return nil, errors.New("fetch full not configured") }
@@ -112,7 +116,7 @@ func (s *Service) RunForever(runOnce bool) error {
 		s.setStatus(map[string]any{"last_error": nil})
 		return nil
 	}
-	if strings.TrimSpace(s.Config.URL) == "" && strings.TrimSpace(s.Config.BuiltinBaseURL) == "" {
+	if strings.TrimSpace(s.Config.URL) == "" && strings.TrimSpace(s.Config.BuiltinBaseURL) == "" && strings.TrimSpace(s.Config.WorkableAPIURL) == "" && strings.TrimSpace(s.Config.HiringCafeSearchAPIURL) == "" {
 		s.setStatus(map[string]any{"last_error": "No source configured"})
 		return nil
 	}
@@ -162,7 +166,7 @@ func (s *Service) RunOnce() error {
 		}
 		log.Printf("watcher source_done source=workable runner=runOnceWorkable")
 	}
-	if strings.TrimSpace(s.Config.HiringCafeSitemapIndexURL) != "" && s.isSourceEnabled(sourceHiringCafe) {
+	if strings.TrimSpace(s.Config.HiringCafeSearchAPIURL) != "" && strings.TrimSpace(s.Config.HiringCafeTotalCountURL) != "" && s.isSourceEnabled(sourceHiringCafe) {
 		log.Printf("watcher source_start source=%s runner=runOnceHiringCafe", sourceHiringCafe)
 		if err := s.runOnceHiringCafe(); err != nil {
 			return err
@@ -428,97 +432,102 @@ func (s *Service) runOnceHiringCafe() error {
 	if err != nil {
 		return err
 	}
-	previousLatestPostDate, _ := statePayload["latest_job_post_date"].(string)
-	previousLatestURL, _ := statePayload["latest_job_url"].(string)
-	previousLatestDT := parseISOTime(previousLatestPostDate)
+	previousFirstJobPostDate, _ := statePayload["first_job_post_date"].(string)
+	previousFirstJobURL, _ := statePayload["first_job_url"].(string)
+	previousFirstDT := parseISOTime(previousFirstJobPostDate)
 
-	indexURL := s.Config.HiringCafeSitemapIndexURL
-	indexText, err := s.FetchText(indexURL)
+	totalCountPayload, err := s.fetchJSON(s.Config.HiringCafeTotalCountURL)
 	if err != nil {
 		return err
 	}
-	sitemapURLs := hiringcafe.ExtractTitleSitemapRows(indexText)
-	payloadsCreated := 0
-	fetchedSitemaps := 0
+	totalCount := hiringcafe.ParseTotalCount(totalCountPayload)
+	if totalCount <= 0 {
+		return s.saveStatePayload(sourceHiringCafe, map[string]any{
+			"search_api_url":           s.Config.HiringCafeSearchAPIURL,
+			"total_count_url":          s.Config.HiringCafeTotalCountURL,
+			"first_job_post_date":      valueOrNil(previousFirstJobPostDate),
+			"first_job_url":            valueOrNil(previousFirstJobURL),
+			"last_scan_at":             utcNowISO(),
+			"total_count_last_run":     0,
+			"pages_scanned_last_cycle": 0,
+			"rows_saved_last_cycle":    0,
+		})
+	}
+	if s.Config.HiringCafePageSize < 1 {
+		s.Config.HiringCafePageSize = 1
+	}
+	totalPages := (totalCount + s.Config.HiringCafePageSize - 1) / s.Config.HiringCafePageSize
+	pagesScanned := 0
 	rowsSaved := 0
-	newestSeenDT := previousLatestDT
-	newestSeenURL := previousLatestURL
+	firstPageLatestPostDate := previousFirstDT
+	firstPageFirstURL := previousFirstJobURL
+	isBootstrap := previousFirstDT == nil
 
-	for _, sitemapURL := range sitemapURLs {
-		xmlText, err := s.FetchText(sitemapURL)
+	for page := 0; page < totalPages; page++ {
+		pageURL := hiringcafe.BuildSearchAPIURL(s.Config.HiringCafeSearchAPIURL, page, s.Config.HiringCafePageSize)
+		response, err := s.fetchJSON(pageURL)
 		if err != nil {
 			return err
 		}
-		fetchedSitemaps++
-		rows, skipped := hiringcafe.ParseImportRows(xmlText)
-		if skipped > 0 {
-			log.Printf("HiringCafe parse_sitemap skipped_invalid=%d source_url=%s", skipped, sitemapURL)
+		pagesScanned++
+		rowsRaw, _ := response["results"].([]any)
+		results := make([]map[string]any, 0, len(rowsRaw))
+		for _, row := range rowsRaw {
+			item, _ := row.(map[string]any)
+			if item != nil {
+				results = append(results, item)
+			}
 		}
+		rows := hiringcafe.NormalizeJobs(results)
 		if len(rows) == 0 {
 			continue
 		}
+		if page == 0 {
+			firstPageLatestPostDate = &rows[0].PostDate
+			firstPageFirstURL = rows[0].URL
+		}
 
-		filteredRows := rows
-		if previousLatestDT != nil {
+		toUpsert := rows
+		if !isBootstrap && previousFirstDT != nil {
 			urls := make([]string, 0, len(rows))
 			for _, row := range rows {
-				if rowURL, _ := row["url"].(string); strings.TrimSpace(rowURL) != "" {
-					urls = append(urls, rowURL)
-				}
+				urls = append(urls, row.URL)
 			}
 			existingURLs, err := s.findExistingSourceURLs(sourceHiringCafe, urls)
 			if err != nil {
 				return err
 			}
-			filteredRows = make([]map[string]any, 0, len(rows))
+			toUpsert = make([]hiringcafe.NormalizedJob, 0, len(rows))
 			for _, row := range rows {
-				rowURL, _ := row["url"].(string)
-				rowPostDate, _ := row["post_date"].(time.Time)
-				isNewer := !rowPostDate.IsZero() && rowPostDate.After(*previousLatestDT)
-				_, seen := existingURLs[rowURL]
-				if isNewer || !seen {
-					filteredRows = append(filteredRows, row)
+				_, seen := existingURLs[row.URL]
+				if row.PostDate.After(*previousFirstDT) || !seen {
+					toUpsert = append(toUpsert, row)
 				}
 			}
 		}
-		if len(filteredRows) == 0 {
+		if len(toUpsert) == 0 {
 			continue
 		}
-		for _, row := range filteredRows {
-			rowURL, _ := row["url"].(string)
-			rowPostDate, _ := row["post_date"].(time.Time)
-			if rowPostDate.IsZero() {
-				continue
-			}
-			rowsSaved++
-			if newestSeenDT == nil || rowPostDate.After(*newestSeenDT) {
-				copyDT := rowPostDate
-				newestSeenDT = &copyDT
-				newestSeenURL = rowURL
-			}
-		}
-
-		payloadID, err := s.saveDeltaPayloadForSource(sourceHiringCafe, sitemapURL, payloadTypeXML, hiringcafe.SerializeImportRows(filteredRows))
+		inserted, updated, err := s.upsertHiringCafeJobs(toUpsert)
 		if err != nil {
 			return err
 		}
-		payloadsCreated++
-		log.Printf("HiringCafe saved_payload payload_id=%d source_url=%s saved_rows=%d", payloadID, sitemapURL, len(filteredRows))
+		rowsSaved += inserted + updated
 	}
 
-	var newestSeenISO any
-	if newestSeenDT != nil {
-		newestSeenISO = newestSeenDT.UTC().Format(time.RFC3339Nano)
+	var firstPageLatestPostDateISO any
+	if firstPageLatestPostDate != nil {
+		firstPageLatestPostDateISO = firstPageLatestPostDate.UTC().Format(time.RFC3339Nano)
 	}
 	return s.saveStatePayload(sourceHiringCafe, map[string]any{
-		"sitemap_index_url":           indexURL,
-		"latest_job_post_date":        newestSeenISO,
-		"latest_job_url":              valueOrNil(newestSeenURL),
-		"last_scan_at":                utcNowISO(),
-		"title_sitemaps_seen":         len(sitemapURLs),
-		"sitemaps_fetched_last_cycle": fetchedSitemaps,
-		"payloads_created_last_cycle": payloadsCreated,
-		"rows_saved_last_cycle":       rowsSaved,
+		"search_api_url":           s.Config.HiringCafeSearchAPIURL,
+		"total_count_url":          s.Config.HiringCafeTotalCountURL,
+		"first_job_post_date":      firstPageLatestPostDateISO,
+		"first_job_url":            valueOrNil(firstPageFirstURL),
+		"last_scan_at":             utcNowISO(),
+		"total_count_last_run":     totalCount,
+		"pages_scanned_last_cycle": pagesScanned,
+		"rows_saved_last_cycle":    rowsSaved,
 	})
 }
 
@@ -683,6 +692,61 @@ func (s *Service) findExistingSourceURLs(source string, urls []string) (map[stri
 		out[rowURL] = struct{}{}
 	}
 	return out, rows.Err()
+}
+
+func (s *Service) fetchJSON(rawURL string) (map[string]any, error) {
+	text, err := s.FetchText(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	payload := map[string]any{}
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		return map[string]any{}, nil
+	}
+	return payload, nil
+}
+
+func (s *Service) upsertHiringCafeJobs(jobs []hiringcafe.NormalizedJob) (int, int, error) {
+	if len(jobs) == 0 {
+		return 0, 0, nil
+	}
+	tx, err := s.DB.SQL.Begin()
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback()
+	inserted := 0
+	updated := 0
+	for _, row := range jobs {
+		var existingID int64
+		var existingPostDateRaw string
+		err := tx.QueryRow(`SELECT id, post_date FROM raw_us_jobs WHERE source = ? AND url = ? LIMIT 1`, sourceHiringCafe, row.URL).Scan(&existingID, &existingPostDateRaw)
+		payloadRaw, _ := json.Marshal(row.RawPayload)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				if _, execErr := tx.Exec(`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 0, 0, ?)`,
+					sourceHiringCafe, row.URL, row.PostDate.UTC().Format(time.RFC3339Nano), string(payloadRaw)); execErr != nil {
+					return 0, 0, execErr
+				}
+				inserted++
+				continue
+			}
+			return 0, 0, err
+		}
+		existingPostDate := parseISOTime(existingPostDateRaw)
+		if existingPostDate != nil && !row.PostDate.After(*existingPostDate) {
+			continue
+		}
+		if _, execErr := tx.Exec(`UPDATE raw_us_jobs SET post_date = ?, is_ready = 1, is_skippable = 0, is_parsed = 0, retry_count = 0, raw_json = ? WHERE id = ?`,
+			row.PostDate.UTC().Format(time.RFC3339Nano), string(payloadRaw), existingID); execErr != nil {
+			return 0, 0, execErr
+		}
+		updated++
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, err
+	}
+	return inserted, updated, nil
 }
 
 func mustMarshalJSON(value any) string {

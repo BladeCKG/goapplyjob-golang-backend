@@ -99,7 +99,7 @@ func (db *DB) Migrate(ctx context.Context) error {
             required_languages TEXT,
             tech_stack TEXT,
             FOREIGN KEY(raw_us_job_id) REFERENCES raw_us_jobs(id),
-            FOREIGN KEY(company_id) REFERENCES parsed_companies(id)
+            FOREIGN KEY(company_id) REFERENCES parsed_companies(id) ON DELETE CASCADE
         );`,
 		`CREATE TABLE IF NOT EXISTS auth_users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
