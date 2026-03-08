@@ -119,6 +119,19 @@ func TestTokenizeRoleTitleRemovesSeniorityTokens(t *testing.T) {
 	}
 }
 
+func TestTokenizeRoleTitleRemovesEmploymentTokens(t *testing.T) {
+	tokens := tokenizeRoleTitleForSimilarity("Full Time Contract Backend Engineer")
+	if _, ok := tokens["full"]; ok {
+		t.Fatal("expected full to be removed")
+	}
+	if _, ok := tokens["contract"]; ok {
+		t.Fatal("expected contract to be removed")
+	}
+	if _, ok := tokens["backend"]; !ok {
+		t.Fatal("expected backend token")
+	}
+}
+
 func TestJaccardSimilarityWorksForOverlap(t *testing.T) {
 	left := map[string]struct{}{"backend": {}, "engineer": {}, "python": {}}
 	right := map[string]struct{}{"backend": {}, "engineer": {}, "go": {}}

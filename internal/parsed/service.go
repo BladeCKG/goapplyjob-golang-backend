@@ -30,6 +30,10 @@ var seniorityTokens = map[string]struct{}{
 	"senior": {}, "sr": {}, "junior": {}, "jr": {}, "lead": {}, "principal": {}, "staff": {}, "entry": {}, "mid": {}, "expert": {}, "leader": {}, "level": {},
 }
 
+var employmentNoiseTokens = map[string]struct{}{
+	"full": {}, "time": {}, "fulltime": {}, "part": {}, "parttime": {}, "contract": {}, "contractor": {}, "temp": {}, "temporary": {}, "intern": {}, "internship": {}, "freelance": {}, "permanent": {},
+}
+
 var genericCategoryMatchTokens = map[string]struct{}{
 	"accountant": {}, "administrator": {}, "engineer": {}, "developer": {}, "manager": {}, "specialist": {}, "consultant": {}, "analyst": {}, "architect": {}, "designer": {}, "director": {}, "producer": {}, "writer": {}, "support": {}, "operations": {}, "web": {}, "remote": {}, "lead": {}, "staff": {},
 }
@@ -235,6 +239,16 @@ func normalizeTextForMatching(value string) string {
 	return normalized
 }
 
+func shouldSkipRoleToken(token string) bool {
+	if _, ok := seniorityTokens[token]; ok {
+		return true
+	}
+	if _, ok := employmentNoiseTokens[token]; ok {
+		return true
+	}
+	return false
+}
+
 func tokenizeRoleTitleForSimilarity(roleTitle string) map[string]struct{} {
 	rawTokens := regexp.MustCompile(`[^a-z0-9]+`).Split(normalizeTextForMatching(roleTitle), -1)
 	out := map[string]struct{}{}
@@ -242,7 +256,7 @@ func tokenizeRoleTitleForSimilarity(roleTitle string) map[string]struct{} {
 		if len(token) <= 1 {
 			continue
 		}
-		if _, ok := seniorityTokens[token]; ok {
+		if shouldSkipRoleToken(token) {
 			continue
 		}
 		out[token] = struct{}{}
@@ -257,7 +271,7 @@ func tokenizeTextForSequence(value string) []string {
 		if len(token) <= 1 {
 			continue
 		}
-		if _, ok := seniorityTokens[token]; ok {
+		if shouldSkipRoleToken(token) {
 			continue
 		}
 		out = append(out, token)
@@ -318,7 +332,7 @@ func orderedTokens(value string) []string {
 		if len(token) <= 1 {
 			continue
 		}
-		if _, ok := seniorityTokens[token]; ok {
+		if shouldSkipRoleToken(token) {
 			continue
 		}
 		out = append(out, token)
