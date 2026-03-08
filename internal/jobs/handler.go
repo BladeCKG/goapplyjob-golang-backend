@@ -349,6 +349,7 @@ func (h *Handler) filterOptions(c *gin.Context) {
 
 	locationQueryValues := map[string]string{}
 	locationParents := map[string][]string{}
+	stateToCountries := map[string]map[string]struct{}{}
 	addLocationOption := func(label, queryValue string, parents []string) {
 		label = strings.TrimSpace(label)
 		queryValue = strings.TrimSpace(queryValue)
@@ -387,7 +388,21 @@ func (h *Handler) filterOptions(c *gin.Context) {
 		stateValues = uniqueStrings(stateValues)
 		for _, state := range stateValues {
 			if isValidLocationOption(state) {
-				addLocationOption(state, state, nil)
+				if _, ok := stateToCountries[state]; !ok {
+					stateToCountries[state] = map[string]struct{}{}
+				}
+				for _, country := range uniqueStrings(countryValues) {
+					country = strings.TrimSpace(country)
+					if isValidLocationOption(country) {
+						stateToCountries[state][country] = struct{}{}
+					}
+				}
+				parents := []string{}
+				for country := range stateToCountries[state] {
+					parents = append(parents, country)
+				}
+				sortStrings(parents)
+				addLocationOption(state, state, parents)
 			}
 		}
 		for _, country := range uniqueStrings(countryValues) {

@@ -390,7 +390,7 @@ func TestJobsFilterOptionsIncludesHierarchyMetadata(t *testing.T) {
 		t.Fatalf("missing Texas query value %#v", body)
 	}
 	texasParents := locationParents["Texas"].([]any)
-	if len(texasParents) != 0 {
+	if len(texasParents) < 1 || texasParents[0] != "United States" {
 		t.Fatalf("unexpected Texas parent metadata %#v", body)
 	}
 }
