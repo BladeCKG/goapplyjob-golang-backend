@@ -28,12 +28,12 @@ type Handler struct {
 }
 
 type filterOptionsCache struct {
-	mu                  sync.Mutex
-	maxParsedJobID      sql.NullInt64
-	jobCategoryParents  map[string]any
-	locationParents     map[string][]string
-	techStacks          []string
-	employmentTypes     []string
+	mu                 sync.Mutex
+	maxParsedJobID     sql.NullInt64
+	jobCategoryParents map[string]any
+	locationParents    map[string][]string
+	techStacks         []string
+	employmentTypes    []string
 }
 
 const (
@@ -665,8 +665,13 @@ func (h *Handler) listJobs(c *gin.Context) {
 		perPage = 100
 	}
 
-	titleValues := parseCSVQuery(c.Query("job_title"))
-	exactTitleValues, _ := h.resolveExactJobTitleValues(c, titleValues)
+	exactCandidateValues := []string{}
+	exactCandidateValues = append(exactCandidateValues, parseCSVQuery(c.Query("job_categories"))...)
+	exactCandidateValues = append(exactCandidateValues, parseCSVQuery(c.Query("job_functions"))...)
+	if len(exactCandidateValues) == 0 {
+		exactCandidateValues = append(exactCandidateValues, parseCSVQuery(c.Query("job_title"))...)
+	}
+	exactTitleValues, _ := h.resolveExactJobTitleValues(c, exactCandidateValues)
 	filters, args := h.buildJobFilters(c, currentUser, true, exactTitleValues)
 
 	where := ""
@@ -772,8 +777,13 @@ func (h *Handler) listJobs(c *gin.Context) {
 
 func (h *Handler) metrics(c *gin.Context) {
 	currentUser := h.auth.OptionalCurrentUser(c)
-	titleValues := parseCSVQuery(c.Query("job_title"))
-	exactTitleValues, _ := h.resolveExactJobTitleValues(c, titleValues)
+	exactCandidateValues := []string{}
+	exactCandidateValues = append(exactCandidateValues, parseCSVQuery(c.Query("job_categories"))...)
+	exactCandidateValues = append(exactCandidateValues, parseCSVQuery(c.Query("job_functions"))...)
+	if len(exactCandidateValues) == 0 {
+		exactCandidateValues = append(exactCandidateValues, parseCSVQuery(c.Query("job_title"))...)
+	}
+	exactTitleValues, _ := h.resolveExactJobTitleValues(c, exactCandidateValues)
 	filters, args := h.buildJobFilters(c, currentUser, false, exactTitleValues)
 	where := ""
 	if len(filters) > 0 {
@@ -1098,7 +1108,12 @@ func isValidLocationOption(value string) bool {
 func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includePostDate bool, exactJobTitleValues map[string]struct{}) ([]string, []any) {
 	filters := []string{}
 	args := []any{}
-	if titles := parseCSVQuery(c.Query("job_title")); len(titles) > 0 {
+	titleValues := parseCSVQuery(c.Query("job_titles"))
+	if len(titleValues) == 0 {
+		titleValues = parseCSVQuery(c.Query("job_title"))
+	}
+	if len(titleValues) > 0 {
+		titles := titleValues
 		titles = uniqueStrings(titles)
 		parts := make([]string, 0, len(titles))
 		for _, title := range titles {
@@ -1130,30 +1145,68 @@ func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includ
 			filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 		}
 	}
-	locations := []string{}
-	rawLocationValue := strings.TrimSpace(c.Query("location"))
-	if rawLocationValue != "" {
-		rawParts := []string{}
-		for _, part := range strings.Split(rawLocationValue, ",") {
-			trimmed := strings.TrimSpace(part)
-			if trimmed != "" {
-				rawParts = append(rawParts, trimmed)
-			}
-		}
-		if len(rawParts) == 2 && strings.EqualFold(rawParts[1], "United States") {
-			locations = []string{rawLocationValue}
-		} else {
-			locations = parseCSVQuery(c.Query("location"))
-		}
-	}
-	if len(locations) > 0 {
-		locations = uniqueStrings(expandLocationQueryTerms(locations))
-		parts := make([]string, 0, len(locations))
-		for _, location := range locations {
-			parts = append(parts, `(p.location_us_states LIKE ? OR p.location_countries LIKE ?)`)
-			args = append(args, "%"+location+"%", "%"+location+"%")
+	if categories := parseCSVQuery(c.Query("job_categories")); len(categories) > 0 {
+		categories = uniqueStrings(categories)
+		parts := make([]string, 0, len(categories))
+		for _, category := range categories {
+			parts = append(parts, `lower(trim(COALESCE(p.categorized_job_title, ''))) = ?`)
+			args = append(args, strings.ToLower(strings.TrimSpace(category)))
 		}
 		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
+	}
+	if functions := parseCSVQuery(c.Query("job_functions")); len(functions) > 0 {
+		functions = uniqueStrings(functions)
+		parts := make([]string, 0, len(functions))
+		for _, function := range functions {
+			parts = append(parts, `lower(trim(COALESCE(p.categorized_job_function, ''))) = ?`)
+			args = append(args, strings.ToLower(strings.TrimSpace(function)))
+		}
+		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
+	}
+	states := uniqueStrings(parseCSVQuery(c.Query("us_states")))
+	countries := uniqueStrings(parseCSVQuery(c.Query("countries")))
+	if len(states) > 0 {
+		parts := make([]string, 0, len(states))
+		for _, state := range states {
+			parts = append(parts, `p.location_us_states LIKE ?`)
+			args = append(args, "%"+state+"%")
+		}
+		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
+	}
+	if len(countries) > 0 {
+		parts := make([]string, 0, len(countries))
+		for _, country := range countries {
+			parts = append(parts, `p.location_countries LIKE ?`)
+			args = append(args, "%"+country+"%")
+		}
+		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
+	}
+	if len(states) == 0 && len(countries) == 0 {
+		locations := []string{}
+		rawLocationValue := strings.TrimSpace(c.Query("location"))
+		if rawLocationValue != "" {
+			rawParts := []string{}
+			for _, part := range strings.Split(rawLocationValue, ",") {
+				trimmed := strings.TrimSpace(part)
+				if trimmed != "" {
+					rawParts = append(rawParts, trimmed)
+				}
+			}
+			if len(rawParts) == 2 && strings.EqualFold(rawParts[1], "United States") {
+				locations = []string{rawLocationValue}
+			} else {
+				locations = parseCSVQuery(c.Query("location"))
+			}
+		}
+		if len(locations) > 0 {
+			locations = uniqueStrings(expandLocationQueryTerms(locations))
+			parts := make([]string, 0, len(locations))
+			for _, location := range locations {
+				parts = append(parts, `(p.location_us_states LIKE ? OR p.location_countries LIKE ?)`)
+				args = append(args, "%"+location+"%", "%"+location+"%")
+			}
+			filters = append(filters, "("+strings.Join(parts, " OR ")+")")
+		}
 	}
 	if companyValues := parseCSVQuery(c.Query("company")); len(companyValues) > 0 {
 		companyValues = uniqueStrings(companyValues)
