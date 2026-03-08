@@ -28,7 +28,6 @@ func main() {
 
 	svc := watcher.New(watcher.Config{
 		Enabled:                 config.GetenvBool("WATCH_ENABLED", true),
-		Debug:                   cfg.WorkersDebug,
 		URL:                     defaultRemoteRocketshipURL,
 		IntervalMinutes:         config.GetenvFloat("WATCH_INTERVAL_MINUTES", 1),
 		SampleKB:                config.GetenvInt("WATCH_SAMPLE_KB", 8),

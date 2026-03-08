@@ -19,14 +19,9 @@ import (
 )
 
 func NewRouter(cfg config.Config, db *database.DB) *gin.Engine {
-	if cfg.APIDebug {
-		gin.SetMode(gin.DebugMode)
-	} else {
-		gin.SetMode(gin.ReleaseMode)
-	}
 	router := gin.New()
 	router.Use(gin.Recovery())
-	router.Use(accessLog(cfg.APIDebug))
+	router.Use(accessLog())
 
 	authHandler := auth.NewHandler(cfg, db)
 	adminHandler := admin.NewHandler(db, authHandler)
@@ -58,16 +53,12 @@ func NewRouter(cfg config.Config, db *database.DB) *gin.Engine {
 	return router
 }
 
-func accessLog(debug bool) gin.HandlerFunc {
+func accessLog() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		statusCode := http.StatusInternalServerError
 		defer func() {
 			durationMS := time.Since(start).Milliseconds()
-			if debug {
-				log.Printf("request method=%s path=%s query=%s status_code=%d duration_ms=%d", c.Request.Method, c.Request.URL.Path, c.Request.URL.RawQuery, statusCode, durationMS)
-				return
-			}
 			log.Printf("request method=%s path=%s status_code=%d duration_ms=%d", c.Request.Method, c.Request.URL.Path, statusCode, durationMS)
 		}()
 		c.Next()

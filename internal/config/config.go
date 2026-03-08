@@ -10,8 +10,6 @@ import (
 type Config struct {
 	HTTPHost                      string
 	HTTPPort                      string
-	APIDebug                      bool
-	WorkersDebug                  bool
 	DatabaseURL                   string
 	AuthCodeTTLMinutes            int
 	AuthSessionTTLMin             int
@@ -76,8 +74,6 @@ func Load() Config {
 	return Config{
 		HTTPHost:                      getenv("HTTP_HOSTNAME", "0.0.0.0"),
 		HTTPPort:                      getenv("HTTP_PORT", "8080"),
-		APIDebug:                      getenvBool("API_DEBUG", false),
-		WorkersDebug:                  getenvBool("WORKERS_DEBUG", false),
 		DatabaseURL:                   normalizeDatabaseURL(getenv("DATABASE_URL", "file:page_extract.db?_foreign_keys=on")),
 		AuthCodeTTLMinutes:            getenvInt("AUTH_CODE_TTL_MINUTES", 10),
 		AuthSessionTTLMin:             getenvInt("AUTH_SESSION_TTL_MINUTES", 60*24*7),
