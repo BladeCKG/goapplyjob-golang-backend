@@ -217,7 +217,7 @@ func TestJobsRelatedCategoriesAreFunctionBased(t *testing.T) {
 	insertJobWithFunction(t, db, 9104, "Product Manager", "Product", "Product Manager")
 	insertJobWithFunction(t, db, 9105, "Platform Engineer", "Engineering", "Platform Engineer")
 
-	req := httptest.NewRequest(http.MethodGet, "/jobs/related-categories?category=Software+Engineer&limit=3", nil)
+	req := httptest.NewRequest(http.MethodGet, "/jobs/related-categories?category=Software+Engineer&limit=4", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	assertStatus(t, rec.Code, http.StatusOK)
@@ -229,6 +229,9 @@ func TestJobsRelatedCategoriesAreFunctionBased(t *testing.T) {
 	for _, item := range items {
 		row := item.(map[string]any)
 		categories[row["category"].(string)] = struct{}{}
+	}
+	if items[0].(map[string]any)["category"] != "Software Engineer" {
+		t.Fatalf("expected selected category to be first %#v", body)
 	}
 	if _, ok := categories["Backend Engineer"]; !ok {
 		t.Fatalf("expected Backend Engineer in related categories %#v", body)

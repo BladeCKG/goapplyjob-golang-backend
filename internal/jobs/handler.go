@@ -716,9 +716,10 @@ func (h *Handler) relatedCategories(c *gin.Context) {
 		 WHERE categorized_job_title IS NOT NULL
 		   AND categorized_job_title != ''
 		   AND categorized_job_function = ?
-		   AND categorized_job_title != ?
 		 GROUP BY categorized_job_title
-		 ORDER BY score DESC, categorized_job_title ASC
+		 ORDER BY CASE WHEN categorized_job_title = ? THEN 0 ELSE 1 END ASC,
+		          score DESC,
+		          categorized_job_title ASC
 		 LIMIT ?`,
 		topFunction.String, category, limit)
 	if err != nil {
