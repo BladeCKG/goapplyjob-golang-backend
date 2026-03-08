@@ -166,7 +166,7 @@ func (s *Service) SuggestCategory(ctx context.Context, source, roleTitle, roleDe
 		categorizedTitle = strings.TrimSpace(classifyJobTitleWithGroqSync(roleTitle, roleDescription))
 	}
 	if categorizedTitle == "" {
-		inferredTitle, inferredFunction, err := s.findSimilarRemoteCategories(ctx, roleTitle)
+		inferredTitle, inferredFunction, err := s.findSimilarRemoteCategories(ctx, roleTitle, nil)
 		if err != nil {
 			return "", "", err
 		}
@@ -326,7 +326,7 @@ func orderedTokens(value string) []string {
 	return out
 }
 
-func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle string) (string, string, error) {
+func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle string, sourceTechStack []string) (string, string, error) {
 	sourceTokens := tokenizeRoleTitleForSimilarity(roleTitle)
 	if len(sourceTokens) == 0 {
 		return "", "", nil
@@ -351,68 +351,113 @@ func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle str
 		return len(prioritizedTokens[i]) > len(prioritizedTokens[j])
 	})
 
-	if sourceExactTitle != "" {
-		title, function, err := s.findExactNormalizedCategoryMatch(ctx, sourceExactTitle)
-		if err != nil {
-			return "", "", err
+	normalizedSkillValues := make([]string, 0, len(sourceTechStack))
+	seenSkillValues := map[string]struct{}{}
+	for _, value := range sourceTechStack {
+		normalized := strings.TrimSpace(strings.ToLower(value))
+		if normalized == "" {
+			continue
 		}
-		if title != "" {
-			return title, function, nil
+		if _, exists := seenSkillValues[normalized]; exists {
+			continue
+		}
+		seenSkillValues[normalized] = struct{}{}
+		normalizedSkillValues = append(normalizedSkillValues, normalized)
+	}
+
+	if sourceExactTitle != "" {
+		for _, applySkillFilter := range []bool{true, false} {
+			if applySkillFilter && len(normalizedSkillValues) == 0 {
+				continue
+			}
+			title, function, err := s.findExactNormalizedCategoryMatch(ctx, sourceExactTitle, normalizedSkillValues, applySkillFilter)
+			if err != nil {
+				return "", "", err
+			}
+			if title != "" {
+				return title, function, nil
+			}
 		}
 	}
 
-	query := `SELECT p.role_title, p.categorized_job_title, p.categorized_job_function
+	buildQuery := func(applySkillFilter bool) (string, []any) {
+		query := `SELECT p.role_title, p.categorized_job_title, p.categorized_job_function
 		FROM parsed_jobs p
 		JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
 		WHERE r.source = ? AND p.role_title IS NOT NULL AND p.categorized_job_title IS NOT NULL`
-	args := []any{sourceRemoteRocketship}
-	if len(prioritizedTokens) > 0 {
-		conditions := make([]string, 0, min(len(prioritizedTokens), 5))
-		for _, token := range prioritizedTokens[:min(len(prioritizedTokens), 5)] {
-			conditions = append(conditions, `(LOWER(p.role_title) LIKE ? OR LOWER(p.categorized_job_title) LIKE ? OR LOWER(COALESCE(p.categorized_job_function, '')) LIKE ?)`)
-			like := "%" + token + "%"
-			args = append(args, like, like, like)
+		args := []any{sourceRemoteRocketship}
+		if len(prioritizedTokens) > 0 {
+			conditions := make([]string, 0, min(len(prioritizedTokens), 5))
+			for _, token := range prioritizedTokens[:min(len(prioritizedTokens), 5)] {
+				conditions = append(conditions, `(LOWER(p.role_title) LIKE ? OR LOWER(p.categorized_job_title) LIKE ? OR LOWER(COALESCE(p.categorized_job_function, '')) LIKE ?)`)
+				like := "%" + token + "%"
+				args = append(args, like, like, like)
+			}
+			query += " AND (" + strings.Join(conditions, " OR ") + ")"
 		}
-		query += " AND (" + strings.Join(conditions, " OR ") + ")"
+		if applySkillFilter && len(normalizedSkillValues) > 0 {
+			conditions := make([]string, 0, len(normalizedSkillValues))
+			for _, skill := range normalizedSkillValues {
+				conditions = append(conditions, `LOWER(COALESCE(p.tech_stack, '')) LIKE ?`)
+				args = append(args, `%`+"\""+skill+"\""+"%")
+			}
+			query += " AND (" + strings.Join(conditions, " OR ") + ")"
+		}
+		query += " ORDER BY p.updated_at DESC, p.id DESC LIMIT 1000"
+		return query, args
 	}
-	query += " ORDER BY p.updated_at DESC, p.id DESC LIMIT 1000"
-	rows, err := s.DB.SQL.QueryContext(ctx, query, args...)
-	if err != nil {
-		return "", "", err
+
+	scanWithFilter := func(applySkillFilter bool) (string, string, float64, error) {
+		query, args := buildQuery(applySkillFilter)
+		rows, err := s.DB.SQL.QueryContext(ctx, query, args...)
+		if err != nil {
+			return "", "", 0, err
+		}
+		defer rows.Close()
+		bestScore := 0.0
+		bestTitle := ""
+		bestFunction := ""
+		for rows.Next() {
+			var candidateRoleTitle, candidateTitle sql.NullString
+			var candidateFunction sql.NullString
+			if err := rows.Scan(&candidateRoleTitle, &candidateTitle, &candidateFunction); err != nil {
+				return "", "", 0, err
+			}
+			score := jaccardSimilarity(sourceTokens, tokenizeRoleTitleForSimilarity(candidateRoleTitle.String))
+			titleTokens := orderedTokens(candidateTitle.String)
+			score += orderedTokenMatchScore(roleTitle, candidateTitle.String)
+			score += 0.1 * float64(len(titleTokens))
+			if normalizeRoleTitleForExactMatch(candidateRoleTitle.String) == sourceExactTitle {
+				score += 0.5
+			}
+			if strings.EqualFold(candidateTitle.String, "Engineer") || strings.EqualFold(candidateTitle.String, "Manager") {
+				score -= 0.35
+			}
+			if score > bestScore {
+				bestScore = score
+				bestTitle = candidateTitle.String
+				bestFunction = candidateFunction.String
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return "", "", 0, err
+		}
+		return bestTitle, bestFunction, bestScore, nil
 	}
-	defer rows.Close()
-	bestScore := 0.0
-	bestTitle := ""
-	bestFunction := ""
-	for rows.Next() {
-		var candidateRoleTitle, candidateTitle sql.NullString
-		var candidateFunction sql.NullString
-		if err := rows.Scan(&candidateRoleTitle, &candidateTitle, &candidateFunction); err != nil {
+
+	for _, applySkillFilter := range []bool{true, false} {
+		if applySkillFilter && len(normalizedSkillValues) == 0 {
+			continue
+		}
+		bestTitle, bestFunction, bestScore, err := scanWithFilter(applySkillFilter)
+		if err != nil {
 			return "", "", err
 		}
-		score := jaccardSimilarity(sourceTokens, tokenizeRoleTitleForSimilarity(candidateRoleTitle.String))
-		titleTokens := orderedTokens(candidateTitle.String)
-		score += orderedTokenMatchScore(roleTitle, candidateTitle.String)
-		score += 0.1 * float64(len(titleTokens))
-		if normalizeRoleTitleForExactMatch(candidateRoleTitle.String) == sourceExactTitle {
-			score += 0.5
-		}
-		if strings.EqualFold(candidateTitle.String, "Engineer") || strings.EqualFold(candidateTitle.String, "Manager") {
-			score -= 0.35
-		}
-		if score > bestScore {
-			bestScore = score
-			bestTitle = candidateTitle.String
-			bestFunction = candidateFunction.String
+		if bestScore >= 0.5 {
+			return bestTitle, bestFunction, nil
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return "", "", err
-	}
-	if bestScore < 0.5 {
-		return "", "", nil
-	}
-	return bestTitle, bestFunction, nil
+	return "", "", nil
 }
 
 func loadJobTitleClassificationPrompt() (string, error) {
@@ -510,12 +555,22 @@ func (s *Service) resolveJobFunctionForCategory(ctx context.Context, category st
 	return strings.TrimSpace(jobFunction.String), nil
 }
 
-func (s *Service) findExactNormalizedCategoryMatch(ctx context.Context, normalizedRoleTitle string) (string, string, error) {
-	rows, err := s.DB.SQL.QueryContext(ctx, `SELECT p.role_title, p.categorized_job_title, p.categorized_job_function
+func (s *Service) findExactNormalizedCategoryMatch(ctx context.Context, normalizedRoleTitle string, normalizedSkillValues []string, applySkillFilter bool) (string, string, error) {
+	query := `SELECT p.role_title, p.categorized_job_title, p.categorized_job_function
 		FROM parsed_jobs p
 		JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
-		WHERE r.source = ? AND p.role_title IS NOT NULL AND p.categorized_job_title IS NOT NULL
-		ORDER BY p.updated_at DESC, p.id DESC`, sourceRemoteRocketship)
+		WHERE r.source = ? AND p.role_title IS NOT NULL AND p.categorized_job_title IS NOT NULL`
+	args := []any{sourceRemoteRocketship}
+	if applySkillFilter && len(normalizedSkillValues) > 0 {
+		conditions := make([]string, 0, len(normalizedSkillValues))
+		for _, skill := range normalizedSkillValues {
+			conditions = append(conditions, `LOWER(COALESCE(p.tech_stack, '')) LIKE ?`)
+			args = append(args, `%`+"\""+skill+"\""+"%")
+		}
+		query += " AND (" + strings.Join(conditions, " OR ") + ")"
+	}
+	query += " ORDER BY p.updated_at DESC, p.id DESC"
+	rows, err := s.DB.SQL.QueryContext(ctx, query, args...)
 	if err != nil {
 		return "", "", err
 	}
@@ -893,7 +948,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				}
 			}
 			if categorizedTitle == nil {
-				inferredTitle, inferredFunction, err := s.findSimilarRemoteCategories(ctx, stringValue(payload["roleTitle"]))
+				inferredTitle, inferredFunction, err := s.findSimilarRemoteCategories(ctx, stringValue(payload["roleTitle"]), normalizedTechStack)
 				if err != nil {
 					return processed, err
 				}

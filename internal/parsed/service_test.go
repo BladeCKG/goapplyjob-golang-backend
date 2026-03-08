@@ -193,7 +193,7 @@ func TestFindSimilarRemoteCategoriesAvoidsGenericEngineer(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := New(db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Product Implementation Engineer")
+	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Product Implementation Engineer", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,12 +230,72 @@ func TestFindSimilarRemoteCategoriesPrefersExactNormalizedRoleTitle(t *testing.T
 		t.Fatal(err)
 	}
 	svc := New(db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Senior SWE Dev Ops")
+	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Senior SWE Dev Ops", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if title != "DevOps Engineer" || function != "Engineering" {
 		t.Fatalf("expected exact normalized match, got %q / %q", title, function)
+	}
+}
+
+func TestFindSimilarRemoteCategoriesUsesTechStackFilter(t *testing.T) {
+	db, err := database.Open("file:test_parsed_tech_stack_filter?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES
+		(1, 'remoterocketship', 'https://remote.example/jobs/platform-ruby', ?, 1, 0, 1, 0, '{}'),
+		(2, 'remoterocketship', 'https://remote.example/jobs/platform-java', ?, 1, 0, 1, 0, '{}')`,
+		time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, role_title, categorized_job_title, categorized_job_function, tech_stack, updated_at) VALUES
+		(1, 'Platform Engineer', 'Software Engineer', 'Engineering', '["Ruby"]', ?),
+		(2, 'Platform Engineer', 'Account Executive', 'Sales', '["Java"]', ?)`,
+		time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(db)
+	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Platform Engineer", []string{"Ruby"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if title != "Software Engineer" || function != "Engineering" {
+		t.Fatalf("expected tech-filtered category match, got %q / %q", title, function)
+	}
+}
+
+func TestFindSimilarRemoteCategoriesFallsBackWhenTechStackFilterHasNoMatch(t *testing.T) {
+	db, err := database.Open("file:test_parsed_tech_stack_filter_fallback?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES
+		(1, 'remoterocketship', 'https://remote.example/jobs/backend-python', ?, 1, 0, 1, 0, '{}')`,
+		time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, role_title, categorized_job_title, categorized_job_function, tech_stack, updated_at) VALUES
+		(1, 'Backend Engineer', 'Backend Engineer', 'Engineering', '["Python"]', ?)`,
+		time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(db)
+	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Backend Engineer", []string{"Rust"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if title != "Backend Engineer" || function != "Engineering" {
+		t.Fatalf("expected fallback category match, got %q / %q", title, function)
 	}
 }
 
