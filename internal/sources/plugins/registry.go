@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"goapplyjob-golang-backend/internal/sources/builtin"
+	"goapplyjob-golang-backend/internal/sources/hiringcafe"
 	"goapplyjob-golang-backend/internal/sources/remoterocketship"
 	"goapplyjob-golang-backend/internal/sources/workable"
 )
@@ -59,6 +60,14 @@ var registry = map[string]SourcePlugin{
 		ParseRawHTML:        workable.ParseRawHTML,
 		ParseImportRows:     workable.ParseImportRows,
 		SerializeImportRows: workable.SerializeImportRows,
+	},
+	hiringcafe.Source: {
+		Source:              hiringcafe.Source,
+		PayloadType:         hiringcafe.PayloadType,
+		ToTargetJobURL:      hiringcafe.ToTargetJobURL,
+		ParseRawHTML:        hiringcafe.ParseRawHTML,
+		ParseImportRows:     hiringcafe.ParseImportRows,
+		SerializeImportRows: hiringcafe.SerializeImportRows,
 	},
 }
 

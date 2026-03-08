@@ -18,12 +18,14 @@ import (
 
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/sources/builtin"
+	"goapplyjob-golang-backend/internal/sources/hiringcafe"
 	"goapplyjob-golang-backend/internal/sources/workable"
 )
 
 const (
 	sourceName       = "remoterocketship"
 	sourceBuiltin    = "builtin"
+	sourceHiringCafe = "hiringcafe"
 	payloadTypeDelta = "delta"
 	payloadTypeXML   = "delta_xml"
 )
@@ -36,18 +38,19 @@ var (
 )
 
 type Config struct {
-	Enabled                bool
-	URL                    string
-	IntervalMinutes        float64
-	SampleKB               int
-	TimeoutSeconds         float64
-	BuiltinBaseURL         string
-	BuiltinMaxPage         int
-	BuiltinPagesPerCycle   int
-	BuiltinCheckpointPages int
-	WorkableAPIURL         string
-	WorkablePageLimit      int
-	EnabledSources         map[string]struct{}
+	Enabled                   bool
+	URL                       string
+	IntervalMinutes           float64
+	SampleKB                  int
+	TimeoutSeconds            float64
+	BuiltinBaseURL            string
+	BuiltinMaxPage            int
+	BuiltinPagesPerCycle      int
+	BuiltinCheckpointPages    int
+	WorkableAPIURL            string
+	WorkablePageLimit         int
+	HiringCafeSitemapIndexURL string
+	EnabledSources            map[string]struct{}
 }
 
 type FetchSampleFunc func() ([]byte, error)
@@ -65,23 +68,24 @@ type Service struct {
 func New(config Config, db *database.DB) *Service {
 	svc := &Service{Config: config, DB: db}
 	svc.status = map[string]any{
-		"enabled":                     config.Enabled,
-		"url":                         config.URL,
-		"interval_minutes":            config.IntervalMinutes,
-		"sample_kb":                   config.SampleKB,
-		"enabled_sources":             sortedSourceNames(config.EnabledSources),
-		"workable_api_url":            config.WorkableAPIURL,
-		"running":                     false,
-		"last_check_at":               nil,
-		"last_change_at":              nil,
-		"last_sample_hash":            nil,
-		"last_error":                  nil,
-		"last_overlap_bytes":          0,
-		"last_delta_source":           nil,
-		"last_delta_size":             0,
-		"last_new_sample_lastmod":     nil,
-		"last_previous_first_lastmod": nil,
-		"last_delta_payload_id":       nil,
+		"enabled":                      config.Enabled,
+		"url":                          config.URL,
+		"interval_minutes":             config.IntervalMinutes,
+		"sample_kb":                    config.SampleKB,
+		"enabled_sources":              sortedSourceNames(config.EnabledSources),
+		"workable_api_url":             config.WorkableAPIURL,
+		"hiringcafe_sitemap_index_url": config.HiringCafeSitemapIndexURL,
+		"running":                      false,
+		"last_check_at":                nil,
+		"last_change_at":               nil,
+		"last_sample_hash":             nil,
+		"last_error":                   nil,
+		"last_overlap_bytes":           0,
+		"last_delta_source":            nil,
+		"last_delta_size":              0,
+		"last_new_sample_lastmod":      nil,
+		"last_previous_first_lastmod":  nil,
+		"last_delta_payload_id":        nil,
 	}
 	svc.FetchSample = func() ([]byte, error) { return nil, errors.New("fetch sample not configured") }
 	svc.FetchFull = func() ([]byte, error) { return nil, errors.New("fetch full not configured") }
@@ -157,6 +161,13 @@ func (s *Service) RunOnce() error {
 			return err
 		}
 		log.Printf("watcher source_done source=workable runner=runOnceWorkable")
+	}
+	if strings.TrimSpace(s.Config.HiringCafeSitemapIndexURL) != "" && s.isSourceEnabled(sourceHiringCafe) {
+		log.Printf("watcher source_start source=%s runner=runOnceHiringCafe", sourceHiringCafe)
+		if err := s.runOnceHiringCafe(); err != nil {
+			return err
+		}
+		log.Printf("watcher source_done source=%s runner=runOnceHiringCafe", sourceHiringCafe)
 	}
 	return nil
 }
@@ -412,6 +423,105 @@ func (s *Service) runOnceWorkable() error {
 	})
 }
 
+func (s *Service) runOnceHiringCafe() error {
+	statePayload, err := s.loadStatePayload(sourceHiringCafe)
+	if err != nil {
+		return err
+	}
+	previousLatestPostDate, _ := statePayload["latest_job_post_date"].(string)
+	previousLatestURL, _ := statePayload["latest_job_url"].(string)
+	previousLatestDT := parseISOTime(previousLatestPostDate)
+
+	indexURL := s.Config.HiringCafeSitemapIndexURL
+	indexText, err := s.FetchText(indexURL)
+	if err != nil {
+		return err
+	}
+	sitemapURLs := hiringcafe.ExtractTitleSitemapRows(indexText)
+	payloadsCreated := 0
+	fetchedSitemaps := 0
+	rowsSaved := 0
+	newestSeenDT := previousLatestDT
+	newestSeenURL := previousLatestURL
+
+	for _, sitemapURL := range sitemapURLs {
+		xmlText, err := s.FetchText(sitemapURL)
+		if err != nil {
+			return err
+		}
+		fetchedSitemaps++
+		rows, skipped := hiringcafe.ParseImportRows(xmlText)
+		if skipped > 0 {
+			log.Printf("HiringCafe parse_sitemap skipped_invalid=%d source_url=%s", skipped, sitemapURL)
+		}
+		if len(rows) == 0 {
+			continue
+		}
+
+		filteredRows := rows
+		if previousLatestDT != nil {
+			urls := make([]string, 0, len(rows))
+			for _, row := range rows {
+				if rowURL, _ := row["url"].(string); strings.TrimSpace(rowURL) != "" {
+					urls = append(urls, rowURL)
+				}
+			}
+			existingURLs, err := s.findExistingSourceURLs(sourceHiringCafe, urls)
+			if err != nil {
+				return err
+			}
+			filteredRows = make([]map[string]any, 0, len(rows))
+			for _, row := range rows {
+				rowURL, _ := row["url"].(string)
+				rowPostDate, _ := row["post_date"].(time.Time)
+				isNewer := !rowPostDate.IsZero() && rowPostDate.After(*previousLatestDT)
+				_, seen := existingURLs[rowURL]
+				if isNewer || !seen {
+					filteredRows = append(filteredRows, row)
+				}
+			}
+		}
+		if len(filteredRows) == 0 {
+			continue
+		}
+		for _, row := range filteredRows {
+			rowURL, _ := row["url"].(string)
+			rowPostDate, _ := row["post_date"].(time.Time)
+			if rowPostDate.IsZero() {
+				continue
+			}
+			rowsSaved++
+			if newestSeenDT == nil || rowPostDate.After(*newestSeenDT) {
+				copyDT := rowPostDate
+				newestSeenDT = &copyDT
+				newestSeenURL = rowURL
+			}
+		}
+
+		payloadID, err := s.saveDeltaPayloadForSource(sourceHiringCafe, sitemapURL, payloadTypeXML, hiringcafe.SerializeImportRows(filteredRows))
+		if err != nil {
+			return err
+		}
+		payloadsCreated++
+		log.Printf("HiringCafe saved_payload payload_id=%d source_url=%s saved_rows=%d", payloadID, sitemapURL, len(filteredRows))
+	}
+
+	var newestSeenISO any
+	if newestSeenDT != nil {
+		newestSeenISO = newestSeenDT.UTC().Format(time.RFC3339Nano)
+	}
+	return s.saveStatePayload(sourceHiringCafe, map[string]any{
+		"sitemap_index_url":           indexURL,
+		"latest_job_post_date":        newestSeenISO,
+		"latest_job_url":              valueOrNil(newestSeenURL),
+		"last_scan_at":                utcNowISO(),
+		"title_sitemaps_seen":         len(sitemapURLs),
+		"sitemaps_fetched_last_cycle": fetchedSitemaps,
+		"payloads_created_last_cycle": payloadsCreated,
+		"rows_saved_last_cycle":       rowsSaved,
+	})
+}
+
 func (s *Service) loadState(ctx context.Context) (string, string, error) {
 	if s.DB == nil {
 		return "", "", nil
@@ -542,6 +652,37 @@ func (s *Service) saveStatePayload(source string, payload map[string]any) error 
 		utcNowISO(),
 	)
 	return err
+}
+
+func (s *Service) findExistingSourceURLs(source string, urls []string) (map[string]struct{}, error) {
+	if len(urls) == 0 {
+		return map[string]struct{}{}, nil
+	}
+	placeholders := make([]string, 0, len(urls))
+	args := make([]any, 0, len(urls)+1)
+	args = append(args, source)
+	for _, rowURL := range urls {
+		placeholders = append(placeholders, "?")
+		args = append(args, rowURL)
+	}
+	rows, err := s.DB.SQL.QueryContext(
+		context.Background(),
+		`SELECT url FROM raw_us_jobs WHERE source = ? AND url IN (`+strings.Join(placeholders, ",")+`)`,
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]struct{}{}
+	for rows.Next() {
+		var rowURL string
+		if err := rows.Scan(&rowURL); err != nil {
+			return nil, err
+		}
+		out[rowURL] = struct{}{}
+	}
+	return out, rows.Err()
 }
 
 func mustMarshalJSON(value any) string {

@@ -19,14 +19,15 @@ func buildService(t *testing.T) *Service {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	return New(Config{
-		Enabled:              true,
-		URL:                  "https://example.com/jobs.xml",
-		IntervalMinutes:      1,
-		SampleKB:             8,
-		TimeoutSeconds:       30,
-		BuiltinBaseURL:       "",
-		BuiltinMaxPage:       1000,
-		BuiltinPagesPerCycle: 25,
+		Enabled:                   true,
+		URL:                       "https://example.com/jobs.xml",
+		IntervalMinutes:           1,
+		SampleKB:                  8,
+		TimeoutSeconds:            30,
+		BuiltinBaseURL:            "",
+		BuiltinMaxPage:            1000,
+		BuiltinPagesPerCycle:      25,
+		HiringCafeSitemapIndexURL: "",
 		EnabledSources: map[string]struct{}{
 			sourceName: {},
 		},
@@ -256,4 +257,39 @@ func TestBuiltinKeepsNextPageAtOneAfterFullScan(t *testing.T) {
 
 func builtinPageHTML(jobURL string, jobID int, publishedDate string) string {
 	return `<html><head><script type="application/ld+json">{"@graph":[{"@type":"ItemList","itemListElement":[{"@type":"ListItem","position":1,"url":"` + jobURL + `","name":"Role","description":"Desc"}]}]}</script></head><body><script>logBuiltinTrackEvent('job_board_view', {'jobs':[{'id':` + strconv.Itoa(jobID) + `,'published_date':'` + publishedDate + `'}],'filters':{}});</script></body></html>`
+}
+
+func TestHiringCafeCreatesDeltaPayloadsFromTitleSitemaps(t *testing.T) {
+	service := buildService(t)
+	service.Config.URL = ""
+	service.Config.HiringCafeSitemapIndexURL = "https://hiring.cafe/sitemap-index.xml"
+	service.Config.EnabledSources = map[string]struct{}{sourceHiringCafe: {}}
+	service.FetchText = func(rawURL string) (string, error) {
+		switch rawURL {
+		case "https://hiring.cafe/sitemap-index.xml":
+			return `<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap><loc>https://hiring.cafe/sitemaps/sitemap-titles-001.xml</loc></sitemap>
+</sitemapindex>`, nil
+		case "https://hiring.cafe/sitemaps/sitemap-titles-001.xml":
+			return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://hiring.cafe/viewjob/a</loc><lastmod>2026-02-20T20:14:34Z</lastmod></url>
+</urlset>`, nil
+		default:
+			return "", errors.New("unexpected URL: " + rawURL)
+		}
+	}
+
+	if err := service.RunOnce(); err != nil {
+		t.Fatal(err)
+	}
+
+	var count int
+	if err := service.DB.SQL.QueryRowContext(context.Background(), `SELECT COUNT(1) FROM watcher_payloads WHERE source = ?`, sourceHiringCafe).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 hiringcafe payload, got %d", count)
+	}
 }
