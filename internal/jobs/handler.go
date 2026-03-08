@@ -682,8 +682,8 @@ func (h *Handler) metrics(c *gin.Context) {
 func (h *Handler) sitemap(c *gin.Context) {
 	page := max(parseIntDefault(c.Query("page"), 1), 1)
 	perPage := max(parseIntDefault(c.Query("per_page"), 500), 1)
-	if perPage > 2000 {
-		perPage = 2000
+	if perPage > 50000 {
+		perPage = 50000
 	}
 	offset := (page - 1) * perPage
 	var total int
