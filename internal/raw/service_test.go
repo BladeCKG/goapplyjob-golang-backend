@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"goapplyjob-golang-backend/internal/database"
@@ -202,5 +203,17 @@ func TestProcessPendingSkipsRemainingSourceJobsAfter429(t *testing.T) {
 		if retryCount != 1 || isReady != 0 {
 			t.Fatalf("unexpected row state retry_count=%d is_ready=%d", retryCount, isReady)
 		}
+	}
+}
+
+func TestIsTransientDBErrorDetectsClosedConnectionMessage(t *testing.T) {
+	if !isTransientDBError(errors.New("InterfaceError: connection is closed")) {
+		t.Fatal("expected closed connection to be treated as transient")
+	}
+}
+
+func TestIsTransientDBErrorReturnsFalseForNonTransientError(t *testing.T) {
+	if isTransientDBError(errors.New("syntax error")) {
+		t.Fatal("expected non-transient error")
 	}
 }

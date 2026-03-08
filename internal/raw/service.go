@@ -115,9 +115,17 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	if batchSize <= 0 {
 		batchSize = 100
 	}
-	rows, err := s.DB.SQL.QueryContext(ctx, `SELECT id, url, COALESCE(source, '') FROM raw_us_jobs WHERE is_ready = 0 AND is_skippable = 0 ORDER BY post_date DESC, id DESC LIMIT ?`, batchSize)
-	if err != nil {
-		return 0, err
+	var rows *sql.Rows
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		rows, err = s.DB.SQL.QueryContext(ctx, `SELECT id, url, COALESCE(source, '') FROM raw_us_jobs WHERE is_ready = 0 AND is_skippable = 0 ORDER BY post_date DESC, id DESC LIMIT ?`, batchSize)
+		if err == nil {
+			break
+		}
+		if !isTransientDBError(err) || attempt == 2 {
+			return 0, err
+		}
+		time.Sleep(time.Duration(50*(1<<attempt)) * time.Millisecond)
 	}
 	defer rows.Close()
 
@@ -237,3 +245,24 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 }
 
 var _ = sql.ErrNoRows
+
+func isTransientDBError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"database is locked",
+		"database table is locked",
+		"connection is closed",
+		"connection already closed",
+		"server closed the connection unexpectedly",
+		"terminating connection",
+		"connection not open",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
+}
