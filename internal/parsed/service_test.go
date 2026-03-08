@@ -320,3 +320,12 @@ func TestNormalizeTechStackPreservesLeadingDot(t *testing.T) {
 		t.Fatalf("unexpected normalized tech stack %#v", got)
 	}
 }
+
+func TestStringFromPayloadTreatsStringNullAsNil(t *testing.T) {
+	if got := stringFromPayload("null"); got != nil {
+		t.Fatalf("expected nil from string null payload, got %#v", got)
+	}
+	if got := stringFromPayload(" NULL "); got != nil {
+		t.Fatalf("expected nil from uppercase string null payload, got %#v", got)
+	}
+}

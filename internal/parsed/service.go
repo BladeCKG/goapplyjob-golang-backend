@@ -979,10 +979,11 @@ func formatNullableTime(value *time.Time) any {
 func stringFromPayload(value any) any {
 	switch item := value.(type) {
 	case string:
-		if strings.TrimSpace(item) == "" {
+		normalized := strings.TrimSpace(item)
+		if normalized == "" || strings.EqualFold(normalized, "null") {
 			return nil
 		}
-		return strings.TrimSpace(item)
+		return normalized
 	case float64:
 		return strings.TrimSpace(strconv.FormatInt(int64(item), 10))
 	case int:
