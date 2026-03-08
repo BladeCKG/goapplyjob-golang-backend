@@ -139,9 +139,8 @@ func ExtractJobFromHTML(htmlText string, fallbackJobURL string) map[string]any {
 		payload["roleDescription"] = cleanedDescription
 	}
 	if company, _ := payload["company"].(map[string]any); company == nil || len(company) == 0 {
-		payload["_skip_for_retry"] = true
-		payload["_skip_reason"] = "builtin_company_parse_failed"
-		payload["source_name"] = "builtin"
+		jobPosting := findJobPostingLD(htmlText)
+		payload["company"] = toRawCompanyShape(fallbackCompanyFromJobPosting(jobPosting, htmlText))
 	}
 	return payload
 }
@@ -505,10 +504,14 @@ func fallbackCompanyFromJobPosting(jobPosting map[string]any, jobPageHTML string
 	if value := matchOne(jobPageHTML, `(?is)Year Founded:\s*([0-9]{4})`); value != "" {
 		foundedYear = value
 	}
+	var externalCompanyID any
+	if companySlug != "" {
+		externalCompanyID = "builtin_company_" + companySlug
+	}
 	tagline := extractWhatWeDoTagline(jobPageHTML)
 	employeeRange := normalizeEmployeeRange(matchOne(jobPageHTML, `(?is)([0-9][0-9,]*)\s+employees`))
 	return map[string]any{
-		"external_company_id":         nil,
+		"external_company_id":         externalCompanyID,
 		"name":                        valueOrNil(companyName),
 		"slug":                        valueOrNil(companySlug),
 		"tagline":                     valueOrNil(tagline),
