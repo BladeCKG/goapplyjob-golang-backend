@@ -139,11 +139,9 @@ func ExtractJobFromHTML(htmlText string, fallbackJobURL string) map[string]any {
 		payload["roleDescription"] = cleanedDescription
 	}
 	if company, _ := payload["company"].(map[string]any); company == nil || len(company) == 0 {
-		jobPosting := findJobPostingLD(htmlText)
-		companyPayload := fallbackCompanyFromJobPosting(jobPosting, htmlText)
-		if companyPayload != nil {
-			payload["company"] = toRawCompanyShape(companyPayload)
-		}
+		payload["_skip_for_retry"] = true
+		payload["_skip_reason"] = "builtin_company_parse_failed"
+		payload["source_name"] = "builtin"
 	}
 	return payload
 }

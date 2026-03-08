@@ -183,6 +183,17 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			if payload == nil {
 				payload = map[string]any{}
 			}
+			if skipRetry, _ := payload["_skip_for_retry"].(bool); skipRetry {
+				log.Printf("raw-us-job-worker parse_retry_later job_id=%d source=%s reason=%v", job.id, job.source, payload["_skip_reason"])
+				if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+					_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET retry_count = retry_count + 1 WHERE id = ?`, job.id)
+					return err
+				}); err != nil {
+					return processed, err
+				}
+				processed++
+				continue
+			}
 			if _, ok := payload["url"]; !ok {
 				payload["url"] = job.url
 			}

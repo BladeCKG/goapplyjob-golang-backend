@@ -2,6 +2,7 @@ package raw
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"testing"
 
@@ -108,5 +109,50 @@ func TestIsRemovedBuiltinJobHTMLFalseWhenTextMissing(t *testing.T) {
 	html := "<html><body><span>Job still active</span></body></html>"
 	if isRemovedBuiltinJobHTML("builtin", html) {
 		t.Fatalf("expected false when removed marker is missing")
+	}
+}
+
+func TestProcessPendingSkipsReadyWhenParserRequestsRetry(t *testing.T) {
+	db, err := database.Open("file:test_raw_retry_marker?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES ('remoterocketship', 'https://remote.example/job/foo/1', '2026-02-12T10:00:00Z', 0, 0, 0, 0, NULL)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(db)
+	svc.ReadHTML = func(targetURL string) (string, int, error) {
+		return "<html></html>", 200, nil
+	}
+	svc.ParseHTML = func(html string) (map[string]any, error) {
+		return map[string]any{"_skip_for_retry": true, "_skip_reason": "test"}, nil
+	}
+
+	processed, err := svc.ProcessPending(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected one processed job, got %d", processed)
+	}
+
+	var isReady, retryCount int
+	var rawJSON sql.NullString
+	err = db.SQL.QueryRowContext(context.Background(), `SELECT is_ready, retry_count, raw_json FROM raw_us_jobs WHERE url = 'https://remote.example/job/foo/1'`).Scan(&isReady, &retryCount, &rawJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isReady != 0 {
+		t.Fatalf("expected job to stay not ready, got %d", isReady)
+	}
+	if retryCount != 1 {
+		t.Fatalf("expected retry_count to increment, got %d", retryCount)
+	}
+	if rawJSON.Valid {
+		t.Fatalf("expected raw_json to stay NULL, got %#v", rawJSON.String)
 	}
 }

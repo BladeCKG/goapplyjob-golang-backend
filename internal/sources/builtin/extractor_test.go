@@ -160,3 +160,29 @@ func TestFallbackCompanyFromJobPosting(t *testing.T) {
 		t.Fatalf("unexpected fallback company values %#v", company)
 	}
 }
+
+func TestExtractJobFromHTMLReturnsRetryMarkerWhenCompanyMissing(t *testing.T) {
+	htmlText := `
+<html>
+  <head>
+    <script type="application/ld+json">
+      {
+        "@type": "JobPosting",
+        "title": "Platform Engineer",
+        "description": "<p>Build systems.</p>",
+        "employmentType": "FULL_TIME",
+        "jobLocationType": "TELECOMMUTE",
+        "hiringOrganization": {"sameAs": "https://builtin.com/company/acme"}
+      }
+    </script>
+  </head>
+  <body></body>
+</html>`
+	payload := ExtractJobFromHTML(htmlText, "https://builtin.com/job/platform-engineer/12345")
+	if payload["_skip_for_retry"] != true {
+		t.Fatalf("expected retry marker, got %#v", payload["_skip_for_retry"])
+	}
+	if payload["_skip_reason"] != "builtin_company_parse_failed" {
+		t.Fatalf("expected retry reason, got %#v", payload["_skip_reason"])
+	}
+}
