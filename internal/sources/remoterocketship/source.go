@@ -73,7 +73,26 @@ func ParseRawHTML(htmlText, _ string) map[string]any {
 	if jobData == nil {
 		return map[string]any{}
 	}
+	if country := normalizeCountryToken(stringValue(jobData["location"])); country != "" {
+		jobData["locationCountries"] = []string{country}
+	}
 	return jobData
+}
+
+func stringValue(value any) string {
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
+}
+
+func normalizeCountryToken(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "us", "usa", "u.s.", "u.s.a.", "united states":
+		return "United States"
+	case "uk", "gbr", "united kingdom":
+		return "United Kingdom"
+	default:
+		return ""
+	}
 }
 
 func ParseImportRows(bodyText string) ([]map[string]any, int) {

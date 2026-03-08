@@ -1,0 +1,167 @@
+{
+  "id": 18004380,
+  "created_at": "2025-12-24T22:07:24.08+00:00",
+  "validUntilDate": null,
+  "dateDeleted": null,
+  "requiredLanguages": [
+    "en"
+  ],
+  "descriptionLanguage": "en",
+  "roleTitle": "Inbound Sales Associate, Mortgage – 6 Month Fixed Term Contract",
+  "isOnLinkedIn": true,
+  "roleDescription": "• Act as the first point of contact for inbound mortgage leads, answering initial questions about the process and making clients feel supported immediately.\n• Work with a high volume of inbound applications to determine timeline and needs, supporting our brokers to accurately manage their time.\n• Review applications for missing details, reaching out to clients to gather necessary information and ensuring the file is \"broker-ready\" before handoff.\n• Manage a dynamic pipeline of leads, using our CRM and scheduling tools to book appointments for the brokerage team.\n• Utilize AI and sales engagement tools to increase outreach efficiency, driving workflows that allow us to help more clients faster.",
+  "roleRequirements": "• Relevant experience: 1+ years in a sales development, customer support, or high-volume administrative role. Interest in the Canadian mortgage or real estate market is a strong plus.\n• Clear & Empathetic Communicator: You speak plainly and truthfully. You meet clients where they are—whether they’re a nervous first-time homebuyer or a seasoned investor—and make complex processes feel simple, safe, and easy to understand.\n• Proactive Action Oriented: You act without being told what to do. If you see a backlog of applications, you jump in to clear it. You seek help when needed but generally find the path of least resistance to execution.\n• Persistent & Dedicated: You are comfortable managing a high volume of outreach because you know every file represents a person looking for help. You understand that people are busy, so you don’t take silence personally; instead, you have a consistent system for following up to ensure no client falls through the cracks.\n• Organization Guru: You can manage hundreds of leads without letting anyone fall through the cracks. You live by your calendar and keep the CRM spotless.\n• Experience with AI Tooling: You have experience with (or a strong desire to learn) AI tooling to speed up your drafting, note-taking, and organization.\n• Honesty/Integrity: Doesn't cut corners; does what is right, not what is politically expedient. You understand that trust is our most valuable asset.",
+  "benefits": "",
+  "jobDescriptionSummary": "Inbound Sales Associate supporting Wealthsimple's mortgage brokerage",
+  "twoLineJobDescriptionSummary": "Inbound Sales Associate for Wealthsimple's mortgage brokerage connecting clients and brokers. Engaging clients and managing mortgage application processes via digital platform.",
+  "educationRequirementsCredentialCategory": null,
+  "experienceInPlaceOfEducation": false,
+  "experienceRequirementsMonthsOfExperience": 12,
+  "roleTitleBrazil": null,
+  "roleDescriptionBrazil": null,
+  "roleRequirementsBrazil": null,
+  "benefitsBrazil": null,
+  "slugBrazil": null,
+  "jobDescriptionSummaryBrazil": null,
+  "twoLineJobDescriptionSummaryBrazil": null,
+  "roleTitleFrance": null,
+  "roleDescriptionFrance": null,
+  "roleRequirementsFrance": null,
+  "benefitsFrance": null,
+  "slugFrance": null,
+  "jobDescriptionSummaryFrance": null,
+  "twoLineJobDescriptionSummaryFrance": null,
+  "roleTitleGermany": null,
+  "roleDescriptionGermany": null,
+  "roleRequirementsGermany": null,
+  "benefitsGermany": null,
+  "slugGermany": null,
+  "jobDescriptionSummaryGermany": null,
+  "twoLineJobDescriptionSummaryGermany": null,
+  "url": "https://jobs.lever.co/wealthsimple/98ff5432-98df-4301-9b8b-ec0842bee73c",
+  "isEntryLevel": false,
+  "isJunior": true,
+  "isMidLevel": true,
+  "isSenior": false,
+  "isLead": false,
+  "salaryRange": null,
+  "techStack": [],
+  "slug": "inbound-sales-associate-mortgage-6-month-fixed-term-contract-united-states-remote",
+  "isPromoted": false,
+  "employmentType": "contract",
+  "location": "United States",
+  "locationType": "remote",
+  "locationCity": null,
+  "locationUSStates": [
+    "California"
+  ],
+  "categorizedJobTitle": "Sales",
+  "categorizedJobFunction": "Sales",
+  "company": {
+    "id": 892,
+    "name": "Wealthsimple",
+    "slug": "wealthsimple",
+    "tagline": "Powerful financial tools to help you grow and manage your money.",
+    "foundedYear": "2014",
+    "fundingData": [
+      {
+        "fundingType": "Private Equity Round",
+        "moneyRaised": null,
+        "announcedDate": "2021-05-02"
+      },
+      {
+        "fundingType": "Private Equity Round",
+        "moneyRaised": null,
+        "announcedDate": "2020-10-14"
+      },
+      {
+        "fundingType": "Venture Round",
+        "moneyRaised": null,
+        "announcedDate": "2019-05-21"
+      },
+      {
+        "fundingType": "Venture Round",
+        "moneyRaised": null,
+        "announcedDate": "2018-02-22"
+      },
+      {
+        "fundingType": "Series B",
+        "moneyRaised": null,
+        "announcedDate": "2017-05-10"
+      },
+      {
+        "fundingType": "Series B",
+        "moneyRaised": null,
+        "announcedDate": "2017-01-31"
+      },
+      {
+        "fundingType": "Series A",
+        "moneyRaised": null,
+        "announcedDate": "2015-04-08"
+      },
+      {
+        "fundingType": "Seed Round",
+        "moneyRaised": null,
+        "announcedDate": "2014-09-14"
+      },
+      {
+        "fundingType": "Seed Round",
+        "moneyRaised": null,
+        "announcedDate": "2014-05-14"
+      }
+    ],
+    "homePageURL": "https://wealthsimple.com",
+    "linkedInURL": "https://www.linkedin.com/company/wealthsimple",
+    "sponsorsH1B": false,
+    "employeeRange": "501,1000",
+    "profilePicURL": "https://storage.googleapis.com/remote-rocket.appspot.com/Wealthsimple.jpeg?GoogleAccessId=firebase-adminsdk-ptm37%40remote-rocket.iam.gserviceaccount.com&Expires=16447017600&Signature=vkDRHFcOodIt0OHDo904wxXTuco5VhkiaLotisjiTEiLtriVtFmhVX6jhFmJzYnP2rFgkt0ovtCQlRkjdVgBzFoUeQHC3vuUUIngoul%2B0Ag1i3QK%2FawJR%2FCLAv0XVyOu67dzifQXksuchE1ftW8Yu%2F8JiefmeOP3tzVLuwWqAGlCz%2FDa0BEtPL14DqWv5Wa9TM%2FCGU9f2eTx0lBVMNb16rsXeg7wUrGD93wBNc3Mnpumcs%2FRYoIvTmtnGendZrAAhpTdIAhK2PqtqGbCf1HAItxa2hzYmkOFBbLopyJipjxtO1vjsuKrag8BMF1amkfTkXO9yDaz8CBd%2FDHqGoIhdg%3D%3D",
+    "taglineBrazil": "Ferramentas financeiras poderosas para ajudar você a crescer e administrar seu dinheiro.",
+    "taglineFrance": "Des outils financiers puissants pour vous aider à développer et gérer votre argent.",
+    "taglineGermany": "Leistungsstarke Finanzwerkzeuge, um Ihr Geld zu vergrößern und zu verwalten.",
+    "chatGPTIndustries": [
+      "Finance",
+      "Fintech",
+      "Investing"
+    ],
+    "chatGPTDescription": "Wealthsimple is a financial technology company based in Canada that offers a range of investment and financial services. They provide managed investing options with custom portfolios tailored to individual goals, and offer self-directed investing to take control of trading stocks, ETFs, and cryptocurrencies commission-free. Wealthsimple also provides high-interest cash accounts, various retirement savings accounts, and a comprehensive set of tools for personal finance management. With over 3 million users, they emphasize low fees, transparency, and personalized financial advice.",
+    "linkedInDescription": "Do money right — no matter who you are or how much you have. wsim.co/legal",
+    "industrySpecialities": [
+      "wealth manager",
+      "financial advisor",
+      "investment manager",
+      "portfolio manager",
+      "investment adivsor"
+    ],
+    "chatGPTDescriptionBrazil": "Wealthsimple é uma empresa de tecnologia financeira sediada no Canadá que oferece uma variedade de serviços de investimento e financeiros. Eles oferecem opções de investimento gerenciado com portfólios personalizados adaptados a objetivos individuais, além de oferecer a possibilidade de investir de forma autônoma para ter controle sobre a negociação de ações, ETFs e criptomoedas sem comissão. Wealthsimple também fornece contas de poupança de alto rendimento, várias contas de poupança para aposentadoria e um conjunto abrangente de ferramentas para gestão de finanças pessoais. Com mais de 3 milhões de usuários, a empresa enfatiza baixas taxas, transparência e aconselhamento financeiro personalizado.",
+    "chatGPTDescriptionFrance": "Wealthsimple est une entreprise de technologie financière basée au Canada qui propose une gamme de services d'investissement et financiers. Elle offre des options d'investissement gérées avec des portefeuilles personnalisés adaptés aux objectifs individuels, ainsi qu'un investissement autogéré pour prendre le contrôle du trading d'actions, d'ETF et de cryptomonnaies sans commission. Wealthsimple propose également des comptes épargne à intérêt élevé, divers comptes d'épargne-retraite, et un ensemble complet d'outils pour la gestion des finances personnelles. Avec plus de 3 millions d'utilisateurs, ils mettent l'accent sur des frais réduits, la transparence et des conseils financiers personnalisés.",
+    "chatGPTDescriptionGermany": "Wealthsimple ist ein Finanztechnologieunternehmen mit Sitz in Kanada, das eine Palette von Investment- und Finanzdienstleistungen anbietet. Sie bieten verwaltete Investitionsoptionen mit individuell auf die Ziele zugeschnittenen Portfolios an und ermöglichen selbstbestimmtes Investieren, um Aktien, ETFs und Kryptowährungen provisionsfrei zu handeln. Wealthsimple bietet auch hochverzinsliche Bargeldkonten, verschiedene Altersvorsorgekonten und ein umfassendes Set an Werkzeugen für das Management der persönlichen Finanzen. Mit über 3 Millionen Nutzern betont das Unternehmen niedrige Gebühren, Transparenz und personalisierte Finanzberatung.",
+    "linkedInDescriptionBrazil": "Cuide bem do seu dinheiro — não importa quem você seja ou quanto você tenha. wsim.co/legal",
+    "linkedInDescriptionFrance": "Gérer votre argent correctement — peu importe qui vous êtes ou combien vous avez. wsim.co/legal",
+    "industrySpecialitiesBrazil": [
+      "gestor de patrimônio",
+      "consultor financeiro",
+      "gestor de investimentos",
+      "gestor de portfólio",
+      "consultor de investimentos"
+    ],
+    "industrySpecialitiesFrance": [
+      "gestionnaire de patrimoine",
+      "conseiller financier",
+      "gestionnaire d'investissement",
+      "gestionnaire de portefeuille",
+      "conseiller en investissement"
+    ],
+    "linkedInDescriptionGermany": "Verwalten Sie Ihr Geld richtig — egal, wer Sie sind oder wie viel Sie haben. wsim.co/legal",
+    "industrySpecialitiesGermany": [
+      "Vermögensverwalter",
+      "Finanzberater",
+      "Investmentmanager",
+      "Portfoliomanager",
+      "Investmentberater"
+    ],
+    "sponsorsUKSkilledWorkerVisa": false
+  },
+  "locationCountries": [
+    "United States"
+  ]
+}

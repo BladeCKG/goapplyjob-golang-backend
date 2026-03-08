@@ -1,0 +1,59 @@
+{
+  "id": "8fed4e2f-1dcf-474b-baa5-19d81507b1c7",
+  "created_at": "2026-02-18T15:05:57.939000+00:00",
+  "validUntilDate": null,
+  "dateDeleted": null,
+  "descriptionLanguage": "en",
+  "roleTitle": "Atlassian Platform Owner - Contract",
+  "roleDescription": "<p>Praecipio is Looking for an Atlassian Platform Owner</p><p></p><p>Why Praecipio?</p><p>Are you looking for a role that offers dynamic and varied experiences, professional growth, and the chance to make an immediate impact? Praecipio’s Residency positions provide all this and more. You'll work on diverse projects across industries, enhancing your skills and expanding your professional network. Enjoy the flexibility of project-based work with competitive compensation and the potential to transition into a permanent role if you choose. If you thrive on new challenges and value career adaptability, this is the perfect opportunity for you!</p><p></p><p>What our Client is looking for on this Project</p><p>Dedicated Atlassian product expert with robust project management skills. You own the strategy, roadmap, and lifecycle management of the organization’s Atlassian suite of products (e.g., Jira, Confluence, Jira Service Management, Bitbucket, Atlas, and related integrations). This role is accountable for advancing the platform vision: “Empower teams across the organization to deliver reliable, scalable services through a flexible and sustainable Atlassian platform.”</p><p></p><h3>What You Will Do</h3><p>As the Atlassian Platform expert you will lead various projects and be a strategic partner of our entire suite, including Jira, Confluence, and Jira Service Management. You are not just managing a tool; you are driving the vision and change for an ecosystem impacting approximately 800 users. You will:</p><ul><li>Drive Strategy &amp; Roadmap: Own the product vision and multi-horizon roadmap, ensuring priorities align with organizational goals and platform sustainability.</li><li>Lead a Technical Team: Manage and keep a small team of Atlassian admins aligned, ensuring they effectively execute hands-on technical work while you focus on the \"wide view\" of organizational impact.</li><li>Enforce Standards: Develop and drive processes, best practices, and guardrails to ensure a scalable and sustainable environment.</li><li>Facilitate Adoption: Secure organizational buy-in by effectively communicating the \"why\" behind business processes to drive high adoption.</li><li>Monitor Innovation: Proactively evaluate emerging Atlassian features, such as AI and automation, to translate them into actionable initiatives.<br /></li></ul>",
+  "roleRequirements": "<h3>Who You Are (Basic Qualifications)</h3><p>You are a proactive leader who can balance \"big picture\" thinking with enough technical depth to communicate effectively with admins and other business users.</p><ul><li>Minimum of 5+ years in Project Management, Business Systems Analysis, Product Management in the <strong>Atlassian Suite</strong>. </li><li>A deep enough understanding of Atlassian Cloud to know what is possible and how it impacts the broader organization.</li><li>Ability to maintain composure and assertiveness in a collaborative environment, ensuring necessary changes are adopted despite potential resistance. Must possess the conviction to advocate for the product's direction and push back appropriately when faced with challenges.</li><li>Strong ability to elicit, analyze, and document complex requirements into functional designs and user stories.</li></ul><h3>How You Will Stand Out (Preferred Qualifications)</h3><ul><li>Prior experience owning or managing internal enterprise platforms or large-scale transformation initiatives.</li><li>Atlassian certifications such as ACP-100, ACP-120, or ACP-420.</li><li>Familiarity with APIs, integrations, and marketplace app evaluations over custom solutions.</li><li>Expertise in Agile, ITSM, or DevOps frameworks.</li></ul>",
+  "benefits": "<p><strong>The Impact You Will Make</strong></p><p></p><p>Joining Praecipio means you will be the catalyst for profound and lasting change for our clients. You will directly enable them to:</p><p></p><ul> <li>Achieve Unprecedented Clarity: You will replace ambiguity and data chaos with a single source of truth. By leveraging advanced analytics and integrated systems, you'll provide executive leaders with real-time, transparent views into their entire value stream, from strategic investment to customer delivery.</li> <li>Drive Data-Driven Decision-Making: You will empower clients to move from guesswork to confident, strategic choices. Your work will provide the critical insights they need to pivot faster, optimize resource allocation, and ensure their investments are generating measurable returns.</li> <li>Connect Strategy to Execution: You will help clients ensure that every task, project, and program is perfectly aligned with their overarching business goals, eliminating wasted effort and maximizing impact.</li> <li>Unlock True Business Agility: You won't just be helping teams run faster sprints; you will be instilling a culture of enterprise-wide agility. This allows our clients to adapt to market changes, outperform competitors, and consistently deliver value to their customers.</li> </ul>",
+  "jobDescriptionSummary": "Praecipio is Looking for an Atlassian Platform OwnerWhy Praecipio?Are you looking for a role that offers dynamic and varied experiences, professional growth, and the chance to make an immediate impact? Praecipio’s Residency positions provide all this a...",
+  "twoLineJobDescriptionSummary": "Praecipio is Looking for an Atlassian Platform OwnerWhy Praecipio?Are you looking for a role that offers dynamic and varied experiences, professional growth, and the chance to make an immediate impact? Praecipio’s Residency positions provide all this a...",
+  "url": "https://jobs.workable.com/view/iLPqeKkyfnPD1TmwXQevU4/remote-atlassian-platform-owner---contract-in-united-states-at-praecipio",
+  "slug": null,
+  "employmentType": "Contract",
+  "location": "United States",
+  "locationType": "remote",
+  "locationCity": "",
+  "categorizedJobTitle": null,
+  "categorizedJobFunction": null,
+  "educationRequirementsCredentialCategory": null,
+  "experienceInPlaceOfEducation": null,
+  "experienceRequirementsMonthsOfExperience": null,
+  "isOnLinkedIn": false,
+  "isPromoted": false,
+  "isEntryLevel": false,
+  "isJunior": false,
+  "isMidLevel": true,
+  "isSenior": false,
+  "isLead": false,
+  "requiredLanguages": [
+    "en"
+  ],
+  "locationUSStates": [],
+  "locationCountries": [
+    "United States"
+  ],
+  "techStack": [],
+  "salaryRange": {},
+  "company": {
+    "id": "ca5076da-fd4a-4df4-9534-cc30ac9abe37",
+    "name": "Praecipio",
+    "slug": null,
+    "tagline": null,
+    "foundedYear": null,
+    "homePageURL": "https://www.praecipio.com/",
+    "linkedInURL": null,
+    "employeeRange": null,
+    "profilePicURL": "https://workablehr.s3.amazonaws.com/uploads/account/logo/553751/logo",
+    "fundingData": [],
+    "industrySpecialities": null,
+    "companyMatchKey": [
+      "domain:jobs.workable.com",
+      "domain:praecipio.com",
+      "name:praecipio",
+      "subdomain:jobs.workable.com"
+    ]
+  }
+}

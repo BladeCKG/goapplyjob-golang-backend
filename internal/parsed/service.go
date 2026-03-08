@@ -663,6 +663,32 @@ func jsonStringOrNil(values []string) any {
 	return string(encoded)
 }
 
+func normalizeLocationCountries(values any) any {
+	switch items := values.(type) {
+	case []string:
+		out := []string{}
+		for _, item := range items {
+			trimmed := strings.TrimSpace(item)
+			if trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		return jsonStringOrNil(out)
+	case []any:
+		out := []string{}
+		for _, item := range items {
+			text, _ := item.(string)
+			trimmed := strings.TrimSpace(text)
+			if trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		return jsonStringOrNil(out)
+	default:
+		return nil
+	}
+}
+
 func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error) {
 	if batchSize <= 0 {
 		batchSize = 100
@@ -728,12 +754,13 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			payload["locationCity"],
 			payload["locationUSStates"],
 		)
+		normalizedLocationCountries := normalizeLocationCountries(payload["locationCountries"])
 		normalizedTechStack := jsonStringOrNil(normalizeTechStack(payload["techStack"]))
 		err = database.RetryLocked(8, 50*time.Millisecond, func() error {
 			_, execErr := s.DB.SQL.ExecContext(
 				ctx,
-				`INSERT INTO parsed_jobs (raw_us_job_id, external_job_id, created_at_source, url, categorized_job_title, categorized_job_function, role_title, employment_type, location, location_city, location_us_states, education_requirements_credential_category, tech_stack, updated_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				`INSERT INTO parsed_jobs (raw_us_job_id, external_job_id, created_at_source, url, categorized_job_title, categorized_job_function, role_title, employment_type, location, location_city, location_us_states, location_countries, education_requirements_credential_category, tech_stack, updated_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				 ON CONFLICT(raw_us_job_id) DO UPDATE SET
 				   external_job_id = excluded.external_job_id,
 				   created_at_source = excluded.created_at_source,
@@ -744,6 +771,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				   location = excluded.location,
 				   location_city = excluded.location_city,
 				   location_us_states = excluded.location_us_states,
+				   location_countries = excluded.location_countries,
 				   education_requirements_credential_category = excluded.education_requirements_credential_category,
 				   tech_stack = excluded.tech_stack,
 				   role_title = excluded.role_title,
@@ -759,6 +787,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				normalizedLocation,
 				normalizedLocationCity,
 				normalizedUSStates,
+				normalizedLocationCountries,
 				normalizeEducationCredentialCategory(payload["educationRequirementsCredentialCategory"]),
 				normalizedTechStack,
 				time.Now().UTC().Format(time.RFC3339Nano),

@@ -1,0 +1,12 @@
+{
+  "files": [
+    "builtin.parse_raw_html.json",
+    "hiringcafe.parse_raw_html.json",
+    "remoterocketship.parse_raw_html.json",
+    "workable.parse_raw_html.json"
+  ],
+  "notes": {
+    "workable": "Uses workable job-listings fixture via import/watcher parser to produce raw payload.",
+    "hiringcafe": "parse_raw_html intentionally returns {} (watcher/import provides raw payload)."
+  }
+}

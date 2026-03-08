@@ -81,6 +81,7 @@ func (db *DB) Migrate(ctx context.Context) error {
             location_city TEXT,
             location_type TEXT,
             location_us_states TEXT,
+            location_countries TEXT,
             employment_type TEXT,
             salary_type TEXT,
             updated_at TEXT,
@@ -331,6 +332,9 @@ func (db *DB) Migrate(ctx context.Context) error {
 		return err
 	}
 	if err := db.ensureColumn(ctx, "parsed_jobs", "description_language", "TEXT"); err != nil {
+		return err
+	}
+	if err := db.ensureColumn(ctx, "parsed_jobs", "location_countries", "TEXT"); err != nil {
 		return err
 	}
 	if err := db.ensureColumn(ctx, "parsed_jobs", "external_job_id", "TEXT"); err != nil {

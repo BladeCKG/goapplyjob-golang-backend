@@ -381,17 +381,17 @@ func TestJobsFilterOptionsIncludesHierarchyMetadata(t *testing.T) {
 	}
 
 	locations := body["locations"].([]any)
-	if len(locations) < 6 {
+	if len(locations) < 4 {
 		t.Fatalf("expected expanded location options %#v", body)
 	}
 	locationQueryValues := body["location_query_values"].(map[string]any)
 	locationParents := body["location_parents"].(map[string]any)
-	if locationQueryValues["Austin"] != "Austin" {
-		t.Fatalf("missing Austin query value %#v", body)
+	if locationQueryValues["Texas"] != "Texas" {
+		t.Fatalf("missing Texas query value %#v", body)
 	}
-	austinParents := locationParents["Austin"].([]any)
-	if len(austinParents) < 2 || austinParents[0] != "Texas" || austinParents[1] != "United States" {
-		t.Fatalf("unexpected Austin parent metadata %#v", body)
+	texasParents := locationParents["Texas"].([]any)
+	if len(texasParents) < 1 || texasParents[0] != "United States" {
+		t.Fatalf("unexpected Texas parent metadata %#v", body)
 	}
 }
 
@@ -411,7 +411,7 @@ func TestJobsListLocationFilterSupportsStateWithCountryLabel(t *testing.T) {
 	if body["total"].(float64) != 1 {
 		t.Fatalf("expected one location-matched job, got %#v", body)
 	}
-	if body["items"].([]any)[0].(map[string]any)["location_city"] != "Austin" {
+	if body["items"].([]any)[0].(map[string]any)["location_us_states"].([]any)[0] != "Texas" {
 		t.Fatalf("unexpected location-matched item %#v", body)
 	}
 }

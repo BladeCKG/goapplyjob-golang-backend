@@ -114,6 +114,7 @@ func ExtractJob(htmlText, companyHTML string) map[string]any {
 		"locationType":                             normalizeLocationType(stringValue(jobPosting["jobLocationType"])),
 		"locationCity":                             firstLocality,
 		"locationUSStates":                         extractUSStates(jobPosting),
+		"locationCountries":                        extractLocationCountries(jobPosting),
 		"categorizedJobTitle":                      nil,
 		"categorizedJobFunction":                   nil,
 		"company":                                  rawCompany,
@@ -780,6 +781,38 @@ func extractUSStates(jobPosting map[string]any) any {
 		states = append(states, region)
 	}
 	return states
+}
+
+func extractLocationCountries(jobPosting map[string]any) []string {
+	locations, _ := jobPosting["jobLocation"].([]any)
+	if locations == nil {
+		if one, ok := jobPosting["jobLocation"].(map[string]any); ok {
+			locations = []any{one}
+		}
+	}
+	countries := []string{}
+	seen := map[string]struct{}{}
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		key := strings.ToLower(value)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		countries = append(countries, value)
+	}
+	for _, location := range locations {
+		entry, _ := location.(map[string]any)
+		address, _ := entry["address"].(map[string]any)
+		add(stringValue(address["addressCountry"]))
+	}
+	if applicantCountry := stringValueFromMap(jobPosting, "applicantLocationRequirements", "name"); applicantCountry != "" {
+		add(applicantCountry)
+	}
+	return countries
 }
 
 func stringValue(value any) string {

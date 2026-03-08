@@ -114,6 +114,9 @@ func NormalizeJobs(results []map[string]any) []NormalizedJob {
 				"location":         "United States",
 				"locationCity":     nil,
 				"locationUSStates": []string{},
+				"locationCountries": []string{
+					"United States",
+				},
 				"educationRequirementsCredentialCategory": nil,
 			},
 		})
