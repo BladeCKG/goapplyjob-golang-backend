@@ -203,3 +203,50 @@ func TestInferLevelFlagsDetectsSrWithPunctuation(t *testing.T) {
 		t.Fatalf("expected isMidLevel=false, got %#v", flags)
 	}
 }
+
+func TestExtractCompanyInfoDoesNotUseInitOrMetaForTagline(t *testing.T) {
+	companyHTML := `
+<html>
+  <head>
+    <meta name="description" content="Meta description fallback">
+    <script>Builtin.companyProfileInit({"companyId":12,"companyAlias":"acme","companyName":"Acme","description":"Init description fallback"});</script>
+  </head>
+  <body></body>
+</html>`
+	company := extractCompanyInfo(companyHTML, "https://builtin.com/company/acme")
+	if company["tagline"] != nil {
+		t.Fatalf("expected nil tagline without mission block, got %#v", company["tagline"])
+	}
+}
+
+func TestExtractCompanyInfoUsesMissionBlockTagline(t *testing.T) {
+	companyHTML := `
+<html>
+  <body>
+    <div x-ref="companyMission">
+      <p>We help modern teams automate recruiting.</p>
+      <p>Built for distributed companies.</p>
+    </div>
+  </body>
+</html>`
+	company := extractCompanyInfo(companyHTML, "https://builtin.com/company/acme")
+	if company["tagline"] != "We help modern teams automate recruiting.\nBuilt for distributed companies." {
+		t.Fatalf("unexpected mission tagline %#v", company["tagline"])
+	}
+}
+
+func TestExtractCompanyInfoMissionBlockHandlesBRAndNestedText(t *testing.T) {
+	companyHTML := `
+<html>
+  <body>
+    <div x-ref="companyMission">
+      We build tools<br>for hiring teams.
+      <span>Fast and reliable.</span>
+    </div>
+  </body>
+</html>`
+	company := extractCompanyInfo(companyHTML, "https://builtin.com/company/acme")
+	if company["tagline"] != "We build tools\nfor hiring teams.\nFast and reliable." {
+		t.Fatalf("unexpected mission block tagline %#v", company["tagline"])
+	}
+}

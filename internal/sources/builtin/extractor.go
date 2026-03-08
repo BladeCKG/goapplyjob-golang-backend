@@ -15,7 +15,6 @@ import (
 var (
 	scriptLDPattern         = regexp.MustCompile(`(?is)<script[^>]*type=['"]application/ld\+json['"][^>]*>(.*?)</script>`)
 	canonicalPattern        = regexp.MustCompile(`(?is)<link[^>]*rel=['"]canonical['"][^>]*href=['"]([^'"]+)['"]`)
-	metaDescriptionPattern  = regexp.MustCompile(`(?is)<meta[^>]*name=['"]description['"][^>]*content=['"]([^'"]+)['"]`)
 	companyProfileInitRegex = regexp.MustCompile(`(?is)Builtin\.companyProfileInit\((\{.*?\})\);`)
 	jobPostInitRegex        = regexp.MustCompile(`(?is)Builtin\.jobPostInit\((\{.*\})\)`)
 	topSkillsRegex          = regexp.MustCompile(`(?is)Top Skills\s*</h[1-6]>.*?<div[^>]*>\s*([^<]*,[^<]*)\s*</div>`)
@@ -431,10 +430,7 @@ func extractCompanyInfo(companyHTML, companySameAs string) map[string]any {
 	if canonicalURL == "" {
 		canonicalURL = companySameAs
 	}
-	tagline := ""
-	if match := metaDescriptionPattern.FindStringSubmatch(companyHTML); len(match) == 2 {
-		tagline = html.UnescapeString(strings.TrimSpace(match[1]))
-	}
+	tagline := extractCompanyTaglineFromMissionBlock(companyHTML)
 	websiteURL := valueOrNil(matchAnchorHref(companyHTML, `(?i)View Website`))
 	companyMatchKey := buildCompanyMatchKey(firstNonEmpty(stringValue(initPayload["companyName"]), extractTitle(companyHTML)), "", stringValue(websiteURL))
 	return map[string]any{
@@ -554,6 +550,49 @@ func extractWhatWeDoTagline(jobPageHTML string) string {
 		lines = append(lines, text)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func cleanTaglineText(value string) string {
+	lines := []string{}
+	for _, line := range strings.Split(value, "\n") {
+		cleaned := strings.TrimSpace(spacePattern.ReplaceAllString(line, " "))
+		if cleaned != "" {
+			lines = append(lines, cleaned)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func extractTaglineTextWithBreaks(htmlText string) string {
+	if strings.TrimSpace(htmlText) == "" {
+		return ""
+	}
+	withBreaks := regexp.MustCompile(`(?is)<br\s*/?>`).ReplaceAllString(htmlText, "\n")
+	withBreaks = regexp.MustCompile(`(?is)</(p|div|li|h[1-6])>`).ReplaceAllString(withBreaks, "\n")
+	stripped := tagPattern.ReplaceAllString(withBreaks, "")
+	return cleanTaglineText(html.UnescapeString(stripped))
+}
+
+func extractCompanyTaglineFromMissionBlock(companyHTML string) string {
+	block := matchOne(companyHTML, `(?is)<div[^>]*x-ref=['"]companyMission['"][^>]*>(.*?)</div>`)
+	if strings.TrimSpace(block) == "" {
+		return ""
+	}
+	paragraphs := regexp.MustCompile(`(?is)<p[^>]*>(.*?)</p>`).FindAllStringSubmatch(block, -1)
+	if len(paragraphs) > 0 {
+		lines := []string{}
+		for _, paragraph := range paragraphs {
+			if len(paragraph) < 2 {
+				continue
+			}
+			text := extractTaglineTextWithBreaks(paragraph[1])
+			if text != "" {
+				lines = append(lines, text)
+			}
+		}
+		return cleanTaglineText(strings.Join(lines, "\n"))
+	}
+	return extractTaglineTextWithBreaks(block)
 }
 
 func toRawCompanyShape(parsedCompany map[string]any) any {
