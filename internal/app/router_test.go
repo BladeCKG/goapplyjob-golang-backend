@@ -745,6 +745,82 @@ func TestJobsMetricsUserActionHiddenFilter(t *testing.T) {
 	}
 }
 
+func TestClearSelectedJobActionBucket(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJob(t, db, 8301, "https://example.com/clear-a", "Austin", "Texas", 100, 130, true, time.Now().UTC())
+	insertJob(t, db, 8302, "https://example.com/clear-b", "Austin", "Texas", 100, 130, true, time.Now().UTC())
+	insertJob(t, db, 8303, "https://example.com/clear-c", "Austin", "Texas", 100, 130, true, time.Now().UTC())
+
+	code := requestLoginCode(t, router, "clear-user@example.com")
+	cookie := verifyLoginCode(t, router, "clear-user@example.com", code)
+
+	for _, pair := range []struct {
+		jobID string
+		body  string
+	}{
+		{"1", `{"is_saved":true}`},
+		{"2", `{"is_saved":true}`},
+		{"2", `{"is_applied":true}`},
+		{"3", `{"is_applied":true}`},
+		{"3", `{"is_hidden":true}`},
+	} {
+		req := httptest.NewRequest(http.MethodPut, "/job-actions/"+pair.jobID, strings.NewReader(pair.body))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		assertStatus(t, rec.Code, http.StatusOK)
+	}
+
+	summaryReq := httptest.NewRequest(http.MethodGet, "/job-actions/summary", nil)
+	summaryReq.AddCookie(cookie)
+	summaryRec := httptest.NewRecorder()
+	router.ServeHTTP(summaryRec, summaryReq)
+	assertStatus(t, summaryRec.Code, http.StatusOK)
+	var before map[string]any
+	decodeBody(t, summaryRec.Body.Bytes(), &before)
+	if before["applied_count"] != float64(2) || before["saved_count"] != float64(2) || before["hidden_count"] != float64(1) {
+		t.Fatalf("unexpected pre-clear summary %#v", before)
+	}
+
+	clearSavedReq := httptest.NewRequest(http.MethodPost, "/job-actions/clear?action=saved", nil)
+	clearSavedReq.AddCookie(cookie)
+	clearSavedRec := httptest.NewRecorder()
+	router.ServeHTTP(clearSavedRec, clearSavedReq)
+	assertStatus(t, clearSavedRec.Code, http.StatusOK)
+
+	clearHiddenReq := httptest.NewRequest(http.MethodPost, "/job-actions/clear?action=hidden", nil)
+	clearHiddenReq.AddCookie(cookie)
+	clearHiddenRec := httptest.NewRecorder()
+	router.ServeHTTP(clearHiddenRec, clearHiddenReq)
+	assertStatus(t, clearHiddenRec.Code, http.StatusOK)
+
+	clearAppliedReq := httptest.NewRequest(http.MethodPost, "/job-actions/clear?action=applied", nil)
+	clearAppliedReq.AddCookie(cookie)
+	clearAppliedRec := httptest.NewRecorder()
+	router.ServeHTTP(clearAppliedRec, clearAppliedReq)
+	assertStatus(t, clearAppliedRec.Code, http.StatusOK)
+
+	finalSummaryReq := httptest.NewRequest(http.MethodGet, "/job-actions/summary", nil)
+	finalSummaryReq.AddCookie(cookie)
+	finalSummaryRec := httptest.NewRecorder()
+	router.ServeHTTP(finalSummaryRec, finalSummaryReq)
+	assertStatus(t, finalSummaryRec.Code, http.StatusOK)
+	var after map[string]any
+	decodeBody(t, finalSummaryRec.Body.Bytes(), &after)
+	if after["applied_count"] != float64(0) || after["saved_count"] != float64(0) || after["hidden_count"] != float64(0) {
+		t.Fatalf("unexpected post-clear summary %#v", after)
+	}
+
+	invalidReq := httptest.NewRequest(http.MethodPost, "/job-actions/clear?action=invalid", nil)
+	invalidReq.AddCookie(cookie)
+	invalidRec := httptest.NewRecorder()
+	router.ServeHTTP(invalidRec, invalidReq)
+	assertStatus(t, invalidRec.Code, http.StatusBadRequest)
+}
+
 func TestPricingFlow(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()

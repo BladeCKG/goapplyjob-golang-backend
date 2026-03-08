@@ -34,6 +34,7 @@ func (h *Handler) Register(router gin.IRouter) {
 	router.GET("/job-actions", h.getJobActions)
 	router.GET("/job-actions/summary", h.getJobActionsSummary)
 	router.PUT("/job-actions/:jobID", h.updateJobAction)
+	router.POST("/job-actions/clear", h.clearJobActions)
 }
 
 func (h *Handler) getJobActions(c *gin.Context) {
@@ -184,6 +185,53 @@ func (h *Handler) getJobActionsSummary(c *gin.Context) {
 		"applied_count": appliedCount,
 		"saved_count":   savedCount,
 		"hidden_count":  hiddenCount,
+	})
+}
+
+func (h *Handler) clearJobActions(c *gin.Context) {
+	user, err := h.auth.CurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Not authenticated"})
+		return
+	}
+	action := strings.ToLower(strings.TrimSpace(c.Query("action")))
+	if action != "applied" && action != "saved" && action != "hidden" {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid action"})
+		return
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	var result sql.Result
+	switch action {
+	case "applied":
+		result, err = h.db.SQL.ExecContext(c.Request.Context(),
+			`UPDATE user_job_actions
+			 SET is_applied = 0, updated_at = ?
+			 WHERE user_id = ? AND is_applied = 1`,
+			now, user.ID,
+		)
+	case "saved":
+		result, err = h.db.SQL.ExecContext(c.Request.Context(),
+			`UPDATE user_job_actions
+			 SET is_saved = 0, updated_at = ?
+			 WHERE user_id = ? AND is_saved = 1`,
+			now, user.ID,
+		)
+	default:
+		result, err = h.db.SQL.ExecContext(c.Request.Context(),
+			`UPDATE user_job_actions
+			 SET is_hidden = 0, updated_at = ?
+			 WHERE user_id = ? AND is_hidden = 1`,
+			now, user.ID,
+		)
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to clear job actions"})
+		return
+	}
+	clearedCount, _ := result.RowsAffected()
+	c.JSON(http.StatusOK, gin.H{
+		"cleared_count": clearedCount,
+		"action":        action,
 	})
 }
 
