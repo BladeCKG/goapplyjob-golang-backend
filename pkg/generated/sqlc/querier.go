@@ -16,45 +16,55 @@ type Querier interface {
 	ClearHiddenJobActionsByUser(ctx context.Context, arg ClearHiddenJobActionsByUserParams) (int64, error)
 	ClearSavedJobActionsByUser(ctx context.Context, arg ClearSavedJobActionsByUserParams) (int64, error)
 	ConsumeActiveVerificationCodesByUser(ctx context.Context, arg ConsumeActiveVerificationCodesByUserParams) error
-	CountParsedJobsByID(ctx context.Context, id int64) (int64, error)
-	CountPasswordCredentialsByUser(ctx context.Context, userID int64) (int64, error)
-	CountUserSubscriptions(ctx context.Context, userID int64) (int64, error)
-	CreateAuthUser(ctx context.Context, arg CreateAuthUserParams) (int64, error)
-	CreateEmployerJobDraft(ctx context.Context, arg CreateEmployerJobDraftParams) (int64, error)
-	CreateEmployerOrganization(ctx context.Context, arg CreateEmployerOrganizationParams) (int64, error)
+	CountCompaniesWithJobsForSitemap(ctx context.Context) (int64, error)
+	CountJobsForListingFiltered(ctx context.Context, arg CountJobsForListingFilteredParams) (*CountJobsForListingFilteredRow, error)
+	CountParsedJobs(ctx context.Context) (int64, error)
+	CountParsedJobsByID(ctx context.Context, id int32) (int64, error)
+	CountPasswordCredentialsByUser(ctx context.Context, userID int32) (int64, error)
+	CountUserSubscriptions(ctx context.Context, userID int32) (int64, error)
+	CreateAuthUser(ctx context.Context, arg CreateAuthUserParams) (int32, error)
+	CreateEmployerJobDraft(ctx context.Context, arg CreateEmployerJobDraftParams) (int32, error)
+	CreateEmployerOrganization(ctx context.Context, arg CreateEmployerOrganizationParams) (int32, error)
 	CreateEmployerOrganizationOwnerMembership(ctx context.Context, arg CreateEmployerOrganizationOwnerMembershipParams) error
-	CreatePaidInternalPayment(ctx context.Context, arg CreatePaidInternalPaymentParams) (int64, error)
-	CreatePendingPayment(ctx context.Context, arg CreatePendingPaymentParams) (int64, error)
+	CreatePaidInternalPayment(ctx context.Context, arg CreatePaidInternalPaymentParams) (int32, error)
+	CreatePendingPayment(ctx context.Context, arg CreatePendingPaymentParams) (int32, error)
 	CreateUserSubscriptionActive(ctx context.Context, arg CreateUserSubscriptionActiveParams) error
-	DeactivateActiveSubscriptionsByUser(ctx context.Context, userID int64) error
-	DeactivateSubscriptionByID(ctx context.Context, id int64) error
+	DeactivateActiveSubscriptionsByUser(ctx context.Context, userID int32) error
+	DeactivateSubscriptionByID(ctx context.Context, id int32) error
 	DeleteAuthSessionByTokenHash(ctx context.Context, sessionTokenHash string) error
 	DeleteUser(ctx context.Context, name string) (*HomepageSchemaUser, error)
 	GetActivePricingPlanByCode(ctx context.Context, code string) (*GetActivePricingPlanByCodeRow, error)
-	GetActivePricingPlanIDByCode(ctx context.Context, code string) (int64, error)
+	GetActivePricingPlanIDByCode(ctx context.Context, code string) (int32, error)
+	GetActiveSubscriptionIDForUser(ctx context.Context, arg GetActiveSubscriptionIDForUserParams) (int32, error)
 	GetAuthUserByEmail(ctx context.Context, email string) (*GetAuthUserByEmailRow, error)
+	GetCompanyProfileBySlug(ctx context.Context, slug pgtype.Text) (*GetCompanyProfileBySlugRow, error)
+	GetCompanyProfileStats(ctx context.Context, companyID pgtype.Int4) (*GetCompanyProfileStatsRow, error)
 	GetCurrentUserBySession(ctx context.Context, arg GetCurrentUserBySessionParams) (*GetCurrentUserBySessionRow, error)
-	GetEmployerJobByID(ctx context.Context, id int64) (*GetEmployerJobByIDRow, error)
-	GetEmployerJobForMemberCheck(ctx context.Context, id int64) (*GetEmployerJobForMemberCheckRow, error)
+	GetEmployerJobByID(ctx context.Context, id int32) (*GetEmployerJobByIDRow, error)
+	GetEmployerJobForMemberCheck(ctx context.Context, id int32) (*GetEmployerJobForMemberCheckRow, error)
 	GetEmployerOrganizationMemberRole(ctx context.Context, arg GetEmployerOrganizationMemberRoleParams) (string, error)
+	GetJobDetailByID(ctx context.Context, id int32) (*GetJobDetailByIDRow, error)
+	GetJobsMetricsFiltered(ctx context.Context, arg GetJobsMetricsFilteredParams) (*GetJobsMetricsFilteredRow, error)
 	GetLatestPaidPaymentMetaByUserAndPlan(ctx context.Context, arg GetLatestPaidPaymentMetaByUserAndPlanParams) (*GetLatestPaidPaymentMetaByUserAndPlanRow, error)
-	GetLatestSubscriptionWithPlanByUser(ctx context.Context, userID int64) (*GetLatestSubscriptionWithPlanByUserRow, error)
+	GetLatestSubscriptionWithPlanByUser(ctx context.Context, userID int32) (*GetLatestSubscriptionWithPlanByUserRow, error)
 	GetMagicLinkVerificationCode(ctx context.Context, arg GetMagicLinkVerificationCodeParams) (*GetMagicLinkVerificationCodeRow, error)
-	GetOwnerEmployerOrganizationByUser(ctx context.Context, userID int64) (*GetOwnerEmployerOrganizationByUserRow, error)
-	GetPasswordCredentialByUser(ctx context.Context, userID int64) (*GetPasswordCredentialByUserRow, error)
-	GetPaymentByID(ctx context.Context, id int64) (*GetPaymentByIDRow, error)
+	GetMaxParsedJobID(ctx context.Context) (int64, error)
+	GetOwnerEmployerOrganizationByUser(ctx context.Context, userID int32) (*GetOwnerEmployerOrganizationByUserRow, error)
+	GetPasswordCredentialByUser(ctx context.Context, userID int32) (*GetPasswordCredentialByUserRow, error)
+	GetPaymentByID(ctx context.Context, id int32) (*GetPaymentByIDRow, error)
 	GetPaymentByIDAndUser(ctx context.Context, arg GetPaymentByIDAndUserParams) (*GetPaymentByIDAndUserRow, error)
 	GetPaymentForUser(ctx context.Context, arg GetPaymentForUserParams) (*GetPaymentForUserRow, error)
 	GetPaymentForWebhookByCheckoutID(ctx context.Context, providerCheckoutID pgtype.Text) (*GetPaymentForWebhookByCheckoutIDRow, error)
-	GetPaymentForWebhookByPaymentID(ctx context.Context, id int64) (*GetPaymentForWebhookByPaymentIDRow, error)
+	GetPaymentForWebhookByPaymentID(ctx context.Context, id int32) (*GetPaymentForWebhookByPaymentIDRow, error)
 	GetPaymentStatusViewByIDAndUser(ctx context.Context, arg GetPaymentStatusViewByIDAndUserParams) (*GetPaymentStatusViewByIDAndUserRow, error)
-	GetPlanDurationByID(ctx context.Context, id int64) (int32, error)
+	GetPlanDurationByID(ctx context.Context, id int32) (int32, error)
 	GetStripeCancelablePaymentByUser(ctx context.Context, arg GetStripeCancelablePaymentByUserParams) (*GetStripeCancelablePaymentByUserRow, error)
+	GetTopFunctionByCategory(ctx context.Context, categorizedJobTitle pgtype.Text) (pgtype.Text, error)
 	GetUser(ctx context.Context, name string) (*HomepageSchemaUser, error)
 	GetUserJobActionByUserAndJob(ctx context.Context, arg GetUserJobActionByUserAndJobParams) (*GetUserJobActionByUserAndJobRow, error)
 	GetUserJobActionsByJobIDs(ctx context.Context, arg GetUserJobActionsByJobIDsParams) ([]*GetUserJobActionsByJobIDsRow, error)
-	GetUserJobActionsSummary(ctx context.Context, userID int64) (*GetUserJobActionsSummaryRow, error)
-	GetVerificationCodeIDByUser(ctx context.Context, arg GetVerificationCodeIDByUserParams) (int64, error)
+	GetUserJobActionsSummary(ctx context.Context, userID int32) (*GetUserJobActionsSummaryRow, error)
+	GetVerificationCodeIDByUser(ctx context.Context, arg GetVerificationCodeIDByUserParams) (int32, error)
 	InsertAuthSession(ctx context.Context, arg InsertAuthSessionParams) error
 	InsertEmployerJobAuditEvent(ctx context.Context, arg InsertEmployerJobAuditEventParams) error
 	InsertPasswordCredential(ctx context.Context, arg InsertPasswordCredentialParams) error
@@ -62,8 +72,18 @@ type Querier interface {
 	InsertUserSubscription(ctx context.Context, arg InsertUserSubscriptionParams) error
 	InsertVerificationCode(ctx context.Context, arg InsertVerificationCodeParams) error
 	ListActivePricingPlans(ctx context.Context) ([]*ListActivePricingPlansRow, error)
-	ListEmployerJobIDsByUser(ctx context.Context, arg ListEmployerJobIDsByUserParams) ([]int64, error)
-	ListEmployerOrganizationsByUser(ctx context.Context, userID int64) ([]*ListEmployerOrganizationsByUserRow, error)
+	ListCompanySitemapPage(ctx context.Context, arg ListCompanySitemapPageParams) ([]*ListCompanySitemapPageRow, error)
+	ListDistinctEmploymentTypes(ctx context.Context) ([]pgtype.Text, error)
+	ListDistinctJobCategoryFunctionPairs(ctx context.Context) ([]*ListDistinctJobCategoryFunctionPairsRow, error)
+	ListDistinctTechStackTexts(ctx context.Context) ([][]byte, error)
+	ListEmployerJobIDsByUser(ctx context.Context, arg ListEmployerJobIDsByUserParams) ([]int32, error)
+	ListEmployerOrganizationsByUser(ctx context.Context, userID int32) ([]*ListEmployerOrganizationsByUserRow, error)
+	ListFilteredJobIDs(ctx context.Context, arg ListFilteredJobIDsParams) ([]int32, error)
+	ListJobSitemapPage(ctx context.Context, arg ListJobSitemapPageParams) ([]*ListJobSitemapPageRow, error)
+	ListJobsByIDsInOrder(ctx context.Context, ids []int64) ([]*ListJobsByIDsInOrderRow, error)
+	ListJobsForListing(ctx context.Context) ([]*ListJobsForListingRow, error)
+	ListRelatedCategoriesByFunction(ctx context.Context, arg ListRelatedCategoriesByFunctionParams) ([]*ListRelatedCategoriesByFunctionRow, error)
+	ListTopCategories(ctx context.Context, arg ListTopCategoriesParams) ([]*ListTopCategoriesRow, error)
 	ListUsers(ctx context.Context) ([]*HomepageSchemaUser, error)
 	MarkEmployerJobPostingFeePaid(ctx context.Context, arg MarkEmployerJobPostingFeePaidParams) error
 	MarkPaymentPaidByID(ctx context.Context, arg MarkPaymentPaidByIDParams) error
@@ -75,7 +95,7 @@ type Querier interface {
 	UpdateEmployerJobStatusSimple(ctx context.Context, arg UpdateEmployerJobStatusSimpleParams) error
 	UpdatePasswordCredentialByUser(ctx context.Context, arg UpdatePasswordCredentialByUserParams) error
 	UpdatePaymentCheckoutInfo(ctx context.Context, arg UpdatePaymentCheckoutInfoParams) error
-	UpdatePaymentFailedByID(ctx context.Context, id int64) error
+	UpdatePaymentFailedByID(ctx context.Context, id int32) error
 	UpdatePaymentPayloadByID(ctx context.Context, arg UpdatePaymentPayloadByIDParams) error
 	UpdateUserJobActionByUserAndJob(ctx context.Context, arg UpdateUserJobActionByUserAndJobParams) error
 	UpsertPricingPlanByCode(ctx context.Context, arg UpsertPricingPlanByCodeParams) error

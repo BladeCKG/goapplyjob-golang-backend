@@ -9,93 +9,93 @@ import (
 )
 
 type AuthPasswordCredential struct {
-	ID           int64  `json:"id"`
-	UserID       int64  `json:"user_id"`
-	PasswordSalt string `json:"password_salt"`
-	PasswordHash string `json:"password_hash"`
-	CreatedAt    string `json:"created_at"`
+	ID           int32              `json:"id"`
+	UserID       int32              `json:"user_id"`
+	PasswordSalt string             `json:"password_salt"`
+	PasswordHash string             `json:"password_hash"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
 type AuthSession struct {
-	ID               int64  `json:"id"`
-	UserID           int64  `json:"user_id"`
-	SessionTokenHash string `json:"session_token_hash"`
-	ExpiresAt        string `json:"expires_at"`
-	CreatedAt        string `json:"created_at"`
+	ID               int32              `json:"id"`
+	UserID           int32              `json:"user_id"`
+	SessionTokenHash string             `json:"session_token_hash"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
 type AuthUser struct {
-	ID                 int64              `json:"id"`
+	ID                 int32              `json:"id"`
 	Email              string             `json:"email"`
-	CreatedAt          string             `json:"created_at"`
 	LastSeenAt         pgtype.Timestamptz `json:"last_seen_at"`
 	LastJobFiltersJson []byte             `json:"last_job_filters_json"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 }
 
 type AuthVerificationCode struct {
-	ID         int64       `json:"id"`
-	UserID     int64       `json:"user_id"`
-	CodeHash   string      `json:"code_hash"`
-	ExpiresAt  string      `json:"expires_at"`
-	ConsumedAt pgtype.Text `json:"consumed_at"`
-	CreatedAt  string      `json:"created_at"`
+	ID         int32              `json:"id"`
+	UserID     int32              `json:"user_id"`
+	CodeHash   string             `json:"code_hash"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+	ConsumedAt pgtype.Timestamptz `json:"consumed_at"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
 type EmployerJob struct {
-	ID               int64         `json:"id"`
-	OrganizationID   int64         `json:"organization_id"`
-	CreatedByUserID  int64         `json:"created_by_user_id"`
-	Status           string        `json:"status"`
-	Title            pgtype.Text   `json:"title"`
-	Department       pgtype.Text   `json:"department"`
-	Slug             pgtype.Text   `json:"slug"`
-	Description      pgtype.Text   `json:"description"`
-	Requirements     pgtype.Text   `json:"requirements"`
-	Benefits         pgtype.Text   `json:"benefits"`
-	EmploymentType   pgtype.Text   `json:"employment_type"`
-	LocationType     pgtype.Text   `json:"location_type"`
-	LocationsJson    pgtype.Text   `json:"locations_json"`
-	Seniority        pgtype.Text   `json:"seniority"`
-	TechStack        pgtype.Text   `json:"tech_stack"`
-	ApplyUrl         pgtype.Text   `json:"apply_url"`
-	ApplyEmail       pgtype.Text   `json:"apply_email"`
-	SalaryCurrency   pgtype.Text   `json:"salary_currency"`
-	SalaryPeriod     pgtype.Text   `json:"salary_period"`
-	SalaryMin        pgtype.Float8 `json:"salary_min"`
-	SalaryMax        pgtype.Float8 `json:"salary_max"`
-	PostingFeeUsd    int32         `json:"posting_fee_usd"`
-	PostingFeeStatus string        `json:"posting_fee_status"`
-	PostingFeePaidAt pgtype.Text   `json:"posting_fee_paid_at"`
-	ModerationNotes  pgtype.Text   `json:"moderation_notes"`
-	PublishedAt      pgtype.Text   `json:"published_at"`
-	ClosedAt         pgtype.Text   `json:"closed_at"`
-	ExpiresAt        pgtype.Text   `json:"expires_at"`
-	CreatedAt        string        `json:"created_at"`
-	UpdatedAt        string        `json:"updated_at"`
+	ID               int32              `json:"id"`
+	OrganizationID   int32              `json:"organization_id"`
+	CreatedByUserID  int32              `json:"created_by_user_id"`
+	Status           string             `json:"status"`
+	Title            pgtype.Text        `json:"title"`
+	Department       pgtype.Text        `json:"department"`
+	Slug             pgtype.Text        `json:"slug"`
+	Description      pgtype.Text        `json:"description"`
+	Requirements     pgtype.Text        `json:"requirements"`
+	Benefits         pgtype.Text        `json:"benefits"`
+	EmploymentType   pgtype.Text        `json:"employment_type"`
+	LocationType     pgtype.Text        `json:"location_type"`
+	LocationsJson    []byte             `json:"locations_json"`
+	Seniority        pgtype.Text        `json:"seniority"`
+	TechStack        []byte             `json:"tech_stack"`
+	ApplyUrl         pgtype.Text        `json:"apply_url"`
+	ApplyEmail       pgtype.Text        `json:"apply_email"`
+	SalaryCurrency   pgtype.Text        `json:"salary_currency"`
+	SalaryPeriod     pgtype.Text        `json:"salary_period"`
+	SalaryMin        pgtype.Float8      `json:"salary_min"`
+	SalaryMax        pgtype.Float8      `json:"salary_max"`
+	PostingFeeUsd    int32              `json:"posting_fee_usd"`
+	PostingFeeStatus string             `json:"posting_fee_status"`
+	PostingFeePaidAt pgtype.Timestamptz `json:"posting_fee_paid_at"`
+	ModerationNotes  pgtype.Text        `json:"moderation_notes"`
+	PublishedAt      pgtype.Timestamptz `json:"published_at"`
+	ClosedAt         pgtype.Timestamptz `json:"closed_at"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 type EmployerJobAuditEvent struct {
-	ID            int64       `json:"id"`
-	EmployerJobID int64       `json:"employer_job_id"`
-	ActorUserID   pgtype.Int8 `json:"actor_user_id"`
-	EventType     string      `json:"event_type"`
-	DetailJson    pgtype.Text `json:"detail_json"`
-	CreatedAt     string      `json:"created_at"`
+	ID            int32              `json:"id"`
+	EmployerJobID int32              `json:"employer_job_id"`
+	ActorUserID   pgtype.Int4        `json:"actor_user_id"`
+	EventType     string             `json:"event_type"`
+	DetailJson    []byte             `json:"detail_json"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type EmployerOrganization struct {
-	ID              int64  `json:"id"`
-	Name            string `json:"name"`
-	CreatedByUserID int64  `json:"created_by_user_id"`
-	CreatedAt       string `json:"created_at"`
+	ID              int32              `json:"id"`
+	Name            string             `json:"name"`
+	CreatedByUserID int32              `json:"created_by_user_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
 type EmployerOrganizationMember struct {
-	ID             int64  `json:"id"`
-	OrganizationID int64  `json:"organization_id"`
-	UserID         int64  `json:"user_id"`
-	Role           string `json:"role"`
-	CreatedAt      string `json:"created_at"`
+	ID             int32              `json:"id"`
+	OrganizationID int32              `json:"organization_id"`
+	UserID         int32              `json:"user_id"`
+	Role           string             `json:"role"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type HomepageSchemaUser struct {
@@ -107,19 +107,18 @@ type HomepageSchemaUser struct {
 }
 
 type ParsedCompany struct {
-	ID                          int64              `json:"id"`
+	ID                          int32              `json:"id"`
 	ExternalCompanyID           pgtype.Text        `json:"external_company_id"`
 	Name                        pgtype.Text        `json:"name"`
 	Slug                        pgtype.Text        `json:"slug"`
 	Tagline                     pgtype.Text        `json:"tagline"`
-	ProfilePicUrl               pgtype.Text        `json:"profile_pic_url"`
+	FoundedYear                 pgtype.Text        `json:"founded_year"`
 	HomePageUrl                 pgtype.Text        `json:"home_page_url"`
 	LinkedinUrl                 pgtype.Text        `json:"linkedin_url"`
-	EmployeeRange               pgtype.Text        `json:"employee_range"`
-	FoundedYear                 pgtype.Text        `json:"founded_year"`
-	SponsorsH1b                 pgtype.Int4        `json:"sponsors_h1b"`
-	IndustrySpecialities        pgtype.Text        `json:"industry_specialities"`
+	SponsorsH1b                 pgtype.Bool        `json:"sponsors_h1b"`
 	SponsorsUkSkilledWorkerVisa pgtype.Bool        `json:"sponsors_uk_skilled_worker_visa"`
+	EmployeeRange               pgtype.Text        `json:"employee_range"`
+	ProfilePicUrl               pgtype.Text        `json:"profile_pic_url"`
 	TaglineBrazil               pgtype.Text        `json:"tagline_brazil"`
 	TaglineFrance               pgtype.Text        `json:"tagline_france"`
 	TaglineGermany              pgtype.Text        `json:"tagline_germany"`
@@ -133,6 +132,7 @@ type ParsedCompany struct {
 	LinkedinDescriptionGermany  pgtype.Text        `json:"linkedin_description_germany"`
 	FundingData                 []byte             `json:"funding_data"`
 	ChatgptIndustries           []byte             `json:"chatgpt_industries"`
+	IndustrySpecialities        []byte             `json:"industry_specialities"`
 	IndustrySpecialitiesBrazil  []byte             `json:"industry_specialities_brazil"`
 	IndustrySpecialitiesFrance  []byte             `json:"industry_specialities_france"`
 	IndustrySpecialitiesGermany []byte             `json:"industry_specialities_germany"`
@@ -140,44 +140,19 @@ type ParsedCompany struct {
 }
 
 type ParsedJob struct {
-	ID                                      int64              `json:"id"`
-	RawUsJobID                              int64              `json:"raw_us_job_id"`
+	ID                                      int32              `json:"id"`
+	RawUsJobID                              int32              `json:"raw_us_job_id"`
+	CompanyID                               pgtype.Int4        `json:"company_id"`
 	ExternalJobID                           pgtype.Text        `json:"external_job_id"`
-	CompanyID                               pgtype.Int8        `json:"company_id"`
-	CreatedAtSource                         pgtype.Text        `json:"created_at_source"`
-	Url                                     pgtype.Text        `json:"url"`
-	CategorizedJobTitle                     pgtype.Text        `json:"categorized_job_title"`
-	CategorizedJobFunction                  pgtype.Text        `json:"categorized_job_function"`
+	CreatedAtSource                         pgtype.Timestamptz `json:"created_at_source"`
+	ValidUntilDate                          pgtype.Timestamptz `json:"valid_until_date"`
+	DateDeleted                             pgtype.Timestamptz `json:"date_deleted"`
+	DescriptionLanguage                     pgtype.Text        `json:"description_language"`
 	RoleTitle                               pgtype.Text        `json:"role_title"`
 	RoleDescription                         pgtype.Text        `json:"role_description"`
 	RoleRequirements                        pgtype.Text        `json:"role_requirements"`
 	Benefits                                pgtype.Text        `json:"benefits"`
 	JobDescriptionSummary                   pgtype.Text        `json:"job_description_summary"`
-	DescriptionLanguage                     pgtype.Text        `json:"description_language"`
-	Location                                pgtype.Text        `json:"location"`
-	LocationCity                            pgtype.Text        `json:"location_city"`
-	LocationType                            pgtype.Text        `json:"location_type"`
-	LocationUsStates                        pgtype.Text        `json:"location_us_states"`
-	LocationCountries                       pgtype.Text        `json:"location_countries"`
-	EmploymentType                          pgtype.Text        `json:"employment_type"`
-	SalaryType                              pgtype.Text        `json:"salary_type"`
-	UpdatedAt                               pgtype.Text        `json:"updated_at"`
-	SalaryMin                               pgtype.Float8      `json:"salary_min"`
-	SalaryMax                               pgtype.Float8      `json:"salary_max"`
-	SalaryMinUsd                            pgtype.Float8      `json:"salary_min_usd"`
-	SalaryMaxUsd                            pgtype.Float8      `json:"salary_max_usd"`
-	IsEntryLevel                            pgtype.Int4        `json:"is_entry_level"`
-	IsJunior                                pgtype.Int4        `json:"is_junior"`
-	IsMidLevel                              pgtype.Int4        `json:"is_mid_level"`
-	IsSenior                                pgtype.Int4        `json:"is_senior"`
-	IsLead                                  pgtype.Int4        `json:"is_lead"`
-	EducationRequirementsCredentialCategory pgtype.Text        `json:"education_requirements_credential_category"`
-	ExperienceRequirementsMonths            pgtype.Int4        `json:"experience_requirements_months"`
-	ExperienceInPlaceOfEducation            pgtype.Int4        `json:"experience_in_place_of_education"`
-	RequiredLanguages                       pgtype.Text        `json:"required_languages"`
-	TechStack                               pgtype.Text        `json:"tech_stack"`
-	ValidUntilDate                          pgtype.Timestamptz `json:"valid_until_date"`
-	DateDeleted                             pgtype.Timestamptz `json:"date_deleted"`
 	TwoLineJobDescriptionSummary            pgtype.Text        `json:"two_line_job_description_summary"`
 	RoleTitleBrazil                         pgtype.Text        `json:"role_title_brazil"`
 	RoleDescriptionBrazil                   pgtype.Text        `json:"role_description_brazil"`
@@ -200,98 +175,119 @@ type ParsedJob struct {
 	SlugGermany                             pgtype.Text        `json:"slug_germany"`
 	JobDescriptionSummaryGermany            pgtype.Text        `json:"job_description_summary_germany"`
 	TwoLineJobDescriptionSummaryGermany     pgtype.Text        `json:"two_line_job_description_summary_germany"`
+	Url                                     pgtype.Text        `json:"url"`
 	Slug                                    pgtype.Text        `json:"slug"`
+	EmploymentType                          pgtype.Text        `json:"employment_type"`
+	LocationType                            pgtype.Text        `json:"location_type"`
+	LocationCity                            pgtype.Text        `json:"location_city"`
+	CategorizedJobTitle                     pgtype.Text        `json:"categorized_job_title"`
+	CategorizedJobFunction                  pgtype.Text        `json:"categorized_job_function"`
+	EducationRequirementsCredentialCategory pgtype.Text        `json:"education_requirements_credential_category"`
+	ExperienceInPlaceOfEducation            pgtype.Bool        `json:"experience_in_place_of_education"`
+	ExperienceRequirementsMonths            pgtype.Int4        `json:"experience_requirements_months"`
 	IsOnLinkedin                            pgtype.Bool        `json:"is_on_linkedin"`
 	IsPromoted                              pgtype.Bool        `json:"is_promoted"`
+	IsEntryLevel                            pgtype.Bool        `json:"is_entry_level"`
+	IsJunior                                pgtype.Bool        `json:"is_junior"`
+	IsMidLevel                              pgtype.Bool        `json:"is_mid_level"`
+	IsSenior                                pgtype.Bool        `json:"is_senior"`
+	IsLead                                  pgtype.Bool        `json:"is_lead"`
+	RequiredLanguages                       []byte             `json:"required_languages"`
+	LocationUsStates                        []byte             `json:"location_us_states"`
+	LocationCountries                       []byte             `json:"location_countries"`
+	TechStack                               []byte             `json:"tech_stack"`
+	SalaryMin                               pgtype.Float8      `json:"salary_min"`
+	SalaryMax                               pgtype.Float8      `json:"salary_max"`
+	SalaryType                              pgtype.Text        `json:"salary_type"`
 	SalaryCurrencyCode                      pgtype.Text        `json:"salary_currency_code"`
 	SalaryCurrencySymbol                    pgtype.Text        `json:"salary_currency_symbol"`
+	SalaryMinUsd                            pgtype.Float8      `json:"salary_min_usd"`
+	SalaryMaxUsd                            pgtype.Float8      `json:"salary_max_usd"`
 	SalaryHumanText                         pgtype.Text        `json:"salary_human_text"`
+	UpdatedAt                               pgtype.Timestamptz `json:"updated_at"`
 }
 
 type PricingPayment struct {
-	ID                 int64       `json:"id"`
-	UserID             int64       `json:"user_id"`
-	PricingPlanID      int64       `json:"pricing_plan_id"`
-	Provider           string      `json:"provider"`
-	PaymentMethod      string      `json:"payment_method"`
-	Currency           string      `json:"currency"`
-	AmountMinor        int32       `json:"amount_minor"`
-	Status             string      `json:"status"`
-	ProviderCheckoutID pgtype.Text `json:"provider_checkout_id"`
-	CheckoutUrl        pgtype.Text `json:"checkout_url"`
-	ProviderPayload    pgtype.Text `json:"provider_payload"`
-	PaidAt             pgtype.Text `json:"paid_at"`
-	CreatedAt          string      `json:"created_at"`
+	ID                 int32              `json:"id"`
+	UserID             int32              `json:"user_id"`
+	PricingPlanID      int32              `json:"pricing_plan_id"`
+	Provider           string             `json:"provider"`
+	PaymentMethod      string             `json:"payment_method"`
+	Currency           string             `json:"currency"`
+	AmountMinor        int32              `json:"amount_minor"`
+	Status             string             `json:"status"`
+	ProviderCheckoutID pgtype.Text        `json:"provider_checkout_id"`
+	CheckoutUrl        pgtype.Text        `json:"checkout_url"`
+	ProviderPayload    []byte             `json:"provider_payload"`
+	PaidAt             pgtype.Timestamptz `json:"paid_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 }
 
 type PricingPlan struct {
-	ID           int64  `json:"id"`
-	Code         string `json:"code"`
-	Name         string `json:"name"`
-	BillingCycle string `json:"billing_cycle"`
-	DurationDays int32  `json:"duration_days"`
-	PriceUsd     int32  `json:"price_usd"`
-	IsActive     int32  `json:"is_active"`
-	CreatedAt    string `json:"created_at"`
+	ID           int32              `json:"id"`
+	Code         string             `json:"code"`
+	Name         string             `json:"name"`
+	BillingCycle string             `json:"billing_cycle"`
+	DurationDays int32              `json:"duration_days"`
+	PriceUsd     int32              `json:"price_usd"`
+	IsActive     bool               `json:"is_active"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
 type RawUsJob struct {
-	ID          int64       `json:"id"`
-	Source      string      `json:"source"`
-	Url         string      `json:"url"`
-	PostDate    string      `json:"post_date"`
-	IsReady     int32       `json:"is_ready"`
-	IsSkippable int32       `json:"is_skippable"`
-	IsParsed    int32       `json:"is_parsed"`
-	RetryCount  int32       `json:"retry_count"`
-	RawJson     pgtype.Text `json:"raw_json"`
-	ExtraJson   pgtype.Text `json:"extra_json"`
+	ID          int32              `json:"id"`
+	Source      string             `json:"source"`
+	Url         string             `json:"url"`
+	PostDate    pgtype.Timestamptz `json:"post_date"`
+	IsReady     bool               `json:"is_ready"`
+	IsSkippable bool               `json:"is_skippable"`
+	IsParsed    bool               `json:"is_parsed"`
+	RetryCount  int32              `json:"retry_count"`
+	ExtraJson   pgtype.Text        `json:"extra_json"`
+	RawJson     pgtype.Text        `json:"raw_json"`
 }
 
 type UserJobAction struct {
-	ID          int64  `json:"id"`
-	UserID      int64  `json:"user_id"`
-	ParsedJobID int64  `json:"parsed_job_id"`
-	IsApplied   int32  `json:"is_applied"`
-	IsSaved     int32  `json:"is_saved"`
-	IsHidden    int32  `json:"is_hidden"`
-	UpdatedAt   string `json:"updated_at"`
-	CreatedAt   string `json:"created_at"`
+	ID          int32              `json:"id"`
+	UserID      int32              `json:"user_id"`
+	ParsedJobID int32              `json:"parsed_job_id"`
+	IsApplied   bool               `json:"is_applied"`
+	IsSaved     bool               `json:"is_saved"`
+	IsHidden    bool               `json:"is_hidden"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type UserSubscription struct {
-	ID            int64  `json:"id"`
-	UserID        int64  `json:"user_id"`
-	PricingPlanID int64  `json:"pricing_plan_id"`
-	StartsAt      string `json:"starts_at"`
-	EndsAt        string `json:"ends_at"`
-	IsActive      int32  `json:"is_active"`
-	CreatedAt     string `json:"created_at"`
+	ID            int32              `json:"id"`
+	UserID        int32              `json:"user_id"`
+	PricingPlanID int32              `json:"pricing_plan_id"`
+	StartsAt      pgtype.Timestamptz `json:"starts_at"`
+	EndsAt        pgtype.Timestamptz `json:"ends_at"`
+	IsActive      bool               `json:"is_active"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type WatcherEvent struct {
-	ID        int64              `json:"id"`
-	Source    pgtype.Text        `json:"source"`
-	Detail    pgtype.Text        `json:"detail"`
+	ID        int32              `json:"id"`
+	Source    string             `json:"source"`
+	Detail    string             `json:"detail"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type WatcherPayload struct {
-	ID          int64       `json:"id"`
-	Source      string      `json:"source"`
-	SourceUrl   string      `json:"source_url"`
-	PayloadType string      `json:"payload_type"`
-	BodyText    string      `json:"body_text"`
-	ConsumedAt  pgtype.Text `json:"consumed_at"`
-	CreatedAt   string      `json:"created_at"`
+	ID          int32              `json:"id"`
+	Source      string             `json:"source"`
+	SourceUrl   string             `json:"source_url"`
+	PayloadType string             `json:"payload_type"`
+	BodyText    string             `json:"body_text"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ConsumedAt  pgtype.Timestamptz `json:"consumed_at"`
 }
 
 type WatcherState struct {
-	ID           int64       `json:"id"`
-	Source       string      `json:"source"`
-	SourceUrl    pgtype.Text `json:"source_url"`
-	SampleHash   pgtype.Text `json:"sample_hash"`
-	FirstLastmod pgtype.Text `json:"first_lastmod"`
-	StateJson    pgtype.Text `json:"state_json"`
-	UpdatedAt    string      `json:"updated_at"`
+	ID        int32              `json:"id"`
+	Source    string             `json:"source"`
+	StateJson []byte             `json:"state_json"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }

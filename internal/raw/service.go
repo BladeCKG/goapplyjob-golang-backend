@@ -118,7 +118,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	var rows *sql.Rows
 	var err error
 	for attempt := 0; attempt < 3; attempt++ {
-		rows, err = s.DB.SQL.QueryContext(ctx, `SELECT id, url, COALESCE(source, '') FROM raw_us_jobs WHERE is_ready = 0 AND is_skippable = 0 ORDER BY post_date DESC, id DESC LIMIT ?`, batchSize)
+		rows, err = s.DB.SQL.QueryContext(ctx, `SELECT id, url, COALESCE(source, '') FROM raw_us_jobs WHERE is_ready = false AND is_skippable = false ORDER BY post_date DESC, id DESC LIMIT ?`, batchSize)
 		if err == nil {
 			break
 		}
@@ -171,7 +171,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		case statusCode == statusNotFound:
 			log.Printf("raw-us-job-worker fetch_result job_id=%d status=404", job.id)
 			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
-				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_skippable = 1, retry_count = retry_count + 1 WHERE id = ?`, job.id)
+				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_skippable = true, retry_count = retry_count + 1 WHERE id = ?`, job.id)
 				return err
 			}); err != nil {
 				return processed, err
@@ -188,7 +188,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		case isRemovedBuiltinJobHTML(job.source, html):
 			log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s detected_builtin_removed_job", job.id, job.source)
 			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
-				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_ready = 1, is_skippable = 1, raw_json = NULL, retry_count = retry_count + 1 WHERE id = ?`, job.id)
+				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_ready = true, is_skippable = true, raw_json = NULL, retry_count = retry_count + 1 WHERE id = ?`, job.id)
 				return err
 			}); err != nil {
 				return processed, err
@@ -233,7 +233,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				return processed, err
 			}
 			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
-				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_ready = 1, raw_json = ? WHERE id = ?`, string(rawJSON), job.id)
+				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_ready = true, raw_json = ? WHERE id = ?`, string(rawJSON), job.id)
 				return err
 			}); err != nil {
 				return processed, err

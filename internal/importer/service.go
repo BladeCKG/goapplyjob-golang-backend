@@ -269,7 +269,7 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 			url         string
 			row         SitemapRow
 			existingID  int64
-			isReady     int
+			isReady     bool
 			rawJSONText any
 		}
 		pendingUpdates := make([]pendingUpdate, 0, len(buffer))
@@ -285,14 +285,14 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 				continue
 			}
 			rawJSONText := any(nil)
-			isReady := 0
+			isReady := false
 			if row.RawJSON != nil {
 				body, _ := json.Marshal(row.RawJSON)
 				rawJSONText = string(body)
-				isReady = 1
+				isReady = true
 			}
 			if errors.Is(err, sql.ErrNoRows) {
-				if _, err := tx.Exec(`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, retry_count, raw_json) VALUES (?, ?, ?, ?, 0, 0, ?)`, source, url, postDate.Format(time.RFC3339), isReady, rawJSONText); err != nil {
+				if _, err := tx.Exec(`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, retry_count, raw_json) VALUES (?, ?, ?, ?, false, 0, ?)`, source, url, postDate.Format(time.RFC3339), isReady, rawJSONText); err != nil {
 					failedDB++
 					failedRows[url] = row
 					continue
@@ -358,7 +358,7 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 				continue
 			}
 			if _, err := tx.Exec(
-				`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, retry_count, raw_json) VALUES (?, ?, ?, ?, 0, 0, ?)`,
+				`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, retry_count, raw_json) VALUES (?, ?, ?, ?, false, 0, ?)`,
 				source,
 				candidate.url,
 				candidate.row.PostDate.Format(time.RFC3339),

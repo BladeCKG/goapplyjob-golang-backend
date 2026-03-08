@@ -41,7 +41,7 @@ type Handler struct {
 }
 
 type User struct {
-	ID    int64
+	ID    int32
 	Email string
 }
 
@@ -76,7 +76,7 @@ func (h *Handler) CurrentUser(c *gin.Context) (*User, error) {
 
 	row, err := h.queries.GetCurrentUserBySession(c.Request.Context(), gensqlc.GetCurrentUserBySessionParams{
 		SessionTokenHash: hashText(token),
-		ExpiresAt:        utcNow().Format(time.RFC3339Nano),
+		ExpiresAt:        pgTimestamptz(utcNow()),
 	})
 	if err != nil {
 		return nil, err
@@ -129,7 +129,7 @@ func (h *Handler) requestCode(c *gin.Context) {
 	qtx := h.queries.WithTx(tx)
 
 	if err := qtx.ConsumeActiveVerificationCodesByUser(c.Request.Context(), gensqlc.ConsumeActiveVerificationCodesByUserParams{
-		ConsumedAt: pgtype.Text{String: now.Format(time.RFC3339Nano), Valid: true},
+		ConsumedAt: pgTimestamptz(now),
 		UserID:     userID,
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to store login code"})
@@ -138,8 +138,8 @@ func (h *Handler) requestCode(c *gin.Context) {
 	if err := qtx.InsertVerificationCode(c.Request.Context(), gensqlc.InsertVerificationCodeParams{
 		UserID:    userID,
 		CodeHash:  hashText(code),
-		ExpiresAt: expiresAt.Format(time.RFC3339Nano),
-		CreatedAt: now.Format(time.RFC3339Nano),
+		ExpiresAt: pgTimestamptz(expiresAt),
+		CreatedAt: pgTimestamptz(now),
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to store login code"})
 		return
@@ -147,8 +147,8 @@ func (h *Handler) requestCode(c *gin.Context) {
 	if err := qtx.InsertVerificationCode(c.Request.Context(), gensqlc.InsertVerificationCodeParams{
 		UserID:    userID,
 		CodeHash:  hashText(magicToken),
-		ExpiresAt: expiresAt.Format(time.RFC3339Nano),
-		CreatedAt: now.Format(time.RFC3339Nano),
+		ExpiresAt: pgTimestamptz(expiresAt),
+		CreatedAt: pgTimestamptz(now),
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to store login code"})
 		return
@@ -217,7 +217,7 @@ func (h *Handler) verifyCode(c *gin.Context) {
 	codeID, err := qtx.GetVerificationCodeIDByUser(c.Request.Context(), gensqlc.GetVerificationCodeIDByUserParams{
 		UserID:    userID,
 		CodeHash:  hashText(code),
-		ExpiresAt: utcNow().Format(time.RFC3339Nano),
+		ExpiresAt: pgTimestamptz(utcNow()),
 	})
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Invalid email or code"})
@@ -226,7 +226,7 @@ func (h *Handler) verifyCode(c *gin.Context) {
 
 	now := utcNow()
 	if err := qtx.MarkVerificationCodeConsumed(c.Request.Context(), gensqlc.MarkVerificationCodeConsumedParams{
-		ConsumedAt: pgtype.Text{String: now.Format(time.RFC3339Nano), Valid: true},
+		ConsumedAt: pgTimestamptz(now),
 		ID:         codeID,
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create session"})
@@ -278,7 +278,7 @@ func (h *Handler) verifyLink(c *gin.Context) {
 
 	codeRow, err := qtx.GetMagicLinkVerificationCode(c.Request.Context(), gensqlc.GetMagicLinkVerificationCodeParams{
 		CodeHash:  hashText(token),
-		ExpiresAt: utcNow().Format(time.RFC3339Nano),
+		ExpiresAt: pgTimestamptz(utcNow()),
 	})
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Invalid or expired sign-in link"})
@@ -289,7 +289,7 @@ func (h *Handler) verifyLink(c *gin.Context) {
 
 	now := utcNow()
 	if err := qtx.MarkVerificationCodeConsumed(c.Request.Context(), gensqlc.MarkVerificationCodeConsumedParams{
-		ConsumedAt: pgtype.Text{String: now.Format(time.RFC3339Nano), Valid: true},
+		ConsumedAt: pgTimestamptz(now),
 		ID:         codeID,
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create session"})
@@ -350,12 +350,12 @@ func (h *Handler) passwordSignup(c *gin.Context) {
 
 	salt := make([]byte, passwordSaltBytes)
 	_, _ = rand.Read(salt)
-	now := utcNow().Format(time.RFC3339Nano)
+	now := utcNow()
 	if err := h.queries.InsertPasswordCredential(c.Request.Context(), gensqlc.InsertPasswordCredentialParams{
 		UserID:       userID,
 		PasswordSalt: hex.EncodeToString(salt),
 		PasswordHash: passwordHash(password, salt),
-		CreatedAt:    now,
+		CreatedAt:    pgTimestamptz(now),
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create password account"})
 		return
@@ -540,7 +540,7 @@ func (h *Handler) logout(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-func (h *Handler) getOrCreateUser(c *gin.Context, email string) (int64, error) {
+func (h *Handler) getOrCreateUser(c *gin.Context, email string) (int32, error) {
 	row, err := h.queries.GetAuthUserByEmail(c.Request.Context(), email)
 	if err == nil {
 		return row.ID, nil
@@ -548,10 +548,10 @@ func (h *Handler) getOrCreateUser(c *gin.Context, email string) (int64, error) {
 	if !errors.Is(err, sql.ErrNoRows) {
 		return 0, err
 	}
-	now := utcNow().Format(time.RFC3339Nano)
+	now := utcNow()
 	userID, err := h.queries.CreateAuthUser(c.Request.Context(), gensqlc.CreateAuthUserParams{
 		Email:     email,
-		CreatedAt: now,
+		CreatedAt: pgTimestamptz(now),
 	})
 	if err != nil {
 		return 0, err
@@ -559,22 +559,22 @@ func (h *Handler) getOrCreateUser(c *gin.Context, email string) (int64, error) {
 	return userID, nil
 }
 
-func (h *Handler) createSessionForUser(c *gin.Context, userID int64) (string, error) {
+func (h *Handler) createSessionForUser(c *gin.Context, userID int32) (string, error) {
 	now := utcNow()
 	expiresAt := now.Add(time.Duration(max(h.cfg.AuthSessionTTLMin, 1)) * time.Minute)
 	sessionToken := randomToken()
 	if err := h.queries.InsertAuthSession(c.Request.Context(), gensqlc.InsertAuthSessionParams{
 		UserID:           userID,
 		SessionTokenHash: hashText(sessionToken),
-		ExpiresAt:        expiresAt.Format(time.RFC3339Nano),
-		CreatedAt:        now.Format(time.RFC3339Nano),
+		ExpiresAt:        pgTimestamptz(expiresAt),
+		CreatedAt:        pgTimestamptz(now),
 	}); err != nil {
 		return "", err
 	}
 	return sessionToken, nil
 }
 
-func (h *Handler) ensureDefaultFreeSubscription(c *gin.Context, userID int64) error {
+func (h *Handler) ensureDefaultFreeSubscription(c *gin.Context, userID int32) error {
 	now := utcNow()
 	if err := h.queries.UpsertPricingPlanByCode(c.Request.Context(), gensqlc.UpsertPricingPlanByCodeParams{
 		Code:         freePlanCode,
@@ -582,7 +582,7 @@ func (h *Handler) ensureDefaultFreeSubscription(c *gin.Context, userID int64) er
 		BillingCycle: "free",
 		DurationDays: int32(max(h.cfg.FreePlanDurationDays, 1)),
 		PriceUsd:     0,
-		CreatedAt:    now.Format(time.RFC3339Nano),
+		CreatedAt:    pgTimestamptz(now),
 	}); err != nil {
 		return err
 	}
@@ -603,9 +603,9 @@ func (h *Handler) ensureDefaultFreeSubscription(c *gin.Context, userID int64) er
 	return h.queries.InsertUserSubscription(c.Request.Context(), gensqlc.InsertUserSubscriptionParams{
 		UserID:        userID,
 		PricingPlanID: planID,
-		StartsAt:      now.Format(time.RFC3339Nano),
-		EndsAt:        endsAt.Format(time.RFC3339Nano),
-		CreatedAt:     now.Format(time.RFC3339Nano),
+		StartsAt:      pgTimestamptz(now),
+		EndsAt:        pgTimestamptz(endsAt),
+		CreatedAt:     pgTimestamptz(now),
 	})
 }
 
@@ -653,6 +653,10 @@ func parseSameSite(value string) http.SameSite {
 
 func utcNow() time.Time {
 	return time.Now().UTC()
+}
+
+func pgTimestamptz(value time.Time) pgtype.Timestamptz {
+	return pgtype.Timestamptz{Time: value, Valid: true}
 }
 
 func max(left, right int) int {

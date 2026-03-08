@@ -49,17 +49,17 @@ func TestResetStaleParsedRemovesStaleParsedRows(t *testing.T) {
 	_, err = db.SQL.ExecContext(
 		context.Background(),
 		`INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES
-		 (1, 'https://example.com/jobs/stale', '2026-02-12T10:00:00Z', 1, 0, 1, 0, '{}'),
-		 (2, 'https://example.com/jobs/fresh', '2026-02-12T10:00:00Z', 1, 0, 1, 0, '{}')`,
+		 (1, 'https://example.com/jobs/stale', '2026-02-12T10:00:00Z', true, false, true, 0, '{}'),
+		 (2, 'https://example.com/jobs/fresh', '2026-02-12T10:00:00Z', true, false, true, 0, '{}')`,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = db.SQL.ExecContext(
 		context.Background(),
-		`INSERT INTO parsed_jobs (raw_us_job_id, created_at_source, url, role_title) VALUES
-		 (1, '2026-02-12T09:00:00Z', 'https://example.com/jobs/stale', 'Stale Engineer'),
-		 (2, '2026-02-12T10:00:00Z', 'https://example.com/jobs/fresh', 'Fresh Engineer')`,
+		`INSERT INTO parsed_jobs (raw_us_job_id, created_at_source, url, role_title, updated_at) VALUES
+		 (1, '2026-02-12T09:00:00Z', 'https://example.com/jobs/stale', 'Stale Engineer', NOW()),
+		 (2, '2026-02-12T10:00:00Z', 'https://example.com/jobs/fresh', 'Fresh Engineer', NOW())`,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -82,13 +82,13 @@ func TestResetStaleParsedRemovesStaleParsedRows(t *testing.T) {
 		t.Fatalf("expected stale parsed row to be deleted, got %d", staleParsedCount)
 	}
 
-	var isReady, isParsed int
+	var isReady, isParsed bool
 	var rawJSON any
 	if err := db.SQL.QueryRowContext(context.Background(), `SELECT is_ready, is_parsed, raw_json FROM raw_us_jobs WHERE id = 1`).Scan(&isReady, &isParsed, &rawJSON); err != nil {
 		t.Fatal(err)
 	}
-	if isReady != 0 || isParsed != 0 {
-		t.Fatalf("expected stale raw row to be reset, got is_ready=%d is_parsed=%d", isReady, isParsed)
+	if isReady || isParsed {
+		t.Fatalf("expected stale raw row to be reset, got is_ready=%t is_parsed=%t", isReady, isParsed)
 	}
 	if rawJSON != nil {
 		t.Fatalf("expected stale raw row payload cleared, got %#v", rawJSON)

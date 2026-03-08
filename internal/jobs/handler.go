@@ -17,14 +17,17 @@ import (
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/locationnorm"
+	gensqlc "goapplyjob-golang-backend/pkg/generated/sqlc"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Handler struct {
 	cfg                       config.Config
 	db                        *database.DB
 	auth                      *auth.Handler
+	q                         *gensqlc.Queries
 	filterCache               filterOptionsCache
 	filterCacheRefreshSeconds int
 }
@@ -198,6 +201,7 @@ func NewHandler(cfg config.Config, db *database.DB, authHandler *auth.Handler) *
 		cfg:                       cfg,
 		db:                        db,
 		auth:                      authHandler,
+		q:                         gensqlc.New(db.PGX),
 		filterCacheRefreshSeconds: max(config.GetenvInt("FILTER_OPTIONS_CACHE_REFRESH_SECONDS", defaultFilterCacheRefreshSeconds), 1),
 		filterCache: filterOptionsCache{
 			jobCategoryParents: map[string]any{},
@@ -549,9 +553,14 @@ func buildEmploymentTypes(rows []string) []string {
 }
 
 func (h *Handler) getMaxParsedJobID(ctx context.Context) (sql.NullInt64, error) {
-	var maxID sql.NullInt64
-	err := h.db.SQL.QueryRowContext(ctx, `SELECT MAX(id) FROM parsed_jobs`).Scan(&maxID)
-	return maxID, err
+	maxID, err := h.q.GetMaxParsedJobID(ctx)
+	if err != nil {
+		return sql.NullInt64{}, err
+	}
+	if maxID <= 0 {
+		return sql.NullInt64{}, nil
+	}
+	return sql.NullInt64{Int64: maxID, Valid: true}, nil
 }
 
 func parsedJobFilterRowsEqual(left, right sql.NullInt64) bool {
@@ -562,59 +571,41 @@ func parsedJobFilterRowsEqual(left, right sql.NullInt64) bool {
 }
 
 func (h *Handler) refreshFilterCache(ctx context.Context) error {
-	rows, err := h.db.SQL.QueryContext(ctx,
-		`SELECT DISTINCT p.categorized_job_title, p.categorized_job_function
-		 FROM parsed_jobs p
-		 WHERE (
-		     p.categorized_job_title IS NOT NULL
-		     OR p.categorized_job_function IS NOT NULL
-		   )`)
+	rows, err := h.q.ListDistinctJobCategoryFunctionPairs(ctx)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 
 	categoryRows := [][2]string{}
 	techRows := [][]string{}
-	for rows.Next() {
-		var categorizedJobTitle, categorizedJobFunction sql.NullString
-		if err := rows.Scan(&categorizedJobTitle, &categorizedJobFunction); err != nil {
+	for _, row := range rows {
+		if row == nil {
 			continue
 		}
-		if categorizedJobTitle.Valid || categorizedJobFunction.Valid {
-			categoryRows = append(categoryRows, [2]string{categorizedJobTitle.String, categorizedJobFunction.String})
+		if row.CategorizedJobTitle.Valid || row.CategorizedJobFunction.Valid {
+			categoryRows = append(categoryRows, [2]string{row.CategorizedJobTitle.String, row.CategorizedJobFunction.String})
 		}
 	}
 
-	techRowsRaw, err := h.db.SQL.QueryContext(ctx, `SELECT DISTINCT tech_stack FROM parsed_jobs WHERE tech_stack IS NOT NULL`)
+	techRowsRaw, err := h.q.ListDistinctTechStackTexts(ctx)
 	if err != nil {
 		return err
 	}
-	defer techRowsRaw.Close()
-	for techRowsRaw.Next() {
-		var techStack sql.NullString
-		if err := techRowsRaw.Scan(&techStack); err != nil {
-			continue
-		}
-		if !techStack.Valid || strings.TrimSpace(techStack.String) == "" {
+	for _, techStack := range techRowsRaw {
+		if len(techStack) == 0 {
 			continue
 		}
 		values := []string{}
-		if err := json.Unmarshal([]byte(techStack.String), &values); err == nil {
+		if err := json.Unmarshal(techStack, &values); err == nil {
 			techRows = append(techRows, values)
 		}
 	}
-	employmentTypeRowsRaw, err := h.db.SQL.QueryContext(ctx, `SELECT DISTINCT employment_type FROM parsed_jobs WHERE employment_type IS NOT NULL`)
+	employmentTypeRowsRaw, err := h.q.ListDistinctEmploymentTypes(ctx)
 	if err != nil {
 		return err
 	}
-	defer employmentTypeRowsRaw.Close()
 	employmentRows := []string{}
-	for employmentTypeRowsRaw.Next() {
-		var employmentType sql.NullString
-		if err := employmentTypeRowsRaw.Scan(&employmentType); err != nil {
-			continue
-		}
+	for _, employmentType := range employmentTypeRowsRaw {
 		if employmentType.Valid && strings.TrimSpace(employmentType.String) != "" {
 			employmentRows = append(employmentRows, employmentType.String)
 		}
@@ -630,25 +621,6 @@ func (h *Handler) refreshFilterCache(ctx context.Context) error {
 	h.filterCache.techStacks = buildTechStacks(techRows)
 	h.filterCache.employmentTypes = buildEmploymentTypes(employmentRows)
 	return nil
-}
-
-func (h *Handler) hasExactTitleMatch(ctx context.Context, normalizedTitle string) bool {
-	if strings.TrimSpace(normalizedTitle) == "" {
-		return false
-	}
-	var count int
-	err := h.db.SQL.QueryRowContext(
-		ctx,
-		`SELECT COUNT(1)
-		 FROM parsed_jobs p
-		 WHERE lower(trim(COALESCE(p.categorized_job_title, ''))) = ?
-		    OR lower(trim(COALESCE(p.categorized_job_function, ''))) = ?
-		    OR lower(trim(COALESCE(p.role_title, ''))) = ?`,
-		normalizedTitle,
-		normalizedTitle,
-		normalizedTitle,
-	).Scan(&count)
-	return err == nil && count > 0
 }
 
 func (h *Handler) ensureFilterCacheFresh(ctx context.Context, force bool) error {
@@ -721,12 +693,17 @@ func (h *Handler) filterOptions(c *gin.Context) {
 }
 
 func (h *Handler) jobDetail(c *gin.Context) {
-	row := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT p.id, p.raw_us_job_id, c.name, c.slug, c.tagline, c.profile_pic_url, c.home_page_url, c.linkedin_url, c.employee_range, c.founded_year, c.sponsors_h1b, p.categorized_job_title, p.categorized_job_function, p.role_title, p.location_city, p.location_type, p.location_us_states, p.location_countries, p.employment_type, p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_type, p.updated_at, p.created_at_source, p.role_description, p.role_requirements, p.education_requirements_credential_category, p.experience_requirements_months, p.experience_in_place_of_education, p.required_languages, p.tech_stack, p.benefits, p.url FROM parsed_jobs p LEFT JOIN parsed_companies c ON c.id = p.company_id WHERE p.id = ? LIMIT 1`, c.Param("jobID"))
-	detail, err := scanJobDetail(row)
+	jobID, err := strconv.ParseInt(strings.TrimSpace(c.Param("jobID")), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"detail": "Job not found"})
 		return
 	}
+	row, err := h.q.GetJobDetailByID(c.Request.Context(), int32(jobID))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "Job not found"})
+		return
+	}
+	detail := mapJobDetailRow(row)
 	c.JSON(http.StatusOK, detail)
 }
 
@@ -734,18 +711,10 @@ func (h *Handler) listJobs(c *gin.Context) {
 	currentUser := h.auth.OptionalCurrentUser(c)
 	hasFullAccess := false
 	if currentUser != nil {
-		var activeID int64
-		err := h.db.SQL.QueryRowContext(
-			c.Request.Context(),
-			`SELECT s.id
-			 FROM user_subscriptions s
-			 JOIN pricing_plans p ON p.id = s.pricing_plan_id
-			 WHERE s.user_id = ? AND s.ends_at > ? AND p.is_active = 1
-			 ORDER BY s.ends_at DESC
-			 LIMIT 1`,
-			currentUser.ID,
-			time.Now().UTC().Format(time.RFC3339Nano),
-		).Scan(&activeID)
+		_, err := h.q.GetActiveSubscriptionIDForUser(c.Request.Context(), gensqlc.GetActiveSubscriptionIDForUserParams{
+			UserID: currentUser.ID,
+			EndsAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		})
 		hasFullAccess = err == nil
 	}
 	isPreview := !hasFullAccess
@@ -754,40 +723,44 @@ func (h *Handler) listJobs(c *gin.Context) {
 	if perPage > 100 {
 		perPage = 100
 	}
-
-	filters, args := h.buildJobFilters(c, currentUser, true)
-
-	where := ""
-	if len(filters) > 0 {
-		where = " WHERE " + strings.Join(filters, " AND ")
+	filterInput := h.buildListingFilterInput(c, currentUser, true)
+	countRow, err := h.q.CountJobsForListingFiltered(c.Request.Context(), gensqlc.CountJobsForListingFilteredParams{
+		CompanyFilter:          filterInput.CompanyFilter,
+		HasTitleFilters:        filterInput.HasTitleFilters,
+		JobCategories:          filterInput.JobCategories,
+		JobFunctions:           filterInput.JobFunctions,
+		TitleExactTerms:        filterInput.TitleExactTerms,
+		TitleLikePatterns:      filterInput.TitleLikePatterns,
+		HasStructuredLocation:  filterInput.HasStructuredLocation,
+		UsStates:               filterInput.USStates,
+		Countries:              filterInput.Countries,
+		LocationPatterns:       filterInput.LocationPatterns,
+		TechStacks:             filterInput.TechStacks,
+		EmploymentTypePatterns: filterInput.EmploymentTypePatterns,
+		HasCreatedFrom:         filterInput.HasCreatedFrom,
+		CreatedFrom:            filterInput.CreatedFrom,
+		HasCreatedTo:           filterInput.HasCreatedTo,
+		CreatedTo:              filterInput.CreatedTo,
+		HasMinSalary:           filterInput.HasMinSalary,
+		MinSalary:              filterInput.MinSalary,
+		HasSeniority:           filterInput.HasSeniority,
+		SeniorityEntry:         filterInput.SeniorityEntry,
+		SeniorityJunior:        filterInput.SeniorityJunior,
+		SeniorityMid:           filterInput.SeniorityMid,
+		SenioritySenior:        filterInput.SenioritySenior,
+		SeniorityLead:          filterInput.SeniorityLead,
+		HasUser:                filterInput.HasUser,
+		UserActionFilter:       filterInput.UserActionFilter,
+		UserID:                 filterInput.UserID,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs"})
+		return
 	}
-
-	var rawTotal, companyCount int
-	hasCompanyFilter := strings.TrimSpace(c.Query("company")) != ""
-	if hasCompanyFilter {
-		countQuery := `SELECT COUNT(p.id) FROM parsed_jobs p` + where
-		if err := h.db.SQL.QueryRowContext(c.Request.Context(), countQuery, args...).Scan(&rawTotal); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs"})
-			return
-		}
-		if rawTotal > 0 {
-			companyCount = 1
-		}
-	} else {
-		countQuery := `SELECT COUNT(p.id), COUNT(DISTINCT p.company_id) FROM parsed_jobs p` + where
-		if err := h.db.SQL.QueryRowContext(c.Request.Context(), countQuery, args...).Scan(&rawTotal, &companyCount); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs"})
-			return
-		}
-	}
-
+	rawTotal := int(countRow.Total)
+	companyCount := int(countRow.CompanyCount)
 	previewPerPage := max(h.cfg.PublicJobsMaxPerPage, 1)
 	previewMaxTotal := max(h.cfg.PublicJobsMaxTotal, 0)
-	idOrderBy := `created_at_source DESC, id DESC`
-	if c.DefaultQuery("sort_criteria", "date") == "salary" {
-		idOrderBy = annualizedSalarySQL(`COALESCE(salary_max_usd, salary_min_usd)`) + ` DESC, ` + annualizedSalarySQL(`COALESCE(salary_max, salary_min)`) + ` DESC, id DESC`
-	}
-
 	pageOut := page
 	perPageOut := perPage
 	offset := (page - 1) * perPage
@@ -799,67 +772,57 @@ func (h *Handler) listJobs(c *gin.Context) {
 		previewVisibleTotal := min(rawTotal, previewMaxTotal)
 		limit = max(min(previewVisibleTotal, previewPerPage), 0)
 	}
-
-	idArgs := append([]any{}, args...)
-	idArgs = append(idArgs, limit, offset)
-	idRows, err := h.db.SQL.QueryContext(
-		c.Request.Context(),
-		`SELECT p.id
-		 FROM parsed_jobs p`+where+`
-		 ORDER BY `+idOrderBy+`
-		 LIMIT ? OFFSET ?`,
-		idArgs...,
-	)
+	pagedIDs, err := h.q.ListFilteredJobIDs(c.Request.Context(), gensqlc.ListFilteredJobIDsParams{
+		HasTitleFilters:        filterInput.HasTitleFilters,
+		JobCategories:          filterInput.JobCategories,
+		JobFunctions:           filterInput.JobFunctions,
+		TitleExactTerms:        filterInput.TitleExactTerms,
+		TitleLikePatterns:      filterInput.TitleLikePatterns,
+		CompanyFilter:          filterInput.CompanyFilter,
+		HasStructuredLocation:  filterInput.HasStructuredLocation,
+		UsStates:               filterInput.USStates,
+		Countries:              filterInput.Countries,
+		LocationPatterns:       filterInput.LocationPatterns,
+		TechStacks:             filterInput.TechStacks,
+		EmploymentTypePatterns: filterInput.EmploymentTypePatterns,
+		HasCreatedFrom:         filterInput.HasCreatedFrom,
+		CreatedFrom:            filterInput.CreatedFrom,
+		HasCreatedTo:           filterInput.HasCreatedTo,
+		CreatedTo:              filterInput.CreatedTo,
+		HasMinSalary:           filterInput.HasMinSalary,
+		MinSalary:              filterInput.MinSalary,
+		HasSeniority:           filterInput.HasSeniority,
+		SeniorityEntry:         filterInput.SeniorityEntry,
+		SeniorityJunior:        filterInput.SeniorityJunior,
+		SeniorityMid:           filterInput.SeniorityMid,
+		SenioritySenior:        filterInput.SenioritySenior,
+		SeniorityLead:          filterInput.SeniorityLead,
+		HasUser:                filterInput.HasUser,
+		UserActionFilter:       filterInput.UserActionFilter,
+		UserID:                 filterInput.UserID,
+		SortSalary:             filterInput.SortSalary,
+		OffsetRows:             int32(offset),
+		LimitRows:              int32(limit),
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs"})
 		return
 	}
-	defer idRows.Close()
-
-	pagedIDs := []int64{}
-	for idRows.Next() {
-		var id int64
-		if err := idRows.Scan(&id); err == nil {
-			pagedIDs = append(pagedIDs, id)
-		}
-	}
-
 	items := []jobItem{}
 	if len(pagedIDs) > 0 {
-		placeholders := make([]string, 0, len(pagedIDs))
-		detailArgs := make([]any, 0, len(pagedIDs))
+		idList := make([]int64, 0, len(pagedIDs))
 		for _, id := range pagedIDs {
-			placeholders = append(placeholders, "?")
-			detailArgs = append(detailArgs, id)
+			idList = append(idList, int64(id))
 		}
-		rows, err := h.db.SQL.QueryContext(
-			c.Request.Context(),
-			`SELECT p.id, p.raw_us_job_id, p.role_title, p.job_description_summary, c.name, c.slug, c.tagline, c.profile_pic_url, c.home_page_url, c.linkedin_url, c.employee_range, c.founded_year, c.sponsors_h1b, p.categorized_job_title, p.location_city, p.location_type, p.location_us_states, p.location_countries, p.employment_type, p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_type, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.tech_stack, p.updated_at, p.created_at_source, p.url
-			 FROM parsed_jobs p
-			 LEFT JOIN parsed_companies c ON c.id = p.company_id
-			 WHERE p.id IN (`+strings.Join(placeholders, ",")+`)`,
-			detailArgs...,
-		)
+		rows, err := h.q.ListJobsByIDsInOrder(c.Request.Context(), idList)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs"})
 			return
 		}
-		defer rows.Close()
-
-		rowsByID := map[int64]jobItem{}
-		for rows.Next() {
-			item, err := scanJob(rows)
-			if err == nil {
-				rowsByID[item.ID] = item
-			}
-		}
-		for _, id := range pagedIDs {
-			if item, ok := rowsByID[id]; ok {
-				items = append(items, item)
-			}
+		for _, row := range rows {
+			items = append(items, mapListJobRow(row))
 		}
 	}
-
 	c.JSON(http.StatusOK, gin.H{
 		"page":             pageOut,
 		"per_page":         perPageOut,
@@ -874,42 +837,49 @@ func (h *Handler) listJobs(c *gin.Context) {
 
 func (h *Handler) metrics(c *gin.Context) {
 	currentUser := h.auth.OptionalCurrentUser(c)
-	filters, args := h.buildJobFilters(c, currentUser, false)
-	where := ""
-	if len(filters) > 0 {
-		where = " WHERE " + strings.Join(filters, " AND ")
-	}
+	filterInput := h.buildListingFilterInput(c, currentUser, false)
 	now := time.Now().UTC()
-	todayCutoff := now.Add(-24 * time.Hour).Format(time.RFC3339Nano)
-	lastHourCutoff := now.Add(-1 * time.Hour).Format(time.RFC3339Nano)
-
-	todayArgs := append(append([]any{}, args...), todayCutoff)
-	lastHourArgs := append(append([]any{}, args...), lastHourCutoff)
-	companyArgs := append(append([]any{}, args...), todayCutoff)
-
-	var jobsToday, jobsLastHour, companiesHiringNow int
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(),
-		`SELECT COUNT(p.id) FROM parsed_jobs p`+where+appendWhere(where, `p.created_at_source IS NOT NULL AND p.created_at_source >= ?`),
-		todayArgs...).Scan(&jobsToday); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs metrics"})
-		return
-	}
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(),
-		`SELECT COUNT(p.id) FROM parsed_jobs p`+where+appendWhere(where, `p.created_at_source IS NOT NULL AND p.created_at_source >= ?`),
-		lastHourArgs...).Scan(&jobsLastHour); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs metrics"})
-		return
-	}
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(),
-		`SELECT COUNT(DISTINCT p.company_id) FROM parsed_jobs p`+where+appendWhere(where, `p.company_id IS NOT NULL AND p.created_at_source IS NOT NULL AND p.created_at_source >= ?`),
-		companyArgs...).Scan(&companiesHiringNow); err != nil {
+	todayCutoff := now.Add(-24 * time.Hour)
+	lastHourCutoff := now.Add(-1 * time.Hour)
+	metrics, err := h.q.GetJobsMetricsFiltered(c.Request.Context(), gensqlc.GetJobsMetricsFilteredParams{
+		TodayCutoff:            pgtype.Timestamptz{Time: todayCutoff, Valid: true},
+		LastHourCutoff:         pgtype.Timestamptz{Time: lastHourCutoff, Valid: true},
+		HasTitleFilters:        filterInput.HasTitleFilters,
+		JobCategories:          filterInput.JobCategories,
+		JobFunctions:           filterInput.JobFunctions,
+		TitleExactTerms:        filterInput.TitleExactTerms,
+		TitleLikePatterns:      filterInput.TitleLikePatterns,
+		CompanyFilter:          filterInput.CompanyFilter,
+		HasStructuredLocation:  filterInput.HasStructuredLocation,
+		UsStates:               filterInput.USStates,
+		Countries:              filterInput.Countries,
+		LocationPatterns:       filterInput.LocationPatterns,
+		TechStacks:             filterInput.TechStacks,
+		EmploymentTypePatterns: filterInput.EmploymentTypePatterns,
+		HasCreatedFrom:         filterInput.HasCreatedFrom,
+		CreatedFrom:            filterInput.CreatedFrom,
+		HasCreatedTo:           filterInput.HasCreatedTo,
+		CreatedTo:              filterInput.CreatedTo,
+		HasMinSalary:           filterInput.HasMinSalary,
+		MinSalary:              filterInput.MinSalary,
+		HasSeniority:           filterInput.HasSeniority,
+		SeniorityEntry:         filterInput.SeniorityEntry,
+		SeniorityJunior:        filterInput.SeniorityJunior,
+		SeniorityMid:           filterInput.SeniorityMid,
+		SenioritySenior:        filterInput.SenioritySenior,
+		SeniorityLead:          filterInput.SeniorityLead,
+		HasUser:                filterInput.HasUser,
+		UserActionFilter:       filterInput.UserActionFilter,
+		UserID:                 filterInput.UserID,
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs metrics"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"jobs_today":           jobsToday,
-		"jobs_last_hour":       jobsLastHour,
-		"companies_hiring_now": companiesHiringNow,
+		"jobs_today":           metrics.JobsToday,
+		"jobs_last_hour":       metrics.JobsLastHour,
+		"companies_hiring_now": metrics.CompaniesHiringNow,
 	})
 }
 
@@ -920,38 +890,33 @@ func (h *Handler) sitemap(c *gin.Context) {
 		perPage = 50000
 	}
 	offset := (page - 1) * perPage
-	var total int
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT COUNT(id) FROM parsed_jobs`).Scan(&total); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs sitemap"})
-		return
-	}
-	rows, err := h.db.SQL.QueryContext(c.Request.Context(),
-		`SELECT p.id, p.role_title, p.categorized_job_title, c.name, p.created_at_source
-		 FROM parsed_jobs p
-		 LEFT JOIN parsed_companies c ON c.id = p.company_id
-		 ORDER BY p.created_at_source DESC, p.id DESC
-		 LIMIT ? OFFSET ?`, perPage, offset)
+	totalCount, err := h.q.CountParsedJobs(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs sitemap"})
 		return
 	}
-	defer rows.Close()
+	rows, err := h.q.ListJobSitemapPage(c.Request.Context(), gensqlc.ListJobSitemapPageParams{
+		Limit:  int32(perPage),
+		Offset: int32(offset),
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs sitemap"})
+		return
+	}
 	items := []jobSitemapItem{}
-	for rows.Next() {
-		var item jobSitemapItem
-		var roleTitle, categorizedTitle, companyName, createdAt sql.NullString
-		if err := rows.Scan(&item.ID, &roleTitle, &categorizedTitle, &companyName, &createdAt); err == nil {
-			item.RoleTitle = nullableString(roleTitle)
-			item.CategorizedTitle = nullableString(categorizedTitle)
-			item.CompanyName = nullableString(companyName)
-			item.CreatedAtSource = nullableString(createdAt)
-			items = append(items, item)
-		}
+	for _, row := range rows {
+		items = append(items, jobSitemapItem{
+			ID:               int64(row.ID),
+			RoleTitle:        pgTextPtr(row.RoleTitle),
+			CategorizedTitle: pgTextPtr(row.CategorizedJobTitle),
+			CompanyName:      pgTextPtr(row.Name),
+			CreatedAtSource:  timestamptzStringPtr(row.CreatedAtSource),
+		})
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"page":     page,
 		"per_page": perPage,
-		"total":    total,
+		"total":    totalCount,
 		"items":    items,
 	})
 }
@@ -963,55 +928,35 @@ func (h *Handler) companiesSitemap(c *gin.Context) {
 		perPage = 50000
 	}
 	offset := (page - 1) * perPage
-	var total int
-	if err := h.db.SQL.QueryRowContext(
-		c.Request.Context(),
-		`SELECT COUNT(DISTINCT c.id)
-		 FROM parsed_companies c
-		 JOIN parsed_jobs p ON p.company_id = c.id
-		 WHERE c.slug IS NOT NULL AND trim(c.slug) != ''`,
-	).Scan(&total); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load companies sitemap"})
-		return
-	}
-	rows, err := h.db.SQL.QueryContext(
-		c.Request.Context(),
-		`SELECT c.slug, c.name, MAX(p.created_at_source) AS latest_job_posted_at
-		 FROM parsed_companies c
-		 JOIN parsed_jobs p ON p.company_id = c.id
-		 WHERE c.slug IS NOT NULL AND trim(c.slug) != ''
-		 GROUP BY c.id, c.slug, c.name
-		 ORDER BY latest_job_posted_at DESC, c.id DESC
-		 LIMIT ? OFFSET ?`,
-		perPage, offset,
-	)
+	totalCount, err := h.q.CountCompaniesWithJobsForSitemap(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load companies sitemap"})
 		return
 	}
-	defer rows.Close()
+	rows, err := h.q.ListCompanySitemapPage(c.Request.Context(), gensqlc.ListCompanySitemapPageParams{
+		Limit:  int32(perPage),
+		Offset: int32(offset),
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load companies sitemap"})
+		return
+	}
 	items := []companySitemapItem{}
-	for rows.Next() {
-		var slug sql.NullString
-		var name sql.NullString
-		var latest sql.NullString
-		if err := rows.Scan(&slug, &name, &latest); err != nil {
-			continue
-		}
-		slugValue := strings.TrimSpace(slug.String)
-		if !slug.Valid || slugValue == "" {
+	for _, row := range rows {
+		slugValue := strings.TrimSpace(pgTextString(row.Slug))
+		if slugValue == "" {
 			continue
 		}
 		items = append(items, companySitemapItem{
 			Slug:              slugValue,
-			Name:              nullableString(name),
-			LatestJobPostedAt: nullableString(latest),
+			Name:              pgTextPtr(row.Name),
+			LatestJobPostedAt: timestamptzStringPtr(row.LatestJobPostedAt),
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"page":     page,
 		"per_page": perPage,
-		"total":    total,
+		"total":    totalCount,
 		"items":    items,
 	})
 }
@@ -1022,59 +967,33 @@ func (h *Handler) companyProfile(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"detail": "Company not found"})
 		return
 	}
-	row := h.db.SQL.QueryRowContext(
-		c.Request.Context(),
-		`SELECT id, slug, name, tagline, profile_pic_url, home_page_url, linkedin_url, employee_range, founded_year, sponsors_h1b, industry_specialities
-		 FROM parsed_companies
-		 WHERE lower(trim(COALESCE(slug, ''))) = ?
-		 LIMIT 1`,
-		slug,
-	)
-	var item companyProfileItem
-	var itemSlug sql.NullString
-	var name, tagline, profilePicURL, homePageURL, linkedInURL, employeeRange, foundedYear, industrySpecialities sql.NullString
-	var sponsorsH1B sql.NullBool
-	if err := row.Scan(
-		&item.ID,
-		&itemSlug,
-		&name,
-		&tagline,
-		&profilePicURL,
-		&homePageURL,
-		&linkedInURL,
-		&employeeRange,
-		&foundedYear,
-		&sponsorsH1B,
-		&industrySpecialities,
-	); err != nil {
+	row, err := h.q.GetCompanyProfileBySlug(c.Request.Context(), pgtype.Text{String: slug, Valid: true})
+	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"detail": "Company not found"})
 		return
 	}
-	item.Slug = strings.TrimSpace(itemSlug.String)
-	item.Name = nullableString(name)
-	item.Tagline = nullableString(tagline)
-	item.ProfilePicURL = nullableString(profilePicURL)
-	item.HomePageURL = nullableString(homePageURL)
-	item.LinkedInURL = nullableString(linkedInURL)
-	item.EmployeeRange = nullableString(employeeRange)
-	item.FoundedYear = nullableString(foundedYear)
-	item.SponsorsH1B = nullableBool(sponsorsH1B)
-	if industrySpecialities.Valid && strings.TrimSpace(industrySpecialities.String) != "" {
-		_ = json.Unmarshal([]byte(industrySpecialities.String), &item.IndustrySpecialies)
+	item := companyProfileItem{
+		ID:            int64(row.ID),
+		Slug:          strings.TrimSpace(pgTextString(row.Slug)),
+		Name:          pgTextPtr(row.Name),
+		Tagline:       pgTextPtr(row.Tagline),
+		ProfilePicURL: pgTextPtr(row.ProfilePicUrl),
+		HomePageURL:   pgTextPtr(row.HomePageUrl),
+		LinkedInURL:   pgTextPtr(row.LinkedinUrl),
+		EmployeeRange: pgTextPtr(row.EmployeeRange),
+		FoundedYear:   pgTextPtr(row.FoundedYear),
+		SponsorsH1B:   pgBoolPtr(row.SponsorsH1b),
 	}
-	statsRow := h.db.SQL.QueryRowContext(
-		c.Request.Context(),
-		`SELECT COUNT(id), MAX(created_at_source)
-		 FROM parsed_jobs
-		 WHERE company_id = ?`,
-		item.ID,
-	)
-	var latestJobPostedAt sql.NullString
-	if err := statsRow.Scan(&item.TotalJobs, &latestJobPostedAt); err != nil {
+	if len(row.IndustrySpecialities) > 0 {
+		_ = json.Unmarshal(row.IndustrySpecialities, &item.IndustrySpecialies)
+	}
+	stats, err := h.q.GetCompanyProfileStats(c.Request.Context(), pgtype.Int4{Int32: row.ID, Valid: true})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load company profile"})
 		return
 	}
-	item.LatestJobPostedAt = nullableString(latestJobPostedAt)
+	item.TotalJobs = stats.TotalJobs
+	item.LatestJobPostedAt = timestamptzStringPtr(stats.LatestJobPostedAt)
 	c.JSON(http.StatusOK, item)
 }
 
@@ -1089,42 +1008,25 @@ func (h *Handler) relatedCategories(c *gin.Context) {
 		limit = 20
 	}
 
-	var topFunction sql.NullString
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(),
-		`SELECT categorized_job_function
-		 FROM parsed_jobs
-		 WHERE categorized_job_title = ?
-		   AND categorized_job_function IS NOT NULL
-		   AND categorized_job_function != ''
-		 GROUP BY categorized_job_function
-		 ORDER BY COUNT(id) DESC, categorized_job_function ASC
-		 LIMIT 1`, category).Scan(&topFunction); err != nil || !topFunction.Valid || strings.TrimSpace(topFunction.String) == "" {
+	topFunction, err := h.q.GetTopFunctionByCategory(c.Request.Context(), pgtype.Text{String: category, Valid: true})
+	if err != nil || !topFunction.Valid || strings.TrimSpace(topFunction.String) == "" {
 		c.JSON(http.StatusOK, gin.H{"items": []any{}})
 		return
 	}
-	rows, err := h.db.SQL.QueryContext(c.Request.Context(),
-		`SELECT categorized_job_title, COUNT(id) AS score
-		 FROM parsed_jobs
-		 WHERE categorized_job_title IS NOT NULL
-		   AND categorized_job_title != ''
-		   AND categorized_job_function = ?
-		 GROUP BY categorized_job_title
-		 ORDER BY CASE WHEN categorized_job_title = ? THEN 0 ELSE 1 END ASC,
-		          score DESC,
-		          categorized_job_title ASC
-		 LIMIT ?`,
-		topFunction.String, category, limit)
+	rows, err := h.q.ListRelatedCategoriesByFunction(c.Request.Context(), gensqlc.ListRelatedCategoriesByFunctionParams{
+		CategorizedJobFunction: topFunction,
+		CategorizedJobTitle:    pgtype.Text{String: category, Valid: true},
+		Limit:                  int32(limit),
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load related categories"})
 		return
 	}
-	defer rows.Close()
 	items := []gin.H{}
-	for rows.Next() {
-		var itemCategory string
-		var score int
-		if err := rows.Scan(&itemCategory, &score); err == nil && strings.TrimSpace(itemCategory) != "" {
-			items = append(items, gin.H{"category": itemCategory, "score": score})
+	for _, row := range rows {
+		itemCategory := strings.TrimSpace(pgTextString(row.CategorizedJobTitle))
+		if itemCategory != "" {
+			items = append(items, gin.H{"category": itemCategory, "score": row.Score})
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
@@ -1140,43 +1042,28 @@ func (h *Handler) topCategories(c *gin.Context) {
 		days = 365
 	}
 	location := strings.TrimSpace(c.Query("location"))
-	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour).Format(time.RFC3339Nano)
+	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
 
-	query := `SELECT categorized_job_title, COUNT(id) AS score
-		FROM parsed_jobs
-		WHERE categorized_job_title IS NOT NULL
-		  AND categorized_job_title != ''
-		  AND created_at_source IS NOT NULL
-		  AND created_at_source >= ?`
-	args := []any{cutoff}
-	if location != "" {
-		query += ` AND (location_us_states ILIKE ? OR location_countries ILIKE ?)`
-		args = append(args, "%"+location+"%", "%"+location+"%")
-	}
-	query += ` GROUP BY categorized_job_title ORDER BY score DESC, categorized_job_title ASC LIMIT ?`
-	args = append(args, limit)
-	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, args...)
+	locationPattern := "%" + location + "%"
+	rows, err := h.q.ListTopCategories(c.Request.Context(), gensqlc.ListTopCategoriesParams{
+		CreatedAtSource:   pgtype.Timestamptz{Time: cutoff, Valid: true},
+		Column2:           location != "",
+		LocationUsStates:  []byte(locationPattern),
+		LocationCountries: []byte(locationPattern),
+		Limit:             int32(limit),
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load top categories"})
 		return
 	}
-	defer rows.Close()
 	items := []gin.H{}
-	for rows.Next() {
-		var category string
-		var score int
-		if err := rows.Scan(&category, &score); err == nil && strings.TrimSpace(category) != "" {
-			items = append(items, gin.H{"category": category, "score": score})
+	for _, row := range rows {
+		category := strings.TrimSpace(pgTextString(row.CategorizedJobTitle))
+		if category != "" {
+			items = append(items, gin.H{"category": category, "score": row.Score})
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
-}
-
-func appendWhere(where, predicate string) string {
-	if strings.TrimSpace(where) == "" {
-		return " WHERE " + predicate
-	}
-	return " AND " + predicate
 }
 
 func isValidLocationOption(value string) bool {
@@ -1203,23 +1090,64 @@ func mustJSONStringArray(value string) string {
 	return string(payload)
 }
 
-func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includePostDate bool) ([]string, []any) {
-	filters := []string{}
-	args := []any{}
-	titlePredicates := []string{}
+type listingFilterInput struct {
+	HasTitleFilters        bool
+	JobCategories          []string
+	JobFunctions           []string
+	TitleExactTerms        []string
+	TitleLikePatterns      []string
+	CompanyFilter          string
+	HasStructuredLocation  bool
+	USStates               []string
+	Countries              []string
+	LocationPatterns       []string
+	TechStacks             []string
+	EmploymentTypePatterns []string
+	HasCreatedFrom         bool
+	CreatedFrom            pgtype.Timestamptz
+	HasCreatedTo           bool
+	CreatedTo              pgtype.Timestamptz
+	HasMinSalary           bool
+	MinSalary              float64
+	HasSeniority           bool
+	SeniorityEntry         bool
+	SeniorityJunior        bool
+	SeniorityMid           bool
+	SenioritySenior        bool
+	SeniorityLead          bool
+	HasUser                bool
+	UserActionFilter       string
+	UserID                 int64
+	SortSalary             bool
+}
 
-	if categories := parseCSVQuery(c.Query("job_categories")); len(categories) > 0 {
-		categories = uniqueStrings(categories)
+func (h *Handler) buildListingFilterInput(c *gin.Context, currentUser *auth.User, includePostDate bool) listingFilterInput {
+	input := listingFilterInput{
+		JobCategories:          []string{},
+		JobFunctions:           []string{},
+		TitleExactTerms:        []string{},
+		TitleLikePatterns:      []string{},
+		USStates:               []string{},
+		Countries:              []string{},
+		LocationPatterns:       []string{},
+		TechStacks:             []string{},
+		EmploymentTypePatterns: []string{},
+	}
+
+	if categories := uniqueStrings(parseCSVQuery(c.Query("job_categories"))); len(categories) > 0 {
 		for _, category := range categories {
-			titlePredicates = append(titlePredicates, `p.categorized_job_title = ?`)
-			args = append(args, strings.TrimSpace(category))
+			trimmed := strings.TrimSpace(category)
+			if trimmed != "" {
+				input.JobCategories = append(input.JobCategories, trimmed)
+			}
 		}
 	}
-	if functions := parseCSVQuery(c.Query("job_functions")); len(functions) > 0 {
-		functions = uniqueStrings(functions)
-		for _, function := range functions {
-			titlePredicates = append(titlePredicates, `p.categorized_job_function = ?`)
-			args = append(args, strings.TrimSpace(function))
+	if functions := uniqueStrings(parseCSVQuery(c.Query("job_functions"))); len(functions) > 0 {
+		for _, fn := range functions {
+			trimmed := strings.TrimSpace(fn)
+			if trimmed != "" {
+				input.JobFunctions = append(input.JobFunctions, trimmed)
+			}
 		}
 	}
 
@@ -1227,64 +1155,33 @@ func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includ
 	if len(titleValues) == 0 {
 		titleValues = parseCSVQuery(c.Query("job_title"))
 	}
-	if len(titleValues) > 0 {
-		titles := titleValues
-		titles = uniqueStrings(titles)
-		for _, title := range titles {
-			normalizedTitle := strings.TrimSpace(title)
-			if normalizedTitle == "" {
-				continue
-			}
-			lowerTitle := strings.ToLower(normalizedTitle)
-			if h.hasExactTitleMatch(c.Request.Context(), lowerTitle) {
-				titlePredicates = append(titlePredicates, `(lower(trim(COALESCE(p.categorized_job_title, ''))) = ? OR lower(trim(COALESCE(p.categorized_job_function, ''))) = ? OR lower(trim(COALESCE(p.role_title, ''))) = ?)`)
-				args = append(args, lowerTitle, lowerTitle, lowerTitle)
-				continue
-			}
-			titleParts := []string{
-				`p.categorized_job_title ILIKE ?`,
-				`p.categorized_job_function ILIKE ?`,
-				`p.role_title ILIKE ?`,
-			}
-			args = append(args, "%"+normalizedTitle+"%", "%"+normalizedTitle+"%", "%"+normalizedTitle+"%")
-			if tokens := tokenizeTitleSearchText(title); len(tokens) > 0 {
-				tokenParts := make([]string, 0, len(tokens))
-				for _, token := range tokens {
-					tokenParts = append(tokenParts, `p.role_title ILIKE ?`)
-					args = append(args, "%"+token+"%")
-				}
-				titleParts = append(titleParts, "("+strings.Join(tokenParts, " AND ")+")")
-			}
-			titlePredicates = append(titlePredicates, "("+strings.Join(titleParts, " OR ")+")")
+	for _, title := range uniqueStrings(titleValues) {
+		normalizedTitle := strings.TrimSpace(title)
+		if normalizedTitle == "" {
+			continue
+		}
+		input.TitleLikePatterns = append(input.TitleLikePatterns, "%"+normalizedTitle+"%")
+		for _, token := range tokenizeTitleSearchText(normalizedTitle) {
+			input.TitleLikePatterns = append(input.TitleLikePatterns, "%"+token+"%")
 		}
 	}
-	if len(titlePredicates) > 0 {
-		filters = append(filters, "("+strings.Join(titlePredicates, " OR ")+")")
-	}
+	input.TitleExactTerms = []string{}
+	input.TitleLikePatterns = uniqueStrings(input.TitleLikePatterns)
+	input.HasTitleFilters = len(input.JobCategories) > 0 || len(input.JobFunctions) > 0 || len(input.TitleExactTerms) > 0 || len(input.TitleLikePatterns) > 0
 
-	states := uniqueStrings(parseCSVQuery(c.Query("us_states")))
-	countries := uniqueStrings(parseCSVQuery(c.Query("countries")))
-	locationParts := []string{}
-	if len(states) > 0 {
-		for _, state := range states {
-			state = locationnorm.NormalizeUSStateName(state)
-			if state == "" {
-				continue
-			}
-			locationParts = append(locationParts, `COALESCE(NULLIF(trim(p.location_us_states), ''), '[]')::jsonb @> ?::jsonb`)
-			args = append(args, mustJSONStringArray(state))
+	for _, state := range uniqueStrings(parseCSVQuery(c.Query("us_states"))) {
+		if normalized := locationnorm.NormalizeUSStateName(state); normalized != "" {
+			input.USStates = append(input.USStates, normalized)
 		}
 	}
-	if len(countries) > 0 {
-		for _, country := range countries {
-			locationParts = append(locationParts, `COALESCE(NULLIF(trim(p.location_countries), ''), '[]')::jsonb @> ?::jsonb`)
-			args = append(args, mustJSONStringArray(strings.TrimSpace(country)))
+	for _, country := range uniqueStrings(parseCSVQuery(c.Query("countries"))) {
+		if trimmed := strings.TrimSpace(country); trimmed != "" {
+			input.Countries = append(input.Countries, trimmed)
 		}
 	}
-	if len(locationParts) > 0 {
-		filters = append(filters, "("+strings.Join(locationParts, " OR ")+")")
-	}
-	if len(states) == 0 && len(countries) == 0 {
+	input.HasStructuredLocation = len(input.USStates) > 0 || len(input.Countries) > 0
+
+	if !input.HasStructuredLocation {
 		locations := []string{}
 		rawLocationValue := strings.TrimSpace(c.Query("location"))
 		if rawLocationValue != "" {
@@ -1301,57 +1198,31 @@ func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includ
 				locations = parseCSVQuery(c.Query("location"))
 			}
 		}
-		if len(locations) > 0 {
-			locations = uniqueStrings(expandLocationQueryTerms(locations))
-			parts := make([]string, 0, len(locations))
-			for _, location := range locations {
-				parts = append(parts, `(p.location_city ILIKE ? OR p.location_us_states ILIKE ? OR p.location_countries ILIKE ?)`)
-				args = append(args, "%"+location+"%", "%"+location+"%", "%"+location+"%")
-			}
-			filters = append(filters, "("+strings.Join(parts, " OR ")+")")
-		}
-	}
-	if normalizedCompany := strings.ToLower(strings.TrimSpace(c.Query("company"))); normalizedCompany != "" {
-		subquery := `p.company_id IN (
-			SELECT c.id FROM parsed_companies c
-			WHERE lower(trim(COALESCE(c.slug, ''))) = ?
-			   OR lower(trim(COALESCE(c.name, ''))) = ?
-		)`
-		filters = append(filters, subquery)
-		args = append(args, normalizedCompany, normalizedCompany)
-	}
-	if techStacks := parseCSVQuery(c.Query("tech_stack")); len(techStacks) > 0 {
-		techStacks = uniqueStrings(techStacks)
-		parts := make([]string, 0, len(techStacks))
-		for _, techStack := range techStacks {
-			normalizedStack := strings.TrimSpace(techStack)
-			if normalizedStack == "" {
+		for _, location := range uniqueStrings(expandLocationQueryTerms(locations)) {
+			if strings.TrimSpace(location) == "" {
 				continue
 			}
-			parts = append(parts, `EXISTS (
-				SELECT 1
-				FROM jsonb_array_elements_text(COALESCE(NULLIF(trim(p.tech_stack), ''), '[]')::jsonb) AS tech_item
-				WHERE lower(tech_item) = lower(?)
-			)`)
-			args = append(args, normalizedStack)
-		}
-		if len(parts) > 0 {
-			filters = append(filters, "("+strings.Join(parts, " OR ")+")")
+			input.LocationPatterns = append(input.LocationPatterns, "%"+location+"%")
 		}
 	}
-	if employmentTypes := parseCSVQuery(c.Query("employment_type")); len(employmentTypes) > 0 {
-		employmentTypes = uniqueStrings(employmentTypes)
-		parts := make([]string, 0, len(employmentTypes))
-		for _, employmentType := range employmentTypes {
-			parts = append(parts, `p.employment_type ILIKE ?`)
-			args = append(args, "%"+employmentType+"%")
+
+	input.CompanyFilter = strings.ToLower(strings.TrimSpace(c.Query("company")))
+
+	for _, tech := range uniqueStrings(parseCSVQuery(c.Query("tech_stack"))) {
+		if trimmed := strings.TrimSpace(tech); trimmed != "" {
+			input.TechStacks = append(input.TechStacks, trimmed)
 		}
-		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 	}
+	for _, employment := range uniqueStrings(parseCSVQuery(c.Query("employment_type"))) {
+		if trimmed := strings.TrimSpace(employment); trimmed != "" {
+			input.EmploymentTypePatterns = append(input.EmploymentTypePatterns, "%"+trimmed+"%")
+		}
+	}
+
 	if postDateFrom := strings.TrimSpace(c.Query("post_date_from")); postDateFrom != "" {
 		if cutoff, ok := parsePostDateFrom(postDateFrom); ok {
-			filters = append(filters, `p.created_at_source >= ?`)
-			args = append(args, cutoff.Format(time.RFC3339Nano))
+			input.HasCreatedFrom = true
+			input.CreatedFrom = pgtype.Timestamptz{Time: cutoff, Valid: true}
 		}
 	}
 	if includePostDate {
@@ -1367,8 +1238,7 @@ func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includ
 			thisMonthStartLocal := time.Date(nowLocal.Year(), nowLocal.Month(), 1, 0, 0, 0, 0, postDateLocation)
 			lastMonthStartLocal := thisMonthStartLocal.AddDate(0, -1, 0)
 			lastWeekStartLocal := thisWeekStartLocal.AddDate(0, 0, -7)
-
-			now := nowLocal.UTC()
+			nowUTC := nowLocal.UTC()
 			todayStart := todayStartLocal.UTC()
 			thisWeekStart := thisWeekStartLocal.UTC()
 			thisMonthStart := thisMonthStartLocal.UTC()
@@ -1377,102 +1247,78 @@ func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includ
 
 			switch postDate {
 			case "today":
-				filters = append(filters, `p.created_at_source >= ?`)
-				args = append(args, todayStart.Format(time.RFC3339Nano))
+				input.HasCreatedFrom = true
+				input.CreatedFrom = pgtype.Timestamptz{Time: todayStart, Valid: true}
+				input.HasCreatedTo = false
+				input.CreatedTo = pgtype.Timestamptz{}
 			case "yesterday":
-				filters = append(filters, `p.created_at_source >= ?`)
-				args = append(args, todayStart.AddDate(0, 0, -1).Format(time.RFC3339Nano))
-				filters = append(filters, `p.created_at_source < ?`)
-				args = append(args, todayStart.Format(time.RFC3339Nano))
+				input.HasCreatedFrom = true
+				input.CreatedFrom = pgtype.Timestamptz{Time: todayStart.AddDate(0, 0, -1), Valid: true}
+				input.HasCreatedTo = true
+				input.CreatedTo = pgtype.Timestamptz{Time: todayStart, Valid: true}
 			case "this_week":
-				filters = append(filters, `p.created_at_source >= ?`)
-				args = append(args, thisWeekStart.Format(time.RFC3339Nano))
+				input.HasCreatedFrom = true
+				input.CreatedFrom = pgtype.Timestamptz{Time: thisWeekStart, Valid: true}
+				input.HasCreatedTo = false
+				input.CreatedTo = pgtype.Timestamptz{}
 			case "previous_week":
-				filters = append(filters, `p.created_at_source >= ?`)
-				args = append(args, lastWeekStart.Format(time.RFC3339Nano))
-				filters = append(filters, `p.created_at_source < ?`)
-				args = append(args, thisWeekStart.Format(time.RFC3339Nano))
+				input.HasCreatedFrom = true
+				input.CreatedFrom = pgtype.Timestamptz{Time: lastWeekStart, Valid: true}
+				input.HasCreatedTo = true
+				input.CreatedTo = pgtype.Timestamptz{Time: thisWeekStart, Valid: true}
 			case "this_month":
-				filters = append(filters, `p.created_at_source >= ?`)
-				args = append(args, thisMonthStart.Format(time.RFC3339Nano))
+				input.HasCreatedFrom = true
+				input.CreatedFrom = pgtype.Timestamptz{Time: thisMonthStart, Valid: true}
+				input.HasCreatedTo = false
+				input.CreatedTo = pgtype.Timestamptz{}
 			case "previous_month":
-				filters = append(filters, `p.created_at_source >= ?`)
-				args = append(args, lastMonthStart.Format(time.RFC3339Nano))
-				filters = append(filters, `p.created_at_source < ?`)
-				args = append(args, thisMonthStart.Format(time.RFC3339Nano))
+				input.HasCreatedFrom = true
+				input.CreatedFrom = pgtype.Timestamptz{Time: lastMonthStart, Valid: true}
+				input.HasCreatedTo = true
+				input.CreatedTo = pgtype.Timestamptz{Time: thisMonthStart, Valid: true}
 			default:
-				window, ok := postDateWindows[postDate]
-				if !ok {
-					break
+				if window, ok := postDateWindows[postDate]; ok {
+					input.HasCreatedFrom = true
+					input.CreatedFrom = pgtype.Timestamptz{Time: nowUTC.Add(-window), Valid: true}
+					input.HasCreatedTo = false
+					input.CreatedTo = pgtype.Timestamptz{}
 				}
-				cutoff := now.Add(-window)
-				filters = append(filters, `p.created_at_source >= ?`)
-				args = append(args, cutoff.Format(time.RFC3339Nano))
 			}
 		}
 	}
+
 	if minSalary := strings.TrimSpace(c.Query("min_salary")); minSalary != "" {
 		if parsed, err := strconv.ParseFloat(minSalary, 64); err == nil {
-			filters = append(filters, minSalaryFilterSQL())
-			args = append(args, parsed, parsed)
+			input.HasMinSalary = true
+			input.MinSalary = parsed
 		}
 	}
+
 	if seniorities := parseCSVQuery(c.Query("seniority")); len(seniorities) > 0 {
-		seniorities = uniqueStrings(seniorities)
-		parts := []string{}
-		fieldMap := map[string]string{"entry": "p.is_entry_level = 1", "junior": "p.is_junior = 1", "mid": "p.is_mid_level = 1", "senior": "p.is_senior = 1", "lead": "p.is_lead = 1"}
-		for _, seniority := range seniorities {
-			if _, valid := validSeniorities[seniority]; valid {
-				if predicate, ok := fieldMap[seniority]; ok {
-					parts = append(parts, predicate)
-				}
+		for _, seniority := range uniqueStrings(seniorities) {
+			switch strings.ToLower(strings.TrimSpace(seniority)) {
+			case "entry":
+				input.SeniorityEntry = true
+			case "junior":
+				input.SeniorityJunior = true
+			case "mid":
+				input.SeniorityMid = true
+			case "senior":
+				input.SenioritySenior = true
+			case "lead":
+				input.SeniorityLead = true
 			}
 		}
-		if len(parts) > 0 {
-			filters = append(filters, "("+strings.Join(parts, " OR ")+")")
-		}
+		input.HasSeniority = input.SeniorityEntry || input.SeniorityJunior || input.SeniorityMid || input.SenioritySenior || input.SeniorityLead
 	}
-	if currentUser != nil {
-		actionFilter := strings.ToLower(strings.TrimSpace(c.DefaultQuery("user_job_action", "all")))
-		hiddenExists := `EXISTS (SELECT 1 FROM user_job_actions uja WHERE uja.user_id = ? AND uja.parsed_job_id = p.id AND uja.is_hidden = 1)`
-		appliedExists := `EXISTS (SELECT 1 FROM user_job_actions uja WHERE uja.user_id = ? AND uja.parsed_job_id = p.id AND uja.is_applied = 1)`
-		savedExists := `EXISTS (SELECT 1 FROM user_job_actions uja WHERE uja.user_id = ? AND uja.parsed_job_id = p.id AND uja.is_saved = 1)`
-		switch actionFilter {
-		case "hidden":
-			filters = append(filters, hiddenExists)
-			args = append(args, currentUser.ID)
-		case "applied":
-			filters = append(filters, appliedExists)
-			args = append(args, currentUser.ID)
-		case "not_applied":
-			filters = append(filters, "NOT ("+appliedExists+")")
-			filters = append(filters, "NOT ("+hiddenExists+")")
-			args = append(args, currentUser.ID, currentUser.ID)
-		case "saved":
-			filters = append(filters, savedExists)
-			args = append(args, currentUser.ID)
-		default:
-			filters = append(filters, "NOT ("+hiddenExists+")")
-			args = append(args, currentUser.ID)
-		}
-	}
-	return filters, args
-}
 
-func selectStrings(c *gin.Context, db *database.DB, query string) ([]string, error) {
-	rows, err := db.SQL.QueryContext(c.Request.Context(), query)
-	if err != nil {
-		return nil, err
+	if currentUser != nil {
+		input.HasUser = true
+		input.UserID = int64(currentUser.ID)
+		input.UserActionFilter = strings.ToLower(strings.TrimSpace(c.DefaultQuery("user_job_action", "all")))
 	}
-	defer rows.Close()
-	values := []string{}
-	for rows.Next() {
-		var value string
-		if err := rows.Scan(&value); err == nil && value != "" {
-			values = append(values, value)
-		}
-	}
-	return values, nil
+	input.SortSalary = strings.EqualFold(strings.TrimSpace(c.DefaultQuery("sort_criteria", "date")), "salary")
+	return input
 }
 
 func scanJob(scanner interface{ Scan(dest ...any) error }) (jobItem, error) {
@@ -1613,6 +1459,169 @@ func nullableBool(value sql.NullBool) *bool {
 	}
 	v := value.Bool
 	return &v
+}
+
+func pgTextString(value pgtype.Text) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.String
+}
+
+func pgTextPtr(value pgtype.Text) *string {
+	if !value.Valid {
+		return nil
+	}
+	v := value.String
+	return &v
+}
+
+func pgBoolPtr(value pgtype.Bool) *bool {
+	if !value.Valid {
+		return nil
+	}
+	v := value.Bool
+	return &v
+}
+
+func timestamptzStringPtr(value pgtype.Timestamptz) *string {
+	if !value.Valid {
+		return nil
+	}
+	formatted := value.Time.UTC().Format(time.RFC3339Nano)
+	return &formatted
+}
+
+func timestamptzTimePtr(value pgtype.Timestamptz) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	timestamp := value.Time.UTC()
+	return &timestamp
+}
+
+func mapJobDetailRow(row *gensqlc.GetJobDetailByIDRow) jobDetail {
+	detail := jobDetail{
+		ID:                                      int64(row.ID),
+		RawUSJobID:                              int64(row.RawUsJobID),
+		CompanyName:                             pgTextPtr(row.Name),
+		CompanySlug:                             pgTextPtr(row.Slug),
+		CompanyTagline:                          pgTextPtr(row.Tagline),
+		CompanyProfilePicURL:                    pgTextPtr(row.ProfilePicUrl),
+		CompanyHomePageURL:                      pgTextPtr(row.HomePageUrl),
+		CompanyLinkedInURL:                      pgTextPtr(row.LinkedinUrl),
+		CompanyEmployeeRange:                    pgTextPtr(row.EmployeeRange),
+		CompanyFoundedYear:                      pgTextPtr(row.FoundedYear),
+		CompanySponsorsH1B:                      pgBoolPtr(row.SponsorsH1b),
+		CategorizedTitle:                        pgTextPtr(row.CategorizedJobTitle),
+		CategorizedFunction:                     pgTextPtr(row.CategorizedJobFunction),
+		RoleTitle:                               pgTextPtr(row.RoleTitle),
+		LocationCity:                            pgTextPtr(row.LocationCity),
+		LocationType:                            pgTextPtr(row.LocationType),
+		EmploymentType:                          pgTextPtr(row.EmploymentType),
+		SalaryType:                              pgTextPtr(row.SalaryType),
+		UpdatedAt:                               timestamptzStringPtr(row.UpdatedAt),
+		CreatedAtSource:                         timestamptzStringPtr(row.CreatedAtSource),
+		RoleDescription:                         pgTextPtr(row.RoleDescription),
+		RoleRequirements:                        pgTextPtr(row.RoleRequirements),
+		EducationRequirementsCredentialCategory: pgTextPtr(row.EducationRequirementsCredentialCategory),
+		ExperienceInPlaceOfEducation:            pgBoolPtr(row.ExperienceInPlaceOfEducation),
+		Benefits:                                pgTextPtr(row.Benefits),
+		URL:                                     pgTextPtr(row.Url),
+	}
+	if row.SalaryMin.Valid {
+		v := row.SalaryMin.Float64
+		detail.SalaryMin = &v
+	}
+	if row.SalaryMax.Valid {
+		v := row.SalaryMax.Float64
+		detail.SalaryMax = &v
+	}
+	if row.SalaryMinUsd.Valid {
+		v := row.SalaryMinUsd.Float64
+		detail.SalaryMinUSD = &v
+	}
+	if row.SalaryMaxUsd.Valid {
+		v := row.SalaryMaxUsd.Float64
+		detail.SalaryMaxUSD = &v
+	}
+	if row.ExperienceRequirementsMonths.Valid {
+		v := int(row.ExperienceRequirementsMonths.Int32)
+		detail.ExperienceRequirementsMonths = &v
+	}
+	if len(row.LocationUsStates) > 0 {
+		_ = json.Unmarshal(row.LocationUsStates, &detail.LocationUSStates)
+	}
+	if len(row.LocationCountries) > 0 {
+		_ = json.Unmarshal(row.LocationCountries, &detail.LocationCountries)
+	}
+	if len(row.RequiredLanguages) > 0 {
+		_ = json.Unmarshal(row.RequiredLanguages, &detail.RequiredLanguages)
+	}
+	if len(row.TechStack) > 0 {
+		_ = json.Unmarshal(row.TechStack, &detail.TechStack)
+	}
+	return detail
+}
+
+func mapListJobRow(row *gensqlc.ListJobsByIDsInOrderRow) jobItem {
+	item := jobItem{
+		ID:                    int64(row.ID),
+		RawUSJobID:            int64(row.RawUsJobID),
+		RoleTitle:             pgTextPtr(row.RoleTitle),
+		JobDescriptionSummary: pgTextPtr(row.JobDescriptionSummary),
+		CompanyName:           pgTextPtr(row.Name),
+		CompanySlug:           pgTextPtr(row.Slug),
+		CompanyTagline:        pgTextPtr(row.Tagline),
+		CompanyProfilePicURL:  pgTextPtr(row.ProfilePicUrl),
+		CompanyHomePageURL:    pgTextPtr(row.HomePageUrl),
+		CompanyLinkedInURL:    pgTextPtr(row.LinkedinUrl),
+		CompanyEmployeeRange:  pgTextPtr(row.EmployeeRange),
+		CompanyFoundedYear:    pgTextPtr(row.FoundedYear),
+		CompanySponsorsH1B:    pgBoolPtr(row.SponsorsH1b),
+		CategorizedTitle:      pgTextPtr(row.CategorizedJobTitle),
+		LocationCity:          pgTextPtr(row.LocationCity),
+		LocationType:          pgTextPtr(row.LocationType),
+		EmploymentType:        pgTextPtr(row.EmploymentType),
+		SalaryType:            pgTextPtr(row.SalaryType),
+		IsEntryLevel:          pgBoolPtr(row.IsEntryLevel),
+		IsJunior:              pgBoolPtr(row.IsJunior),
+		IsMidLevel:            pgBoolPtr(row.IsMidLevel),
+		IsSenior:              pgBoolPtr(row.IsSenior),
+		IsLead:                pgBoolPtr(row.IsLead),
+		URL:                   pgTextPtr(row.Url),
+	}
+	if row.SalaryMin.Valid {
+		v := row.SalaryMin.Float64
+		item.SalaryMin = &v
+	}
+	if row.SalaryMax.Valid {
+		v := row.SalaryMax.Float64
+		item.SalaryMax = &v
+	}
+	if row.SalaryMinUsd.Valid {
+		v := row.SalaryMinUsd.Float64
+		item.SalaryMinUSD = &v
+	}
+	if row.SalaryMaxUsd.Valid {
+		v := row.SalaryMaxUsd.Float64
+		item.SalaryMaxUSD = &v
+	}
+	if len(row.TechStack) > 0 {
+		_ = json.Unmarshal(row.TechStack, &item.TechStack)
+	}
+	if len(row.LocationUsStates) > 0 {
+		_ = json.Unmarshal(row.LocationUsStates, &item.LocationUSStates)
+	}
+	if len(row.LocationCountries) > 0 {
+		_ = json.Unmarshal(row.LocationCountries, &item.LocationCountries)
+	}
+	if row.UpdatedAt.Valid {
+		updatedAt := row.UpdatedAt.Time.UTC()
+		item.UpdatedAt = &updatedAt
+	}
+	item.CreatedAtSource = timestamptzTimePtr(row.CreatedAtSource)
+	return item
 }
 func parseIntDefault(raw string, fallback int) int {
 	if raw == "" {

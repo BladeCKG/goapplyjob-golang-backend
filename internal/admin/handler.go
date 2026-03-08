@@ -352,7 +352,7 @@ func (h *Handler) listRawUSJobs(c *gin.Context) {
 		args = append(args, source)
 	}
 	if onlyNotReady {
-		filters = append(filters, "is_ready = 0")
+		filters = append(filters, "is_ready = false")
 	}
 	filterDefinitions := map[string]filterDef{
 		"id":           {columnExpr: "id", valueType: "int"},

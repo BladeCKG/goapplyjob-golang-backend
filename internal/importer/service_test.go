@@ -151,11 +151,11 @@ func TestImportRawUSJobsReturnsFailedRowsAndSuccessesSeparately(t *testing.T) {
 	defer db.Close()
 	svc := New(db)
 
-	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (1, 'https://example.com/b', ?, 1, 0, 1, 0, '{}')`, time.Date(2026, 2, 12, 16, 0, 0, 0, time.UTC).Format(time.RFC3339))
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (1, 'https://example.com/b', ?, true, false, true, 0, '{}')`, time.Date(2026, 2, 12, 16, 0, 0, 0, time.UTC).Format(time.RFC3339))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, created_at_source, url) VALUES (1, 'Old Role', ?, 'https://example.com/b')`, time.Now().UTC().Format(time.RFC3339))
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, created_at_source, updated_at, url) VALUES (1, 'Old Role', ?, ?, 'https://example.com/b')`, time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
 	}

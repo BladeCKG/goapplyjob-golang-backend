@@ -19,8 +19,8 @@ WHERE user_id = $2
 `
 
 type ConsumeActiveVerificationCodesByUserParams struct {
-	ConsumedAt pgtype.Text `json:"consumed_at"`
-	UserID     int64       `json:"user_id"`
+	ConsumedAt pgtype.Timestamptz `json:"consumed_at"`
+	UserID     int32              `json:"user_id"`
 }
 
 func (q *Queries) ConsumeActiveVerificationCodesByUser(ctx context.Context, arg ConsumeActiveVerificationCodesByUserParams) error {
@@ -34,7 +34,7 @@ FROM auth_password_credentials
 WHERE user_id = $1
 `
 
-func (q *Queries) CountPasswordCredentialsByUser(ctx context.Context, userID int64) (int64, error) {
+func (q *Queries) CountPasswordCredentialsByUser(ctx context.Context, userID int32) (int64, error) {
 	row := q.db.QueryRow(ctx, countPasswordCredentialsByUser, userID)
 	var count int64
 	err := row.Scan(&count)
@@ -47,7 +47,7 @@ FROM user_subscriptions
 WHERE user_id = $1
 `
 
-func (q *Queries) CountUserSubscriptions(ctx context.Context, userID int64) (int64, error) {
+func (q *Queries) CountUserSubscriptions(ctx context.Context, userID int32) (int64, error) {
 	row := q.db.QueryRow(ctx, countUserSubscriptions, userID)
 	var count int64
 	err := row.Scan(&count)
@@ -61,13 +61,13 @@ RETURNING id
 `
 
 type CreateAuthUserParams struct {
-	Email     string `json:"email"`
-	CreatedAt string `json:"created_at"`
+	Email     string             `json:"email"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
-func (q *Queries) CreateAuthUser(ctx context.Context, arg CreateAuthUserParams) (int64, error) {
+func (q *Queries) CreateAuthUser(ctx context.Context, arg CreateAuthUserParams) (int32, error) {
 	row := q.db.QueryRow(ctx, createAuthUser, arg.Email, arg.CreatedAt)
-	var id int64
+	var id int32
 	err := row.Scan(&id)
 	return id, err
 }
@@ -86,13 +86,13 @@ const getActivePricingPlanIDByCode = `-- name: GetActivePricingPlanIDByCode :one
 SELECT id
 FROM pricing_plans
 WHERE code = $1
-  AND is_active = 1
+  AND is_active = true
 LIMIT 1
 `
 
-func (q *Queries) GetActivePricingPlanIDByCode(ctx context.Context, code string) (int64, error) {
+func (q *Queries) GetActivePricingPlanIDByCode(ctx context.Context, code string) (int32, error) {
 	row := q.db.QueryRow(ctx, getActivePricingPlanIDByCode, code)
-	var id int64
+	var id int32
 	err := row.Scan(&id)
 	return id, err
 }
@@ -105,9 +105,9 @@ LIMIT 1
 `
 
 type GetAuthUserByEmailRow struct {
-	ID        int64  `json:"id"`
-	Email     string `json:"email"`
-	CreatedAt string `json:"created_at"`
+	ID        int32              `json:"id"`
+	Email     string             `json:"email"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) GetAuthUserByEmail(ctx context.Context, email string) (*GetAuthUserByEmailRow, error) {
@@ -127,12 +127,12 @@ LIMIT 1
 `
 
 type GetCurrentUserBySessionParams struct {
-	SessionTokenHash string `json:"session_token_hash"`
-	ExpiresAt        string `json:"expires_at"`
+	SessionTokenHash string             `json:"session_token_hash"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
 }
 
 type GetCurrentUserBySessionRow struct {
-	ID    int64  `json:"id"`
+	ID    int32  `json:"id"`
 	Email string `json:"email"`
 }
 
@@ -155,13 +155,13 @@ LIMIT 1
 `
 
 type GetMagicLinkVerificationCodeParams struct {
-	CodeHash  string `json:"code_hash"`
-	ExpiresAt string `json:"expires_at"`
+	CodeHash  string             `json:"code_hash"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
 }
 
 type GetMagicLinkVerificationCodeRow struct {
-	ID     int64 `json:"id"`
-	UserID int64 `json:"user_id"`
+	ID     int32 `json:"id"`
+	UserID int32 `json:"user_id"`
 }
 
 func (q *Queries) GetMagicLinkVerificationCode(ctx context.Context, arg GetMagicLinkVerificationCodeParams) (*GetMagicLinkVerificationCodeRow, error) {
@@ -183,7 +183,7 @@ type GetPasswordCredentialByUserRow struct {
 	PasswordHash string `json:"password_hash"`
 }
 
-func (q *Queries) GetPasswordCredentialByUser(ctx context.Context, userID int64) (*GetPasswordCredentialByUserRow, error) {
+func (q *Queries) GetPasswordCredentialByUser(ctx context.Context, userID int32) (*GetPasswordCredentialByUserRow, error) {
 	row := q.db.QueryRow(ctx, getPasswordCredentialByUser, userID)
 	var i GetPasswordCredentialByUserRow
 	err := row.Scan(&i.PasswordSalt, &i.PasswordHash)
@@ -202,14 +202,14 @@ LIMIT 1
 `
 
 type GetVerificationCodeIDByUserParams struct {
-	UserID    int64  `json:"user_id"`
-	CodeHash  string `json:"code_hash"`
-	ExpiresAt string `json:"expires_at"`
+	UserID    int32              `json:"user_id"`
+	CodeHash  string             `json:"code_hash"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
 }
 
-func (q *Queries) GetVerificationCodeIDByUser(ctx context.Context, arg GetVerificationCodeIDByUserParams) (int64, error) {
+func (q *Queries) GetVerificationCodeIDByUser(ctx context.Context, arg GetVerificationCodeIDByUserParams) (int32, error) {
 	row := q.db.QueryRow(ctx, getVerificationCodeIDByUser, arg.UserID, arg.CodeHash, arg.ExpiresAt)
-	var id int64
+	var id int32
 	err := row.Scan(&id)
 	return id, err
 }
@@ -220,10 +220,10 @@ VALUES ($1, $2, $3, $4)
 `
 
 type InsertAuthSessionParams struct {
-	UserID           int64  `json:"user_id"`
-	SessionTokenHash string `json:"session_token_hash"`
-	ExpiresAt        string `json:"expires_at"`
-	CreatedAt        string `json:"created_at"`
+	UserID           int32              `json:"user_id"`
+	SessionTokenHash string             `json:"session_token_hash"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) InsertAuthSession(ctx context.Context, arg InsertAuthSessionParams) error {
@@ -242,10 +242,10 @@ VALUES ($1, $2, $3, $4)
 `
 
 type InsertPasswordCredentialParams struct {
-	UserID       int64  `json:"user_id"`
-	PasswordSalt string `json:"password_salt"`
-	PasswordHash string `json:"password_hash"`
-	CreatedAt    string `json:"created_at"`
+	UserID       int32              `json:"user_id"`
+	PasswordSalt string             `json:"password_salt"`
+	PasswordHash string             `json:"password_hash"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) InsertPasswordCredential(ctx context.Context, arg InsertPasswordCredentialParams) error {
@@ -260,15 +260,15 @@ func (q *Queries) InsertPasswordCredential(ctx context.Context, arg InsertPasswo
 
 const insertUserSubscription = `-- name: InsertUserSubscription :exec
 INSERT INTO user_subscriptions (user_id, pricing_plan_id, starts_at, ends_at, is_active, created_at)
-VALUES ($1, $2, $3, $4, 1, $5)
+VALUES ($1, $2, $3, $4, true, $5)
 `
 
 type InsertUserSubscriptionParams struct {
-	UserID        int64  `json:"user_id"`
-	PricingPlanID int64  `json:"pricing_plan_id"`
-	StartsAt      string `json:"starts_at"`
-	EndsAt        string `json:"ends_at"`
-	CreatedAt     string `json:"created_at"`
+	UserID        int32              `json:"user_id"`
+	PricingPlanID int32              `json:"pricing_plan_id"`
+	StartsAt      pgtype.Timestamptz `json:"starts_at"`
+	EndsAt        pgtype.Timestamptz `json:"ends_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) InsertUserSubscription(ctx context.Context, arg InsertUserSubscriptionParams) error {
@@ -288,10 +288,10 @@ VALUES ($1, $2, $3, $4)
 `
 
 type InsertVerificationCodeParams struct {
-	UserID    int64  `json:"user_id"`
-	CodeHash  string `json:"code_hash"`
-	ExpiresAt string `json:"expires_at"`
-	CreatedAt string `json:"created_at"`
+	UserID    int32              `json:"user_id"`
+	CodeHash  string             `json:"code_hash"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) InsertVerificationCode(ctx context.Context, arg InsertVerificationCodeParams) error {
@@ -311,8 +311,8 @@ WHERE id = $2
 `
 
 type MarkVerificationCodeConsumedParams struct {
-	ConsumedAt pgtype.Text `json:"consumed_at"`
-	ID         int64       `json:"id"`
+	ConsumedAt pgtype.Timestamptz `json:"consumed_at"`
+	ID         int32              `json:"id"`
 }
 
 func (q *Queries) MarkVerificationCodeConsumed(ctx context.Context, arg MarkVerificationCodeConsumedParams) error {
@@ -329,7 +329,7 @@ WHERE user_id = $3
 type UpdatePasswordCredentialByUserParams struct {
 	PasswordSalt string `json:"password_salt"`
 	PasswordHash string `json:"password_hash"`
-	UserID       int64  `json:"user_id"`
+	UserID       int32  `json:"user_id"`
 }
 
 func (q *Queries) UpdatePasswordCredentialByUser(ctx context.Context, arg UpdatePasswordCredentialByUserParams) error {
@@ -339,22 +339,22 @@ func (q *Queries) UpdatePasswordCredentialByUser(ctx context.Context, arg Update
 
 const upsertPricingPlanByCode = `-- name: UpsertPricingPlanByCode :exec
 INSERT INTO pricing_plans (code, name, billing_cycle, duration_days, price_usd, is_active, created_at)
-VALUES ($1, $2, $3, $4, $5, 1, $6)
+VALUES ($1, $2, $3, $4, $5, true, $6)
 ON CONFLICT (code) DO UPDATE
 SET name = EXCLUDED.name,
     billing_cycle = EXCLUDED.billing_cycle,
     duration_days = EXCLUDED.duration_days,
     price_usd = EXCLUDED.price_usd,
-    is_active = 1
+    is_active = true
 `
 
 type UpsertPricingPlanByCodeParams struct {
-	Code         string `json:"code"`
-	Name         string `json:"name"`
-	BillingCycle string `json:"billing_cycle"`
-	DurationDays int32  `json:"duration_days"`
-	PriceUsd     int32  `json:"price_usd"`
-	CreatedAt    string `json:"created_at"`
+	Code         string             `json:"code"`
+	Name         string             `json:"name"`
+	BillingCycle string             `json:"billing_cycle"`
+	DurationDays int32              `json:"duration_days"`
+	PriceUsd     int32              `json:"price_usd"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) UpsertPricingPlanByCode(ctx context.Context, arg UpsertPricingPlanByCodeParams) error {

@@ -132,7 +132,7 @@ func TestRunOnceSkipsDeltaFileWhenDeltaIsEmpty(t *testing.T) {
 
 	service.FetchSample = func() ([]byte, error) { return sample, nil }
 	service.FetchFull = func() ([]byte, error) { return fullData, nil }
-	if _, err := service.DB.SQL.ExecContext(context.Background(), `INSERT INTO watcher_states (source, source_url, sample_hash, first_lastmod, state_json, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, "remoterocketship", service.Config.URL, "old-hash", "2026-02-12T10:00:00+00:00", `{"source_url":"https://example.com/jobs.xml","sample_hash":"old-hash","first_lastmod":"2026-02-12T10:00:00+00:00"}`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+	if _, err := service.DB.SQL.ExecContext(context.Background(), `INSERT INTO watcher_states (source, state_json, updated_at) VALUES (?, ?, ?)`, "remoterocketship", `{"source_url":"https://example.com/jobs.xml","sample_hash":"old-hash","first_lastmod":"2026-02-12T10:00:00+00:00"}`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -158,7 +158,7 @@ func TestRunOnceUsesSampleDeltaWithoutFullFetch(t *testing.T) {
 
 	service.FetchSample = func() ([]byte, error) { return sample, nil }
 	service.FetchFull = func() ([]byte, error) { return nil, errors.New("full fetch should not be called") }
-	if _, err := service.DB.SQL.ExecContext(context.Background(), `INSERT INTO watcher_states (source, source_url, sample_hash, first_lastmod, state_json, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, "remoterocketship", service.Config.URL, "old-hash", "2026-02-12T10:00:00+00:00", `{"source_url":"https://example.com/jobs.xml","sample_hash":"old-hash","first_lastmod":"2026-02-12T10:00:00+00:00"}`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+	if _, err := service.DB.SQL.ExecContext(context.Background(), `INSERT INTO watcher_states (source, state_json, updated_at) VALUES (?, ?, ?)`, "remoterocketship", `{"source_url":"https://example.com/jobs.xml","sample_hash":"old-hash","first_lastmod":"2026-02-12T10:00:00+00:00"}`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
 

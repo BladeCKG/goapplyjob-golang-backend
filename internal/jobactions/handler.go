@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Handler struct {
@@ -65,11 +66,11 @@ func (h *Handler) getJobActions(c *gin.Context) {
 	items := []actionItem{}
 	for _, row := range rows {
 		items = append(items, actionItem{
-			JobID:     row.ParsedJobID,
-			IsApplied: row.IsApplied == 1,
-			IsSaved:   row.IsSaved == 1,
-			IsHidden:  row.IsHidden == 1,
-			UpdatedAt: row.UpdatedAt,
+			JobID:     int64(row.ParsedJobID),
+			IsApplied: row.IsApplied,
+			IsSaved:   row.IsSaved,
+			IsHidden:  row.IsHidden,
+			UpdatedAt: row.UpdatedAt.Time.UTC().Format(time.RFC3339Nano),
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
@@ -81,11 +82,12 @@ func (h *Handler) updateJobAction(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Not authenticated"})
 		return
 	}
-	jobID, err := strconv.ParseInt(strings.TrimSpace(c.Param("jobID")), 10, 64)
-	if err != nil || jobID <= 0 {
+	jobID64, err := strconv.ParseInt(strings.TrimSpace(c.Param("jobID")), 10, 64)
+	if err != nil || jobID64 <= 0 || jobID64 > int64(^uint32(0)>>1) {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid job id"})
 		return
 	}
+	jobID := int32(jobID64)
 
 	var payload struct {
 		IsApplied *bool `json:"is_applied"`
@@ -124,24 +126,24 @@ func (h *Handler) updateJobAction(c *gin.Context) {
 		return
 	}
 	if errors.Is(rowErr, sql.ErrNoRows) || errors.Is(rowErr, pgx.ErrNoRows) {
-		now := time.Now().UTC().Format(time.RFC3339Nano)
+		now := time.Now().UTC()
 		err = qtx.InsertUserJobActionDefaults(c.Request.Context(), gensqlc.InsertUserJobActionDefaultsParams{
 			UserID:      user.ID,
 			ParsedJobID: jobID,
-			UpdatedAt:   now,
-			CreatedAt:   now,
+			UpdatedAt:   pgTimestamptz(now),
+			CreatedAt:   pgTimestamptz(now),
 		})
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to update job action"})
 			return
 		}
-		current = actionItem{JobID: jobID, UpdatedAt: now}
+		current = actionItem{JobID: int64(jobID), UpdatedAt: now.Format(time.RFC3339Nano)}
 	} else {
-		current.JobID = row.ParsedJobID
-		current.IsApplied = row.IsApplied == 1
-		current.IsSaved = row.IsSaved == 1
-		current.IsHidden = row.IsHidden == 1
-		current.UpdatedAt = row.UpdatedAt
+		current.JobID = int64(row.ParsedJobID)
+		current.IsApplied = row.IsApplied
+		current.IsSaved = row.IsSaved
+		current.IsHidden = row.IsHidden
+		current.UpdatedAt = row.UpdatedAt.Time.UTC().Format(time.RFC3339Nano)
 	}
 
 	if payload.IsApplied != nil {
@@ -153,12 +155,13 @@ func (h *Handler) updateJobAction(c *gin.Context) {
 	if payload.IsHidden != nil {
 		current.IsHidden = *payload.IsHidden
 	}
-	current.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC()
+	current.UpdatedAt = now.Format(time.RFC3339Nano)
 	err = qtx.UpdateUserJobActionByUserAndJob(c.Request.Context(), gensqlc.UpdateUserJobActionByUserAndJobParams{
-		IsApplied:   int32(boolToInt(current.IsApplied)),
-		IsSaved:     int32(boolToInt(current.IsSaved)),
-		IsHidden:    int32(boolToInt(current.IsHidden)),
-		UpdatedAt:   current.UpdatedAt,
+		IsApplied:   current.IsApplied,
+		IsSaved:     current.IsSaved,
+		IsHidden:    current.IsHidden,
+		UpdatedAt:   pgTimestamptz(now),
 		UserID:      user.ID,
 		ParsedJobID: jobID,
 	})
@@ -202,22 +205,22 @@ func (h *Handler) clearJobActions(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid action"})
 		return
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC()
 	var clearedCount int64
 	switch action {
 	case "applied":
 		clearedCount, err = h.q.ClearAppliedJobActionsByUser(c.Request.Context(), gensqlc.ClearAppliedJobActionsByUserParams{
-			UpdatedAt: now,
+			UpdatedAt: pgTimestamptz(now),
 			UserID:    user.ID,
 		})
 	case "saved":
 		clearedCount, err = h.q.ClearSavedJobActionsByUser(c.Request.Context(), gensqlc.ClearSavedJobActionsByUserParams{
-			UpdatedAt: now,
+			UpdatedAt: pgTimestamptz(now),
 			UserID:    user.ID,
 		})
 	default:
 		clearedCount, err = h.q.ClearHiddenJobActionsByUser(c.Request.Context(), gensqlc.ClearHiddenJobActionsByUserParams{
-			UpdatedAt: now,
+			UpdatedAt: pgTimestamptz(now),
 			UserID:    user.ID,
 		})
 	}
@@ -251,9 +254,6 @@ func parseJobIDsCSV(raw string) []int64 {
 	return result
 }
 
-func boolToInt(v bool) int {
-	if v {
-		return 1
-	}
-	return 0
+func pgTimestamptz(value time.Time) pgtype.Timestamptz {
+	return pgtype.Timestamptz{Time: value, Valid: true}
 }

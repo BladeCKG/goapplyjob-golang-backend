@@ -36,13 +36,13 @@ type Handler struct {
 }
 
 type organizationResponse struct {
-	ID   int64  `json:"id"`
+	ID   int32  `json:"id"`
 	Name string `json:"name"`
 	Role string `json:"role"`
 }
 
 type employerJobPayload struct {
-	OrganizationID *int64   `json:"organization_id"`
+	OrganizationID *int32   `json:"organization_id"`
 	Title          *string  `json:"title"`
 	Department     *string  `json:"department"`
 	Description    *string  `json:"description"`
@@ -62,8 +62,8 @@ type employerJobPayload struct {
 }
 
 type jobResponse struct {
-	ID             int64    `json:"id"`
-	OrganizationID int64    `json:"organization_id"`
+	ID             int32    `json:"id"`
+	OrganizationID int32    `json:"organization_id"`
 	Status         string   `json:"status"`
 	Title          *string  `json:"title"`
 	Slug           *string  `json:"slug"`
@@ -122,11 +122,11 @@ func (h *Handler) createOrganization(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "Organization name is required"})
 		return
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC()
 	orgID, err := h.q.CreateEmployerOrganization(c.Request.Context(), gensqlc.CreateEmployerOrganizationParams{
 		Name:            strings.TrimSpace(payload.Name),
 		CreatedByUserID: user.ID,
-		CreatedAt:       now,
+		CreatedAt:       pgTimestamptz(now),
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create organization"})
@@ -135,7 +135,7 @@ func (h *Handler) createOrganization(c *gin.Context) {
 	if err := h.q.CreateEmployerOrganizationOwnerMembership(c.Request.Context(), gensqlc.CreateEmployerOrganizationOwnerMembershipParams{
 		OrganizationID: orgID,
 		UserID:         user.ID,
-		CreatedAt:      now,
+		CreatedAt:      pgTimestamptz(now),
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create organization membership"})
 		return
@@ -184,8 +184,8 @@ func (h *Handler) createJobDraft(c *gin.Context) {
 		return
 	}
 	now := time.Now().UTC()
-	locationsJSON := marshalStringSlice(payload.Locations)
-	techStackJSON := marshalStringSlice(payload.TechStack)
+	locationsJSON := marshalStringSliceBytes(payload.Locations)
+	techStackJSON := marshalStringSliceBytes(payload.TechStack)
 	jobID, err := h.q.CreateEmployerJobDraft(c.Request.Context(), gensqlc.CreateEmployerJobDraftParams{
 		OrganizationID:  orgID,
 		CreatedByUserID: user.ID,
@@ -197,9 +197,9 @@ func (h *Handler) createJobDraft(c *gin.Context) {
 		Benefits:        nullableText(payload.Benefits),
 		EmploymentType:  nullableText(payload.EmploymentType),
 		LocationType:    nullableText(payload.LocationType),
-		LocationsJson:   nullableText(locationsJSON),
+		LocationsJson:   locationsJSON,
 		Seniority:       nullableText(payload.Seniority),
-		TechStack:       nullableText(techStackJSON),
+		TechStack:       techStackJSON,
 		ApplyUrl:        nullableText(payload.ApplyURL),
 		ApplyEmail:      nullableText(payload.ApplyEmail),
 		SalaryCurrency:  nullableText(payload.SalaryCurrency),
@@ -207,18 +207,18 @@ func (h *Handler) createJobDraft(c *gin.Context) {
 		SalaryMin:       nullableFloat(payload.SalaryMin),
 		SalaryMax:       nullableFloat(payload.SalaryMax),
 		PostingFeeUsd:   int32(max(h.cfg.EmployerPostingFeeUSD, 0)),
-		CreatedAt:       now.Format(time.RFC3339Nano),
-		UpdatedAt:       now.Format(time.RFC3339Nano),
+		CreatedAt:       pgTimestamptz(now),
+		UpdatedAt:       pgTimestamptz(now),
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create draft"})
 		return
 	}
 	if payload.Title != nil && strings.TrimSpace(*payload.Title) != "" {
-		slug := slugify(*payload.Title) + "-" + strconv.FormatInt(jobID, 10)
+		slug := slugify(*payload.Title) + "-" + strconv.FormatInt(int64(jobID), 10)
 		_ = h.q.UpdateEmployerJobSlug(c.Request.Context(), gensqlc.UpdateEmployerJobSlugParams{
 			Slug:      pgtype.Text{String: slug, Valid: true},
-			UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			UpdatedAt: pgTimestamptz(time.Now().UTC()),
 			ID:        jobID,
 		})
 	}
@@ -231,10 +231,10 @@ func (h *Handler) listJobs(c *gin.Context) {
 	if !ok {
 		return
 	}
-	orgID := int64(0)
+	orgID := int32(0)
 	if raw := strings.TrimSpace(c.Query("organization_id")); raw != "" {
 		if parsed, parseErr := strconv.ParseInt(raw, 10, 64); parseErr == nil {
-			orgID = parsed
+			orgID = int32(parsed)
 		}
 	}
 	statusFilter := strings.TrimSpace(c.Query("status_filter"))
@@ -302,8 +302,8 @@ func (h *Handler) updateJob(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid request"})
 		return
 	}
-	locationsJSON := marshalStringSlice(payload.Locations)
-	techStackJSON := marshalStringSlice(payload.TechStack)
+	locationsJSON := marshalStringSliceBytes(payload.Locations)
+	techStackJSON := marshalStringSliceBytes(payload.TechStack)
 	nextStatus := job.Status
 	if job.Status == statusPublished {
 		nextStatus = statusReview
@@ -316,9 +316,9 @@ func (h *Handler) updateJob(c *gin.Context) {
 		Benefits:       nullableText(payload.Benefits),
 		EmploymentType: nullableText(payload.EmploymentType),
 		LocationType:   nullableText(payload.LocationType),
-		LocationsJson:  nullableText(locationsJSON),
+		LocationsJson:  locationsJSON,
 		Seniority:      nullableText(payload.Seniority),
-		TechStack:      nullableText(techStackJSON),
+		TechStack:      techStackJSON,
 		ApplyUrl:       nullableText(payload.ApplyURL),
 		ApplyEmail:     nullableText(payload.ApplyEmail),
 		SalaryCurrency: nullableText(payload.SalaryCurrency),
@@ -326,7 +326,7 @@ func (h *Handler) updateJob(c *gin.Context) {
 		SalaryMin:      nullableFloat(payload.SalaryMin),
 		SalaryMax:      nullableFloat(payload.SalaryMax),
 		Status:         nextStatus,
-		UpdatedAt:      time.Now().UTC().Format(time.RFC3339Nano),
+		UpdatedAt:      pgTimestamptz(time.Now().UTC()),
 		ID:             jobID,
 	})
 	if err != nil {
@@ -365,10 +365,10 @@ func (h *Handler) payPostingFee(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"detail": "Insufficient role"})
 		return
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC()
 	_ = h.q.MarkEmployerJobPostingFeePaid(c.Request.Context(), gensqlc.MarkEmployerJobPostingFeePaidParams{
-		PostingFeePaidAt: pgtype.Text{String: now, Valid: true},
-		UpdatedAt:        now,
+		PostingFeePaidAt: pgTimestamptz(now),
+		UpdatedAt:        pgTimestamptz(now),
 		ID:               jobID,
 	})
 	_ = h.addAuditEvent(c, jobID, user.ID, "posting_fee_paid", map[string]any{"posting_fee_usd": max(h.cfg.EmployerPostingFeeUSD, 0)})
@@ -400,7 +400,7 @@ func (h *Handler) closeJob(c *gin.Context) {
 }
 
 type employerJob struct {
-	ID               int64
+	ID               int32
 	Status           string
 	PostingFeeStatus string
 }
@@ -425,27 +425,27 @@ func (h *Handler) transitionStatus(c *gin.Context, nextStatus string, allowed fu
 		c.JSON(code, gin.H{"detail": detail})
 		return
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC()
 	switch nextStatus {
 	case statusPublished:
 		_ = h.q.UpdateEmployerJobStatusPublished(c.Request.Context(), gensqlc.UpdateEmployerJobStatusPublishedParams{
 			Status:      nextStatus,
-			PublishedAt: pgtype.Text{String: now, Valid: true},
-			ExpiresAt:   pgtype.Text{String: time.Now().UTC().Add(30 * 24 * time.Hour).Format(time.RFC3339Nano), Valid: true},
-			UpdatedAt:   now,
+			PublishedAt: pgTimestamptz(now),
+			ExpiresAt:   pgTimestamptz(time.Now().UTC().Add(30 * 24 * time.Hour)),
+			UpdatedAt:   pgTimestamptz(now),
 			ID:          jobID,
 		})
 	case statusClosed:
 		_ = h.q.UpdateEmployerJobStatusClosed(c.Request.Context(), gensqlc.UpdateEmployerJobStatusClosedParams{
 			Status:    nextStatus,
-			ClosedAt:  pgtype.Text{String: now, Valid: true},
-			UpdatedAt: now,
+			ClosedAt:  pgTimestamptz(now),
+			UpdatedAt: pgTimestamptz(now),
 			ID:        jobID,
 		})
 	default:
 		_ = h.q.UpdateEmployerJobStatusSimple(c.Request.Context(), gensqlc.UpdateEmployerJobStatusSimpleParams{
 			Status:    nextStatus,
-			UpdatedAt: now,
+			UpdatedAt: pgTimestamptz(now),
 			ID:        jobID,
 		})
 	}
@@ -462,7 +462,7 @@ func (h *Handler) requireUser(c *gin.Context) (*auth.User, bool) {
 	return user, true
 }
 
-func (h *Handler) resolveOrganizationForCreate(c *gin.Context, userID int64, requested *int64) (int64, string, error) {
+func (h *Handler) resolveOrganizationForCreate(c *gin.Context, userID int32, requested *int32) (int32, string, error) {
 	if requested != nil && *requested > 0 {
 		return h.requireOrganizationMember(c, *requested, userID)
 	}
@@ -473,12 +473,12 @@ func (h *Handler) resolveOrganizationForCreate(c *gin.Context, userID int64, req
 	if !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, pgx.ErrNoRows) {
 		return 0, "", err
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	name := strings.SplitN("user-"+strconv.FormatInt(userID, 10), "@", 2)[0] + " jobs"
+	now := time.Now().UTC()
+	name := strings.SplitN("user-"+strconv.FormatInt(int64(userID), 10), "@", 2)[0] + " jobs"
 	orgID, err := h.q.CreateEmployerOrganization(c.Request.Context(), gensqlc.CreateEmployerOrganizationParams{
 		Name:            name,
 		CreatedByUserID: userID,
-		CreatedAt:       now,
+		CreatedAt:       pgTimestamptz(now),
 	})
 	if err != nil {
 		return 0, "", err
@@ -486,12 +486,12 @@ func (h *Handler) resolveOrganizationForCreate(c *gin.Context, userID int64, req
 	err = h.q.CreateEmployerOrganizationOwnerMembership(c.Request.Context(), gensqlc.CreateEmployerOrganizationOwnerMembershipParams{
 		OrganizationID: orgID,
 		UserID:         userID,
-		CreatedAt:      now,
+		CreatedAt:      pgTimestamptz(now),
 	})
 	return orgID, "owner", err
 }
 
-func (h *Handler) requireOrganizationMember(c *gin.Context, orgID, userID int64) (int64, string, error) {
+func (h *Handler) requireOrganizationMember(c *gin.Context, orgID, userID int32) (int32, string, error) {
 	role, err := h.q.GetEmployerOrganizationMemberRole(c.Request.Context(), gensqlc.GetEmployerOrganizationMemberRoleParams{
 		OrganizationID: orgID,
 		UserID:         userID,
@@ -502,7 +502,7 @@ func (h *Handler) requireOrganizationMember(c *gin.Context, orgID, userID int64)
 	return orgID, role, nil
 }
 
-func (h *Handler) requireJobMember(c *gin.Context, jobID, userID int64) (employerJob, string, error) {
+func (h *Handler) requireJobMember(c *gin.Context, jobID, userID int32) (employerJob, string, error) {
 	jobRow, err := h.q.GetEmployerJobForMemberCheck(c.Request.Context(), jobID)
 	if err != nil {
 		return employerJob{}, "", err
@@ -521,24 +521,21 @@ func (h *Handler) requireJobMember(c *gin.Context, jobID, userID int64) (employe
 	}, role, nil
 }
 
-func (h *Handler) addAuditEvent(c *gin.Context, jobID, actorUserID int64, eventType string, detail map[string]any) error {
-	var detailJSON string
-	detailValid := false
+func (h *Handler) addAuditEvent(c *gin.Context, jobID, actorUserID int32, eventType string, detail map[string]any) error {
+	var detailJSON []byte
 	if detail != nil {
-		body, _ := json.Marshal(detail)
-		detailJSON = string(body)
-		detailValid = true
+		detailJSON, _ = json.Marshal(detail)
 	}
 	return h.q.InsertEmployerJobAuditEvent(c.Request.Context(), gensqlc.InsertEmployerJobAuditEventParams{
 		EmployerJobID: jobID,
-		ActorUserID:   pgtype.Int8{Int64: actorUserID, Valid: true},
+		ActorUserID:   pgtype.Int4{Int32: actorUserID, Valid: true},
 		EventType:     eventType,
-		DetailJson:    pgtype.Text{String: detailJSON, Valid: detailValid},
-		CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
+		DetailJson:    detailJSON,
+		CreatedAt:     pgTimestamptz(time.Now().UTC()),
 	})
 }
 
-func (h *Handler) respondJob(c *gin.Context, jobID int64) {
+func (h *Handler) respondJob(c *gin.Context, jobID int32) {
 	item, err := h.loadJobByID(c, jobID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"detail": "Job not found"})
@@ -547,7 +544,7 @@ func (h *Handler) respondJob(c *gin.Context, jobID int64) {
 	c.JSON(http.StatusOK, item)
 }
 
-func (h *Handler) loadJobByID(c *gin.Context, jobID int64) (jobResponse, error) {
+func (h *Handler) loadJobByID(c *gin.Context, jobID int32) (jobResponse, error) {
 	row, err := h.q.GetEmployerJobByID(c.Request.Context(), jobID)
 	if err != nil {
 		return jobResponse{}, err
@@ -558,8 +555,8 @@ func (h *Handler) loadJobByID(c *gin.Context, jobID int64) (jobResponse, error) 
 	item.Status = row.Status
 	item.PostingFeeUSD = int(row.PostingFeeUsd)
 	item.PostingStatus = row.PostingFeeStatus
-	item.CreatedAt = row.CreatedAt
-	item.UpdatedAt = row.UpdatedAt
+	item.CreatedAt = row.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
+	item.UpdatedAt = row.UpdatedAt.Time.UTC().Format(time.RFC3339Nano)
 	item.Title = nullableString(row.Title)
 	item.Slug = nullableString(row.Slug)
 	item.Department = nullableString(row.Department)
@@ -575,15 +572,15 @@ func (h *Handler) loadJobByID(c *gin.Context, jobID int64) (jobResponse, error) 
 	item.SalaryPeriod = nullableString(row.SalaryPeriod)
 	item.SalaryMin = nullableFloat64(row.SalaryMin)
 	item.SalaryMax = nullableFloat64(row.SalaryMax)
-	item.PostingPaidAt = nullableString(row.PostingFeePaidAt)
-	item.PublishedAt = nullableString(row.PublishedAt)
-	item.ClosedAt = nullableString(row.ClosedAt)
-	item.ExpiresAt = nullableString(row.ExpiresAt)
-	if row.LocationsJson.Valid && strings.TrimSpace(row.LocationsJson.String) != "" {
-		_ = json.Unmarshal([]byte(row.LocationsJson.String), &item.Locations)
+	item.PostingPaidAt = nullableTimestamptzString(row.PostingFeePaidAt)
+	item.PublishedAt = nullableTimestamptzString(row.PublishedAt)
+	item.ClosedAt = nullableTimestamptzString(row.ClosedAt)
+	item.ExpiresAt = nullableTimestamptzString(row.ExpiresAt)
+	if len(row.LocationsJson) > 0 {
+		_ = json.Unmarshal(row.LocationsJson, &item.Locations)
 	}
-	if row.TechStack.Valid && strings.TrimSpace(row.TechStack.String) != "" {
-		_ = json.Unmarshal([]byte(row.TechStack.String), &item.TechStack)
+	if len(row.TechStack) > 0 {
+		_ = json.Unmarshal(row.TechStack, &item.TechStack)
 	}
 	return item, nil
 }
@@ -596,6 +593,14 @@ func nullableString(value pgtype.Text) *string {
 	return &v
 }
 
+func nullableTimestamptzString(value pgtype.Timestamptz) *string {
+	if !value.Valid {
+		return nil
+	}
+	formatted := value.Time.UTC().Format(time.RFC3339Nano)
+	return &formatted
+}
+
 func nullableFloat64(value pgtype.Float8) *float64 {
 	if !value.Valid {
 		return nil
@@ -604,13 +609,12 @@ func nullableFloat64(value pgtype.Float8) *float64 {
 	return &v
 }
 
-func marshalStringSlice(values []string) *string {
+func marshalStringSliceBytes(values []string) []byte {
 	if len(values) == 0 {
 		return nil
 	}
 	body, _ := json.Marshal(values)
-	value := string(body)
-	return &value
+	return body
 }
 
 func nullableText(value *string) pgtype.Text {
@@ -631,8 +635,13 @@ func nullableFloat(value *float64) pgtype.Float8 {
 	return pgtype.Float8{Float64: *value, Valid: true}
 }
 
-func parseJobID(raw string) (int64, error) {
-	return strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+func parseJobID(raw string) (int32, error) {
+	value, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	return int32(value), err
+}
+
+func pgTimestamptz(value time.Time) pgtype.Timestamptz {
+	return pgtype.Timestamptz{Time: value, Valid: true}
 }
 
 func slugify(value string) string {

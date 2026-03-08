@@ -1,14 +1,14 @@
 -- name: ListActivePricingPlans :many
 SELECT code, name, billing_cycle, duration_days, price_usd
 FROM pricing_plans
-WHERE is_active = 1
+WHERE is_active = true
 ORDER BY price_usd ASC;
 
 -- name: GetActivePricingPlanByCode :one
 SELECT id, code, name, duration_days, price_usd
 FROM pricing_plans
 WHERE code = $1
-  AND is_active = 1
+  AND is_active = true
 LIMIT 1;
 
 -- name: CreatePaidInternalPayment :one
@@ -63,13 +63,13 @@ LIMIT 1;
 
 -- name: DeactivateActiveSubscriptionsByUser :exec
 UPDATE user_subscriptions
-SET is_active = 0
+SET is_active = false
 WHERE user_id = $1
-  AND is_active = 1;
+  AND is_active = true;
 
 -- name: CreateUserSubscriptionActive :exec
 INSERT INTO user_subscriptions (user_id, pricing_plan_id, starts_at, ends_at, is_active, created_at)
-VALUES ($1, $2, $3, $4, 1, $5);
+VALUES ($1, $2, $3, $4, true, $5);
 
 -- name: MarkPaymentPaidByID :exec
 UPDATE pricing_payments
@@ -110,15 +110,15 @@ SELECT s.id, p.id, p.code, p.name, s.starts_at, s.ends_at
 FROM user_subscriptions s
 JOIN pricing_plans p ON p.id = s.pricing_plan_id
 WHERE s.user_id = $1
-  AND p.is_active = 1
+  AND p.is_active = true
 ORDER BY s.ends_at DESC
 LIMIT 1;
 
 -- name: DeactivateSubscriptionByID :exec
 UPDATE user_subscriptions
-SET is_active = 0
+SET is_active = false
 WHERE id = $1
-  AND is_active = 1;
+  AND is_active = true;
 
 -- name: GetLatestPaidPaymentMetaByUserAndPlan :one
 SELECT provider, payment_method, provider_payload
@@ -134,7 +134,7 @@ SELECT p.id, p.provider_payload
 FROM pricing_payments p
 JOIN user_subscriptions s ON s.pricing_plan_id = p.pricing_plan_id
 WHERE s.user_id = $1
-  AND s.is_active = 1
+  AND s.is_active = true
   AND p.user_id = $2
   AND p.provider = 'stripe'
   AND p.status = 'paid'

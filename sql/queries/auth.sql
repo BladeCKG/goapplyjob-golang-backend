@@ -82,13 +82,13 @@ WHERE session_token_hash = $1;
 
 -- name: UpsertPricingPlanByCode :exec
 INSERT INTO pricing_plans (code, name, billing_cycle, duration_days, price_usd, is_active, created_at)
-VALUES ($1, $2, $3, $4, $5, 1, $6)
+VALUES ($1, $2, $3, $4, $5, true, $6)
 ON CONFLICT (code) DO UPDATE
 SET name = EXCLUDED.name,
     billing_cycle = EXCLUDED.billing_cycle,
     duration_days = EXCLUDED.duration_days,
     price_usd = EXCLUDED.price_usd,
-    is_active = 1;
+    is_active = true;
 
 -- name: CountUserSubscriptions :one
 SELECT COUNT(1)
@@ -99,9 +99,9 @@ WHERE user_id = $1;
 SELECT id
 FROM pricing_plans
 WHERE code = $1
-  AND is_active = 1
+  AND is_active = true
 LIMIT 1;
 
 -- name: InsertUserSubscription :exec
 INSERT INTO user_subscriptions (user_id, pricing_plan_id, starts_at, ends_at, is_active, created_at)
-VALUES ($1, $2, $3, $4, 1, $5);
+VALUES ($1, $2, $3, $4, true, $5);

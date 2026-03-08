@@ -67,7 +67,7 @@ func TestProcessPendingKeepsParsingWhenSourceCreatedAtIsOlderThanPostDate(t *tes
 	}
 	_, err = db.SQL.ExecContext(
 		context.Background(),
-		`INSERT INTO raw_us_jobs (url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, 1, 0, 0, 0, ?)`,
+		`INSERT INTO raw_us_jobs (url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, true, false, false, 0, ?)`,
 		"https://example.com/jobs/1",
 		"2026-02-12T10:00:00Z",
 		string(payload),
@@ -85,13 +85,13 @@ func TestProcessPendingKeepsParsingWhenSourceCreatedAtIsOlderThanPostDate(t *tes
 		t.Fatalf("expected one row processed, got %d", processed)
 	}
 
-	var isReady, isParsed int
+	var isReady, isParsed bool
 	var rawJSONText string
 	if err := db.SQL.QueryRowContext(context.Background(), `SELECT is_ready, is_parsed, raw_json FROM raw_us_jobs WHERE url = ?`, "https://example.com/jobs/1").Scan(&isReady, &isParsed, &rawJSONText); err != nil {
 		t.Fatal(err)
 	}
-	if isReady != 1 || isParsed != 1 {
-		t.Fatalf("expected row to stay ready and parsed, got is_ready=%d is_parsed=%d", isReady, isParsed)
+	if !isReady || !isParsed {
+		t.Fatalf("expected row to stay ready and parsed, got is_ready=%t is_parsed=%t", isReady, isParsed)
 	}
 	if rawJSONText == "" {
 		t.Fatal("expected raw payload to remain populated")
@@ -160,7 +160,7 @@ func TestBuiltinBackfillsCategoriesFromSimilarRemoteJob(t *testing.T) {
 	}
 	defer db.Close()
 
-	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (1, 'remoterocketship', 'https://remote.example/jobs/1', ?, 1, 0, 1, 0, '{}')`, time.Date(2026, 2, 17, 0, 0, 0, 0, time.UTC).Format(time.RFC3339))
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (1, 'remoterocketship', 'https://remote.example/jobs/1', ?, true, false, true, 0, '{}')`, time.Date(2026, 2, 17, 0, 0, 0, 0, time.UTC).Format(time.RFC3339))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestBuiltinBackfillsCategoriesFromSimilarRemoteJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (2, 'builtin', 'https://builtin.com/job/acme/200', ?, 1, 0, 0, 0, ?)`, time.Date(2026, 2, 17, 0, 0, 0, 0, time.UTC).Format(time.RFC3339), string(payload))
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (2, 'builtin', 'https://builtin.com/job/acme/200', ?, true, false, false, 0, ?)`, time.Date(2026, 2, 17, 0, 0, 0, 0, time.UTC).Format(time.RFC3339), string(payload))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,11 +206,11 @@ func TestFindSimilarRemoteCategoriesAvoidsGenericEngineer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (1, 'remoterocketship', 'https://remote.example/jobs/engineer', ?, 1, 0, 1, 0, '{}')`, time.Now().UTC().Format(time.RFC3339))
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (1, 'remoterocketship', 'https://remote.example/jobs/engineer', ?, true, false, true, 0, '{}')`, time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (2, 'remoterocketship', 'https://remote.example/jobs/implementation-engineer', ?, 1, 0, 1, 0, '{}')`, time.Now().UTC().Format(time.RFC3339))
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (2, 'remoterocketship', 'https://remote.example/jobs/implementation-engineer', ?, true, false, true, 0, '{}')`, time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,8 +242,8 @@ func TestFindSimilarRemoteCategoriesPrefersExactNormalizedRoleTitle(t *testing.T
 	}
 	defer db.Close()
 	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES
-		(1, 'remoterocketship', 'https://remote.example/jobs/devops', ?, 1, 0, 1, 0, '{}'),
-		(2, 'remoterocketship', 'https://remote.example/jobs/software-engineer', ?, 1, 0, 1, 0, '{}')`,
+		(1, 'remoterocketship', 'https://remote.example/jobs/devops', ?, true, false, true, 0, '{}'),
+		(2, 'remoterocketship', 'https://remote.example/jobs/software-engineer', ?, true, false, true, 0, '{}')`,
 		time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
 		t.Fatal(err)
@@ -273,8 +273,8 @@ func TestFindSimilarRemoteCategoriesUsesTechStackFilter(t *testing.T) {
 	defer db.Close()
 
 	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES
-		(1, 'remoterocketship', 'https://remote.example/jobs/platform-ruby', ?, 1, 0, 1, 0, '{}'),
-		(2, 'remoterocketship', 'https://remote.example/jobs/platform-java', ?, 1, 0, 1, 0, '{}')`,
+		(1, 'remoterocketship', 'https://remote.example/jobs/platform-ruby', ?, true, false, true, 0, '{}'),
+		(2, 'remoterocketship', 'https://remote.example/jobs/platform-java', ?, true, false, true, 0, '{}')`,
 		time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
 		t.Fatal(err)
@@ -304,7 +304,7 @@ func TestFindSimilarRemoteCategoriesFallsBackWhenTechStackFilterHasNoMatch(t *te
 	defer db.Close()
 
 	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES
-		(1, 'remoterocketship', 'https://remote.example/jobs/backend-python', ?, 1, 0, 1, 0, '{}')`,
+		(1, 'remoterocketship', 'https://remote.example/jobs/backend-python', ?, true, false, true, 0, '{}')`,
 		time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
 		t.Fatal(err)

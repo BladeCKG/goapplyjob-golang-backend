@@ -41,7 +41,7 @@ func TestProcessPendingUsesNormalizedURLForFetchAndKeepsOriginalPayloadURL(t *te
 	defer db.Close()
 
 	jobURL := "https://www.remoterocketship.com/us/company/acme/jobs/dev/"
-	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES ('remoterocketship', ?, '2026-02-12T10:00:00Z', 0, 0, 0, 0, NULL)`, jobURL)
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES ('remoterocketship', ?, '2026-02-12T10:00:00Z', false, false, false, 0, NULL)`, jobURL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,13 +68,13 @@ func TestProcessPendingUsesNormalizedURLForFetchAndKeepsOriginalPayloadURL(t *te
 		t.Fatalf("expected fetch to use normalized URL, got %#v", fetchedURLs)
 	}
 
-	var isReady int
+	var isReady bool
 	var rawJSONText string
 	if err := db.SQL.QueryRowContext(context.Background(), `SELECT is_ready, raw_json FROM raw_us_jobs WHERE url = ?`, jobURL).Scan(&isReady, &rawJSONText); err != nil {
 		t.Fatal(err)
 	}
-	if isReady != 1 {
-		t.Fatalf("expected job to become ready, got %d", isReady)
+	if !isReady {
+		t.Fatalf("expected job to become ready, got %t", isReady)
 	}
 	payload := map[string]any{}
 	if err := json.Unmarshal([]byte(rawJSONText), &payload); err != nil {
@@ -120,7 +120,7 @@ func TestProcessPendingSkipsReadyWhenParserRequestsRetry(t *testing.T) {
 	}
 	defer db.Close()
 
-	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES ('remoterocketship', 'https://remote.example/job/foo/1', '2026-02-12T10:00:00Z', 0, 0, 0, 0, NULL)`)
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES ('remoterocketship', 'https://remote.example/job/foo/1', '2026-02-12T10:00:00Z', false, false, false, 0, NULL)`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,14 +141,15 @@ func TestProcessPendingSkipsReadyWhenParserRequestsRetry(t *testing.T) {
 		t.Fatalf("expected one processed job, got %d", processed)
 	}
 
-	var isReady, retryCount int
+	var isReady bool
+	var retryCount int
 	var rawJSON sql.NullString
 	err = db.SQL.QueryRowContext(context.Background(), `SELECT is_ready, retry_count, raw_json FROM raw_us_jobs WHERE url = 'https://remote.example/job/foo/1'`).Scan(&isReady, &retryCount, &rawJSON)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if isReady != 0 {
-		t.Fatalf("expected job to stay not ready, got %d", isReady)
+	if isReady {
+		t.Fatalf("expected job to stay not ready, got %t", isReady)
 	}
 	if retryCount != 1 {
 		t.Fatalf("expected retry_count to increment, got %d", retryCount)
@@ -166,8 +167,8 @@ func TestProcessPendingSkipsRemainingSourceJobsAfter429(t *testing.T) {
 	defer db.Close()
 
 	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES
-		('remoterocketship', 'https://remote.example/job/1', '2026-02-12T10:00:00Z', 0, 0, 0, 0, NULL),
-		('remoterocketship', 'https://remote.example/job/2', '2026-02-12T09:00:00Z', 0, 0, 0, 0, NULL)`)
+		('remoterocketship', 'https://remote.example/job/1', '2026-02-12T10:00:00Z', false, false, false, 0, NULL),
+		('remoterocketship', 'https://remote.example/job/2', '2026-02-12T09:00:00Z', false, false, false, 0, NULL)`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,12 +197,13 @@ func TestProcessPendingSkipsRemainingSourceJobsAfter429(t *testing.T) {
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var retryCount, isReady int
+		var retryCount int
+		var isReady bool
 		if err := rows.Scan(&retryCount, &isReady); err != nil {
 			t.Fatal(err)
 		}
-		if retryCount != 1 || isReady != 0 {
-			t.Fatalf("unexpected row state retry_count=%d is_ready=%d", retryCount, isReady)
+		if retryCount != 1 || isReady {
+			t.Fatalf("unexpected row state retry_count=%d is_ready=%t", retryCount, isReady)
 		}
 	}
 }

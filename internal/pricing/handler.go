@@ -161,8 +161,8 @@ func (h *Handler) subscribe(c *gin.Context) {
 			gensqlc.CreatePaidInternalPaymentParams{
 				UserID:        user.ID,
 				PricingPlanID: planID,
-				PaidAt:        pgtype.Text{String: now.Format(time.RFC3339Nano), Valid: true},
-				CreatedAt:     now.Format(time.RFC3339Nano),
+				PaidAt:        pgTimestamptz(now),
+				CreatedAt:     pgTimestamptz(now),
 			},
 		)
 		if err != nil {
@@ -195,7 +195,7 @@ func (h *Handler) subscribe(c *gin.Context) {
 	if cancelURL == "" {
 		cancelURL = h.cfg.PaymentCancelURL
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC()
 	paymentID, err := h.q.CreatePendingPayment(
 		c.Request.Context(),
 		gensqlc.CreatePendingPaymentParams{
@@ -204,15 +204,15 @@ func (h *Handler) subscribe(c *gin.Context) {
 			Provider:      payload.Provider,
 			PaymentMethod: payload.PaymentMethod,
 			AmountMinor:   int32(priceUSD * 100),
-			CreatedAt:     now,
+			CreatedAt:     pgTimestamptz(now),
 		},
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create payment"})
 		return
 	}
-	successURL = appendQueryParam(successURL, "payment_id", strconv.FormatInt(paymentID, 10))
-	cancelURL = appendQueryParam(cancelURL, "payment_id", strconv.FormatInt(paymentID, 10))
+	successURL = appendQueryParam(successURL, "payment_id", strconv.FormatInt(int64(paymentID), 10))
+	cancelURL = appendQueryParam(cancelURL, "payment_id", strconv.FormatInt(int64(paymentID), 10))
 
 	checkoutID, checkoutURL, providerPayload, err := h.createCryptoInvoice(planName, priceUSD, payload.PayCurrency, successURL, cancelURL, paymentID, user)
 	if err != nil {
@@ -225,7 +225,7 @@ func (h *Handler) subscribe(c *gin.Context) {
 		gensqlc.UpdatePaymentCheckoutInfoParams{
 			ProviderCheckoutID: pgtype.Text{String: checkoutID, Valid: true},
 			CheckoutUrl:        pgtype.Text{String: checkoutURL, Valid: true},
-			ProviderPayload:    pgtype.Text{String: string(payloadBytes), Valid: true},
+			ProviderPayload:    payloadBytes,
 			ID:                 paymentID,
 		},
 	)
@@ -272,11 +272,12 @@ func (h *Handler) confirmPayment(c *gin.Context) {
 	h.renderPaymentStatus(c, user.ID)
 }
 
-func (h *Handler) confirmOrActivatePayment(c *gin.Context, paymentID string, userID int64) error {
-	paymentIDInt, err := strconv.ParseInt(strings.TrimSpace(paymentID), 10, 64)
-	if err != nil {
+func (h *Handler) confirmOrActivatePayment(c *gin.Context, paymentID string, userID int32) error {
+	paymentIDInt64, err := strconv.ParseInt(strings.TrimSpace(paymentID), 10, 64)
+	if err != nil || paymentIDInt64 <= 0 || paymentIDInt64 > int64(^uint32(0)>>1) {
 		return sql.ErrNoRows
 	}
+	paymentIDInt := int32(paymentIDInt64)
 	row, err := h.q.GetPaymentForUser(
 		c.Request.Context(),
 		gensqlc.GetPaymentForUserParams{
@@ -304,7 +305,7 @@ func (h *Handler) confirmOrActivatePayment(c *gin.Context, paymentID string, use
 						mergedPayload["last_verified_at"] = time.Now().UTC().Format(time.RFC3339Nano)
 						payloadBytes, _ := json.Marshal(mergedPayload)
 						_ = h.q.UpdatePaymentPayloadByID(c.Request.Context(), gensqlc.UpdatePaymentPayloadByIDParams{
-							ProviderPayload: pgtype.Text{String: string(payloadBytes), Valid: true},
+							ProviderPayload: payloadBytes,
 							ID:              row.ID,
 						})
 					}
@@ -342,8 +343,8 @@ func (h *Handler) stripeWebhook(c *gin.Context) {
 			case "checkout.session.completed":
 				_ = h.activateSubscription(c, raw, 0)
 			case "checkout.session.expired", "payment_intent.payment_failed":
-				if paymentID, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64); err == nil {
-					_ = h.q.UpdatePaymentFailedByID(c.Request.Context(), paymentID)
+				if paymentID, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64); err == nil && paymentID > 0 && paymentID <= int64(^uint32(0)>>1) {
+					_ = h.q.UpdatePaymentFailedByID(c.Request.Context(), int32(paymentID))
 				}
 			}
 		}
@@ -378,7 +379,7 @@ func (h *Handler) cryptoWebhook(c *gin.Context) {
 		return
 	}
 	info := gateway.ParseWebhook(payload)
-	paymentID := int64(0)
+	paymentID := int32(0)
 	if strings.TrimSpace(info.OrderID) != "" {
 		fmt.Sscanf(info.OrderID, "%d", &paymentID)
 	}
@@ -396,7 +397,7 @@ func (h *Handler) cryptoWebhook(c *gin.Context) {
 }
 
 func (h *Handler) ensurePlans(c *gin.Context) error {
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UTC()
 	for _, plan := range h.planDefinitions() {
 		err := h.q.UpsertPricingPlanByCode(
 			c.Request.Context(),
@@ -406,7 +407,7 @@ func (h *Handler) ensurePlans(c *gin.Context) error {
 				BillingCycle: plan.BillingCycle,
 				DurationDays: int32(plan.DurationDays),
 				PriceUsd:     int32(plan.PriceUSD),
-				CreatedAt:    now,
+				CreatedAt:    pgTimestamptz(now),
 			},
 		)
 		if err != nil {
@@ -416,11 +417,12 @@ func (h *Handler) ensurePlans(c *gin.Context) error {
 	return nil
 }
 
-func (h *Handler) activateSubscription(c *gin.Context, paymentID string, userID int64) error {
-	paymentIDInt, err := strconv.ParseInt(strings.TrimSpace(paymentID), 10, 64)
-	if err != nil {
+func (h *Handler) activateSubscription(c *gin.Context, paymentID string, userID int32) error {
+	paymentIDInt64, err := strconv.ParseInt(strings.TrimSpace(paymentID), 10, 64)
+	if err != nil || paymentIDInt64 <= 0 || paymentIDInt64 > int64(^uint32(0)>>1) {
 		return sql.ErrNoRows
 	}
+	paymentIDInt := int32(paymentIDInt64)
 	tx, err := h.db.PGX.Begin(c.Request.Context())
 	if err != nil {
 		return err
@@ -428,7 +430,7 @@ func (h *Handler) activateSubscription(c *gin.Context, paymentID string, userID 
 	defer tx.Rollback(c.Request.Context())
 	qtx := h.q.WithTx(tx)
 
-	var paymentRowID, paymentUserID, planID int64
+	var paymentRowID, paymentUserID, planID int32
 	var paymentStatus string
 	if userID != 0 {
 		row, err := qtx.GetPaymentByIDAndUser(c.Request.Context(), gensqlc.GetPaymentByIDAndUserParams{
@@ -471,9 +473,9 @@ func (h *Handler) activateSubscription(c *gin.Context, paymentID string, userID 
 		gensqlc.CreateUserSubscriptionActiveParams{
 			UserID:        paymentUserID,
 			PricingPlanID: planID,
-			StartsAt:      now.Format(time.RFC3339Nano),
-			EndsAt:        endsAt.Format(time.RFC3339Nano),
-			CreatedAt:     now.Format(time.RFC3339Nano),
+			StartsAt:      pgTimestamptz(now),
+			EndsAt:        pgTimestamptz(endsAt),
+			CreatedAt:     pgTimestamptz(now),
 		},
 	); err != nil {
 		return err
@@ -481,7 +483,7 @@ func (h *Handler) activateSubscription(c *gin.Context, paymentID string, userID 
 	if err := qtx.MarkPaymentPaidByID(
 		c.Request.Context(),
 		gensqlc.MarkPaymentPaidByIDParams{
-			PaidAt: pgtype.Text{String: now.Format(time.RFC3339Nano), Valid: true},
+			PaidAt: pgTimestamptz(now),
 			ID:     paymentRowID,
 		},
 	); err != nil {
@@ -490,7 +492,7 @@ func (h *Handler) activateSubscription(c *gin.Context, paymentID string, userID 
 	return tx.Commit(c.Request.Context())
 }
 
-func (h *Handler) activatePlan(c *gin.Context, userID, planID int64, durationDays int, paymentID int64) error {
+func (h *Handler) activatePlan(c *gin.Context, userID, planID int32, durationDays int, paymentID int32) error {
 	now := time.Now().UTC()
 	endsAt := now.Add(time.Duration(durationDays) * 24 * time.Hour)
 	tx, err := h.db.PGX.Begin(c.Request.Context())
@@ -507,9 +509,9 @@ func (h *Handler) activatePlan(c *gin.Context, userID, planID int64, durationDay
 		gensqlc.CreateUserSubscriptionActiveParams{
 			UserID:        userID,
 			PricingPlanID: planID,
-			StartsAt:      now.Format(time.RFC3339Nano),
-			EndsAt:        endsAt.Format(time.RFC3339Nano),
-			CreatedAt:     now.Format(time.RFC3339Nano),
+			StartsAt:      pgTimestamptz(now),
+			EndsAt:        pgTimestamptz(endsAt),
+			CreatedAt:     pgTimestamptz(now),
 		},
 	); err != nil {
 		return err
@@ -517,7 +519,7 @@ func (h *Handler) activatePlan(c *gin.Context, userID, planID int64, durationDay
 	if err := qtx.MarkPaymentPaidByID(
 		c.Request.Context(),
 		gensqlc.MarkPaymentPaidByIDParams{
-			PaidAt: pgtype.Text{String: now.Format(time.RFC3339Nano), Valid: true},
+			PaidAt: pgTimestamptz(now),
 			ID:     paymentID,
 		},
 	); err != nil {
@@ -526,12 +528,13 @@ func (h *Handler) activatePlan(c *gin.Context, userID, planID int64, durationDay
 	return tx.Commit(c.Request.Context())
 }
 
-func (h *Handler) renderPaymentStatus(c *gin.Context, userID int64) {
-	paymentID, err := strconv.ParseInt(strings.TrimSpace(c.Param("paymentID")), 10, 64)
-	if err != nil {
+func (h *Handler) renderPaymentStatus(c *gin.Context, userID int32) {
+	paymentID64, err := strconv.ParseInt(strings.TrimSpace(c.Param("paymentID")), 10, 64)
+	if err != nil || paymentID64 <= 0 || paymentID64 > int64(^uint32(0)>>1) {
 		c.JSON(http.StatusNotFound, gin.H{"detail": "Payment not found"})
 		return
 	}
+	paymentID := int32(paymentID64)
 	row, err := h.q.GetPaymentStatusViewByIDAndUser(c.Request.Context(), gensqlc.GetPaymentStatusViewByIDAndUserParams{
 		ID:     paymentID,
 		UserID: userID,
@@ -555,11 +558,11 @@ func (h *Handler) renderPaymentStatus(c *gin.Context, userID int64) {
 		response["invoice_url"] = row.CheckoutUrl.String
 	}
 	if row.PaidAt.Valid {
-		response["paid_at"] = row.PaidAt.String
+		response["paid_at"] = row.PaidAt.Time.UTC().Format(time.RFC3339Nano)
 	}
-	if row.ProviderPayload.Valid {
+	if len(row.ProviderPayload) > 0 {
 		payload := map[string]any{}
-		if json.Unmarshal([]byte(row.ProviderPayload.String), &payload) == nil {
+		if json.Unmarshal(row.ProviderPayload, &payload) == nil {
 			response["crypto_payment"] = extractCryptoPayment(payload, response["checkout_url"])
 		}
 	}
@@ -614,7 +617,8 @@ func (h *Handler) subscriptionStatus(c *gin.Context) {
 	isActive := false
 	status := "expired"
 	var daysLeft any
-	if parsed, parseErr := parseUTCDateTime(subscription.EndsAt); parseErr == nil {
+	if subscription.EndsAt.Valid {
+		parsed := ensureUTC(subscription.EndsAt.Time)
 		nowUTC := ensureUTC(now)
 		if parsed.After(nowUTC) {
 			isActive = true
@@ -625,21 +629,22 @@ func (h *Handler) subscriptionStatus(c *gin.Context) {
 	if !isActive {
 		_ = h.q.DeactivateSubscriptionByID(c.Request.Context(), subscription.ID)
 	}
-	var provider, paymentMethod, providerPayload pgtype.Text
+	var provider, paymentMethod string
+	var providerPayload []byte
 	if meta, metaErr := h.q.GetLatestPaidPaymentMetaByUserAndPlan(c.Request.Context(), gensqlc.GetLatestPaidPaymentMetaByUserAndPlanParams{
 		UserID:        user.ID,
 		PricingPlanID: subscription.ID_2,
 	}); metaErr == nil {
-		provider = pgtype.Text{String: meta.Provider, Valid: true}
-		paymentMethod = pgtype.Text{String: meta.PaymentMethod, Valid: true}
+		provider = meta.Provider
+		paymentMethod = meta.PaymentMethod
 		providerPayload = meta.ProviderPayload
 	}
 	cancelAtPeriodEnd := false
 	canCancel := false
 	var stripeSubscriptionID any
-	if provider.Valid && provider.String == "stripe" && providerPayload.Valid && strings.TrimSpace(providerPayload.String) != "" {
+	if provider == "stripe" && len(providerPayload) > 0 {
 		payload := map[string]any{}
-		if json.Unmarshal([]byte(providerPayload.String), &payload) == nil {
+		if json.Unmarshal(providerPayload, &payload) == nil {
 			if rawID, ok := payload["stripe_subscription_id"].(string); ok && strings.TrimSpace(rawID) != "" {
 				stripeSubscriptionID = strings.TrimSpace(rawID)
 			}
@@ -653,10 +658,10 @@ func (h *Handler) subscriptionStatus(c *gin.Context) {
 		"days_left":              daysLeft,
 		"plan_code":              subscription.Code,
 		"plan_name":              subscription.Name,
-		"starts_at":              nullStringValue(pgtype.Text{String: subscription.StartsAt, Valid: strings.TrimSpace(subscription.StartsAt) != ""}),
-		"ends_at":                nullStringValue(pgtype.Text{String: subscription.EndsAt, Valid: strings.TrimSpace(subscription.EndsAt) != ""}),
-		"provider":               nullStringValue(provider),
-		"payment_method":         nullStringValue(paymentMethod),
+		"starts_at":              timestamptzStringOrNil(subscription.StartsAt),
+		"ends_at":                timestamptzStringOrNil(subscription.EndsAt),
+		"provider":               emptyStringToNil(provider),
+		"payment_method":         emptyStringToNil(paymentMethod),
 		"can_cancel":             canCancel,
 		"cancel_at_period_end":   cancelAtPeriodEnd,
 		"stripe_subscription_id": stripeSubscriptionID,
@@ -678,8 +683,8 @@ func (h *Handler) cancelSubscription(c *gin.Context) {
 		return
 	}
 	payload := map[string]any{}
-	if row.ProviderPayload.Valid && strings.TrimSpace(row.ProviderPayload.String) != "" {
-		_ = json.Unmarshal([]byte(row.ProviderPayload.String), &payload)
+	if len(row.ProviderPayload) > 0 {
+		_ = json.Unmarshal(row.ProviderPayload, &payload)
 	}
 	stripeSubscriptionID, _ := payload["stripe_subscription_id"].(string)
 	if strings.TrimSpace(stripeSubscriptionID) == "" {
@@ -689,7 +694,7 @@ func (h *Handler) cancelSubscription(c *gin.Context) {
 	payload["stripe_cancel_at_period_end"] = true
 	payloadBytes, _ := json.Marshal(payload)
 	if err := h.q.UpdatePaymentPayloadByID(c.Request.Context(), gensqlc.UpdatePaymentPayloadByIDParams{
-		ProviderPayload: pgtype.Text{String: string(payloadBytes), Valid: true},
+		ProviderPayload: payloadBytes,
 		ID:              row.ID,
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to cancel Stripe subscription"})
@@ -713,7 +718,7 @@ func validateProviderMethod(provider, paymentMethod string) error {
 	return nil
 }
 
-func (h *Handler) createCryptoInvoice(planName string, priceUSD int, payCurrency, successURL, cancelURL string, paymentID int64, user *auth.User) (string, string, map[string]any, error) {
+func (h *Handler) createCryptoInvoice(planName string, priceUSD int, payCurrency, successURL, cancelURL string, paymentID int32, user *auth.User) (string, string, map[string]any, error) {
 	gateway, err := paymentcrypto.GetGateway(h.cfg)
 	if err != nil {
 		return "", "", nil, err
@@ -753,10 +758,10 @@ func appendQueryParam(rawURL, key, value string) string {
 	return parsed.String()
 }
 
-func mergeProviderPayload(existing pgtype.Text, latest map[string]any) (map[string]any, error) {
+func mergeProviderPayload(existing []byte, latest map[string]any) (map[string]any, error) {
 	merged := map[string]any{}
-	if existing.Valid && strings.TrimSpace(existing.String) != "" {
-		if err := json.Unmarshal([]byte(existing.String), &merged); err != nil {
+	if len(existing) > 0 {
+		if err := json.Unmarshal(existing, &merged); err != nil {
 			return nil, err
 		}
 	}
@@ -766,12 +771,12 @@ func mergeProviderPayload(existing pgtype.Text, latest map[string]any) (map[stri
 	return merged, nil
 }
 
-func extractProviderPayloadStatus(existing pgtype.Text) string {
-	if !existing.Valid || strings.TrimSpace(existing.String) == "" {
+func extractProviderPayloadStatus(existing []byte) string {
+	if len(existing) == 0 {
 		return "pending"
 	}
 	payload := map[string]any{}
-	if err := json.Unmarshal([]byte(existing.String), &payload); err != nil {
+	if err := json.Unmarshal(existing, &payload); err != nil {
 		return "pending"
 	}
 	if strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", payload["mode"]))) == "local_stub" {
@@ -817,14 +822,14 @@ func (h *Handler) planDefinitions() []struct {
 	return plans
 }
 
-func lookupNowPaymentsRefs(payload map[string]any) (int64, string) {
-	var paymentID int64
+func lookupNowPaymentsRefs(payload map[string]any) (int32, string) {
+	var paymentID int32
 	if rawOrderID, ok := payload["order_id"]; ok {
 		switch value := rawOrderID.(type) {
 		case string:
 			fmt.Sscanf(value, "%d", &paymentID)
 		case float64:
-			paymentID = int64(value)
+			paymentID = int32(value)
 		}
 	}
 	providerID := ""
@@ -834,7 +839,7 @@ func lookupNowPaymentsRefs(payload map[string]any) (int64, string) {
 	return paymentID, providerID
 }
 
-func (h *Handler) lookupPaymentForWebhook(c *gin.Context, paymentID int64, providerCheckoutID string) (int64, int64, int64, int, error) {
+func (h *Handler) lookupPaymentForWebhook(c *gin.Context, paymentID int32, providerCheckoutID string) (int32, int32, int32, int, error) {
 	switch {
 	case paymentID != 0:
 		row, err := h.q.GetPaymentForWebhookByPaymentID(c.Request.Context(), paymentID)
@@ -942,11 +947,22 @@ func nestedMap(value any) map[string]any {
 	return map[string]any{}
 }
 
-func nullStringValue(value pgtype.Text) any {
+func emptyStringToNil(value string) any {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
+}
+
+func timestamptzStringOrNil(value pgtype.Timestamptz) any {
 	if !value.Valid {
 		return nil
 	}
-	return value.String
+	return value.Time.UTC().Format(time.RFC3339Nano)
+}
+
+func pgTimestamptz(value time.Time) pgtype.Timestamptz {
+	return pgtype.Timestamptz{Time: value, Valid: true}
 }
 
 func firstNonEmpty(values ...any) any {

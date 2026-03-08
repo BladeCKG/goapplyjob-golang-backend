@@ -7,19 +7,21 @@ package sqlc
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const clearAppliedJobActionsByUser = `-- name: ClearAppliedJobActionsByUser :execrows
 UPDATE user_job_actions
-SET is_applied = 0,
+SET is_applied = false,
     updated_at = $1
 WHERE user_id = $2
-  AND is_applied = 1
+  AND is_applied = true
 `
 
 type ClearAppliedJobActionsByUserParams struct {
-	UpdatedAt string `json:"updated_at"`
-	UserID    int64  `json:"user_id"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	UserID    int32              `json:"user_id"`
 }
 
 func (q *Queries) ClearAppliedJobActionsByUser(ctx context.Context, arg ClearAppliedJobActionsByUserParams) (int64, error) {
@@ -32,15 +34,15 @@ func (q *Queries) ClearAppliedJobActionsByUser(ctx context.Context, arg ClearApp
 
 const clearHiddenJobActionsByUser = `-- name: ClearHiddenJobActionsByUser :execrows
 UPDATE user_job_actions
-SET is_hidden = 0,
+SET is_hidden = false,
     updated_at = $1
 WHERE user_id = $2
-  AND is_hidden = 1
+  AND is_hidden = true
 `
 
 type ClearHiddenJobActionsByUserParams struct {
-	UpdatedAt string `json:"updated_at"`
-	UserID    int64  `json:"user_id"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	UserID    int32              `json:"user_id"`
 }
 
 func (q *Queries) ClearHiddenJobActionsByUser(ctx context.Context, arg ClearHiddenJobActionsByUserParams) (int64, error) {
@@ -53,15 +55,15 @@ func (q *Queries) ClearHiddenJobActionsByUser(ctx context.Context, arg ClearHidd
 
 const clearSavedJobActionsByUser = `-- name: ClearSavedJobActionsByUser :execrows
 UPDATE user_job_actions
-SET is_saved = 0,
+SET is_saved = false,
     updated_at = $1
 WHERE user_id = $2
-  AND is_saved = 1
+  AND is_saved = true
 `
 
 type ClearSavedJobActionsByUserParams struct {
-	UpdatedAt string `json:"updated_at"`
-	UserID    int64  `json:"user_id"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	UserID    int32              `json:"user_id"`
 }
 
 func (q *Queries) ClearSavedJobActionsByUser(ctx context.Context, arg ClearSavedJobActionsByUserParams) (int64, error) {
@@ -78,7 +80,7 @@ FROM parsed_jobs
 WHERE id = $1
 `
 
-func (q *Queries) CountParsedJobsByID(ctx context.Context, id int64) (int64, error) {
+func (q *Queries) CountParsedJobsByID(ctx context.Context, id int32) (int64, error) {
 	row := q.db.QueryRow(ctx, countParsedJobsByID, id)
 	var count int64
 	err := row.Scan(&count)
@@ -94,16 +96,16 @@ LIMIT 1
 `
 
 type GetUserJobActionByUserAndJobParams struct {
-	UserID      int64 `json:"user_id"`
-	ParsedJobID int64 `json:"parsed_job_id"`
+	UserID      int32 `json:"user_id"`
+	ParsedJobID int32 `json:"parsed_job_id"`
 }
 
 type GetUserJobActionByUserAndJobRow struct {
-	ParsedJobID int64  `json:"parsed_job_id"`
-	IsApplied   int32  `json:"is_applied"`
-	IsSaved     int32  `json:"is_saved"`
-	IsHidden    int32  `json:"is_hidden"`
-	UpdatedAt   string `json:"updated_at"`
+	ParsedJobID int32              `json:"parsed_job_id"`
+	IsApplied   bool               `json:"is_applied"`
+	IsSaved     bool               `json:"is_saved"`
+	IsHidden    bool               `json:"is_hidden"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) GetUserJobActionByUserAndJob(ctx context.Context, arg GetUserJobActionByUserAndJobParams) (*GetUserJobActionByUserAndJobRow, error) {
@@ -127,16 +129,16 @@ WHERE user_id = $1
 `
 
 type GetUserJobActionsByJobIDsParams struct {
-	UserID  int64   `json:"user_id"`
+	UserID  int32   `json:"user_id"`
 	Column2 []int64 `json:"column_2"`
 }
 
 type GetUserJobActionsByJobIDsRow struct {
-	ParsedJobID int64  `json:"parsed_job_id"`
-	IsApplied   int32  `json:"is_applied"`
-	IsSaved     int32  `json:"is_saved"`
-	IsHidden    int32  `json:"is_hidden"`
-	UpdatedAt   string `json:"updated_at"`
+	ParsedJobID int32              `json:"parsed_job_id"`
+	IsApplied   bool               `json:"is_applied"`
+	IsSaved     bool               `json:"is_saved"`
+	IsHidden    bool               `json:"is_hidden"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) GetUserJobActionsByJobIDs(ctx context.Context, arg GetUserJobActionsByJobIDsParams) ([]*GetUserJobActionsByJobIDsRow, error) {
@@ -166,9 +168,9 @@ func (q *Queries) GetUserJobActionsByJobIDs(ctx context.Context, arg GetUserJobA
 }
 
 const getUserJobActionsSummary = `-- name: GetUserJobActionsSummary :one
-SELECT COALESCE(SUM(is_applied), 0)::bigint,
-       COALESCE(SUM(is_saved), 0)::bigint,
-       COALESCE(SUM(is_hidden), 0)::bigint
+SELECT COUNT(*) FILTER (WHERE is_applied = true)::bigint,
+       COUNT(*) FILTER (WHERE is_saved = true)::bigint,
+       COUNT(*) FILTER (WHERE is_hidden = true)::bigint
 FROM user_job_actions
 WHERE user_id = $1
 `
@@ -179,7 +181,7 @@ type GetUserJobActionsSummaryRow struct {
 	Column3 int64 `json:"column_3"`
 }
 
-func (q *Queries) GetUserJobActionsSummary(ctx context.Context, userID int64) (*GetUserJobActionsSummaryRow, error) {
+func (q *Queries) GetUserJobActionsSummary(ctx context.Context, userID int32) (*GetUserJobActionsSummaryRow, error) {
 	row := q.db.QueryRow(ctx, getUserJobActionsSummary, userID)
 	var i GetUserJobActionsSummaryRow
 	err := row.Scan(&i.Column1, &i.Column2, &i.Column3)
@@ -188,14 +190,14 @@ func (q *Queries) GetUserJobActionsSummary(ctx context.Context, userID int64) (*
 
 const insertUserJobActionDefaults = `-- name: InsertUserJobActionDefaults :exec
 INSERT INTO user_job_actions (user_id, parsed_job_id, is_applied, is_saved, is_hidden, updated_at, created_at)
-VALUES ($1, $2, 0, 0, 0, $3, $4)
+VALUES ($1, $2, false, false, false, $3, $4)
 `
 
 type InsertUserJobActionDefaultsParams struct {
-	UserID      int64  `json:"user_id"`
-	ParsedJobID int64  `json:"parsed_job_id"`
-	UpdatedAt   string `json:"updated_at"`
-	CreatedAt   string `json:"created_at"`
+	UserID      int32              `json:"user_id"`
+	ParsedJobID int32              `json:"parsed_job_id"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) InsertUserJobActionDefaults(ctx context.Context, arg InsertUserJobActionDefaultsParams) error {
@@ -219,12 +221,12 @@ WHERE user_id = $5
 `
 
 type UpdateUserJobActionByUserAndJobParams struct {
-	IsApplied   int32  `json:"is_applied"`
-	IsSaved     int32  `json:"is_saved"`
-	IsHidden    int32  `json:"is_hidden"`
-	UpdatedAt   string `json:"updated_at"`
-	UserID      int64  `json:"user_id"`
-	ParsedJobID int64  `json:"parsed_job_id"`
+	IsApplied   bool               `json:"is_applied"`
+	IsSaved     bool               `json:"is_saved"`
+	IsHidden    bool               `json:"is_hidden"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	UserID      int32              `json:"user_id"`
+	ParsedJobID int32              `json:"parsed_job_id"`
 }
 
 func (q *Queries) UpdateUserJobActionByUserAndJob(ctx context.Context, arg UpdateUserJobActionByUserAndJobParams) error {

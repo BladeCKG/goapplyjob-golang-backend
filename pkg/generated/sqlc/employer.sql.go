@@ -24,31 +24,31 @@ INSERT INTO employer_jobs (
 `
 
 type CreateEmployerJobDraftParams struct {
-	OrganizationID  int64         `json:"organization_id"`
-	CreatedByUserID int64         `json:"created_by_user_id"`
-	Status          string        `json:"status"`
-	Title           pgtype.Text   `json:"title"`
-	Department      pgtype.Text   `json:"department"`
-	Description     pgtype.Text   `json:"description"`
-	Requirements    pgtype.Text   `json:"requirements"`
-	Benefits        pgtype.Text   `json:"benefits"`
-	EmploymentType  pgtype.Text   `json:"employment_type"`
-	LocationType    pgtype.Text   `json:"location_type"`
-	LocationsJson   pgtype.Text   `json:"locations_json"`
-	Seniority       pgtype.Text   `json:"seniority"`
-	TechStack       pgtype.Text   `json:"tech_stack"`
-	ApplyUrl        pgtype.Text   `json:"apply_url"`
-	ApplyEmail      pgtype.Text   `json:"apply_email"`
-	SalaryCurrency  pgtype.Text   `json:"salary_currency"`
-	SalaryPeriod    pgtype.Text   `json:"salary_period"`
-	SalaryMin       pgtype.Float8 `json:"salary_min"`
-	SalaryMax       pgtype.Float8 `json:"salary_max"`
-	PostingFeeUsd   int32         `json:"posting_fee_usd"`
-	CreatedAt       string        `json:"created_at"`
-	UpdatedAt       string        `json:"updated_at"`
+	OrganizationID  int32              `json:"organization_id"`
+	CreatedByUserID int32              `json:"created_by_user_id"`
+	Status          string             `json:"status"`
+	Title           pgtype.Text        `json:"title"`
+	Department      pgtype.Text        `json:"department"`
+	Description     pgtype.Text        `json:"description"`
+	Requirements    pgtype.Text        `json:"requirements"`
+	Benefits        pgtype.Text        `json:"benefits"`
+	EmploymentType  pgtype.Text        `json:"employment_type"`
+	LocationType    pgtype.Text        `json:"location_type"`
+	LocationsJson   []byte             `json:"locations_json"`
+	Seniority       pgtype.Text        `json:"seniority"`
+	TechStack       []byte             `json:"tech_stack"`
+	ApplyUrl        pgtype.Text        `json:"apply_url"`
+	ApplyEmail      pgtype.Text        `json:"apply_email"`
+	SalaryCurrency  pgtype.Text        `json:"salary_currency"`
+	SalaryPeriod    pgtype.Text        `json:"salary_period"`
+	SalaryMin       pgtype.Float8      `json:"salary_min"`
+	SalaryMax       pgtype.Float8      `json:"salary_max"`
+	PostingFeeUsd   int32              `json:"posting_fee_usd"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
-func (q *Queries) CreateEmployerJobDraft(ctx context.Context, arg CreateEmployerJobDraftParams) (int64, error) {
+func (q *Queries) CreateEmployerJobDraft(ctx context.Context, arg CreateEmployerJobDraftParams) (int32, error) {
 	row := q.db.QueryRow(ctx, createEmployerJobDraft,
 		arg.OrganizationID,
 		arg.CreatedByUserID,
@@ -73,7 +73,7 @@ func (q *Queries) CreateEmployerJobDraft(ctx context.Context, arg CreateEmployer
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
-	var id int64
+	var id int32
 	err := row.Scan(&id)
 	return id, err
 }
@@ -85,14 +85,14 @@ RETURNING id
 `
 
 type CreateEmployerOrganizationParams struct {
-	Name            string `json:"name"`
-	CreatedByUserID int64  `json:"created_by_user_id"`
-	CreatedAt       string `json:"created_at"`
+	Name            string             `json:"name"`
+	CreatedByUserID int32              `json:"created_by_user_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
-func (q *Queries) CreateEmployerOrganization(ctx context.Context, arg CreateEmployerOrganizationParams) (int64, error) {
+func (q *Queries) CreateEmployerOrganization(ctx context.Context, arg CreateEmployerOrganizationParams) (int32, error) {
 	row := q.db.QueryRow(ctx, createEmployerOrganization, arg.Name, arg.CreatedByUserID, arg.CreatedAt)
-	var id int64
+	var id int32
 	err := row.Scan(&id)
 	return id, err
 }
@@ -103,9 +103,9 @@ VALUES ($1, $2, 'owner', $3)
 `
 
 type CreateEmployerOrganizationOwnerMembershipParams struct {
-	OrganizationID int64  `json:"organization_id"`
-	UserID         int64  `json:"user_id"`
-	CreatedAt      string `json:"created_at"`
+	OrganizationID int32              `json:"organization_id"`
+	UserID         int32              `json:"user_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) CreateEmployerOrganizationOwnerMembership(ctx context.Context, arg CreateEmployerOrganizationOwnerMembershipParams) error {
@@ -148,37 +148,37 @@ LIMIT 1
 `
 
 type GetEmployerJobByIDRow struct {
-	ID               int64         `json:"id"`
-	OrganizationID   int64         `json:"organization_id"`
-	Status           string        `json:"status"`
-	Title            pgtype.Text   `json:"title"`
-	Slug             pgtype.Text   `json:"slug"`
-	Department       pgtype.Text   `json:"department"`
-	Description      pgtype.Text   `json:"description"`
-	Requirements     pgtype.Text   `json:"requirements"`
-	Benefits         pgtype.Text   `json:"benefits"`
-	EmploymentType   pgtype.Text   `json:"employment_type"`
-	LocationType     pgtype.Text   `json:"location_type"`
-	LocationsJson    pgtype.Text   `json:"locations_json"`
-	Seniority        pgtype.Text   `json:"seniority"`
-	TechStack        pgtype.Text   `json:"tech_stack"`
-	ApplyUrl         pgtype.Text   `json:"apply_url"`
-	ApplyEmail       pgtype.Text   `json:"apply_email"`
-	SalaryCurrency   pgtype.Text   `json:"salary_currency"`
-	SalaryPeriod     pgtype.Text   `json:"salary_period"`
-	SalaryMin        pgtype.Float8 `json:"salary_min"`
-	SalaryMax        pgtype.Float8 `json:"salary_max"`
-	PostingFeeUsd    int32         `json:"posting_fee_usd"`
-	PostingFeeStatus string        `json:"posting_fee_status"`
-	PostingFeePaidAt pgtype.Text   `json:"posting_fee_paid_at"`
-	PublishedAt      pgtype.Text   `json:"published_at"`
-	ClosedAt         pgtype.Text   `json:"closed_at"`
-	ExpiresAt        pgtype.Text   `json:"expires_at"`
-	CreatedAt        string        `json:"created_at"`
-	UpdatedAt        string        `json:"updated_at"`
+	ID               int32              `json:"id"`
+	OrganizationID   int32              `json:"organization_id"`
+	Status           string             `json:"status"`
+	Title            pgtype.Text        `json:"title"`
+	Slug             pgtype.Text        `json:"slug"`
+	Department       pgtype.Text        `json:"department"`
+	Description      pgtype.Text        `json:"description"`
+	Requirements     pgtype.Text        `json:"requirements"`
+	Benefits         pgtype.Text        `json:"benefits"`
+	EmploymentType   pgtype.Text        `json:"employment_type"`
+	LocationType     pgtype.Text        `json:"location_type"`
+	LocationsJson    []byte             `json:"locations_json"`
+	Seniority        pgtype.Text        `json:"seniority"`
+	TechStack        []byte             `json:"tech_stack"`
+	ApplyUrl         pgtype.Text        `json:"apply_url"`
+	ApplyEmail       pgtype.Text        `json:"apply_email"`
+	SalaryCurrency   pgtype.Text        `json:"salary_currency"`
+	SalaryPeriod     pgtype.Text        `json:"salary_period"`
+	SalaryMin        pgtype.Float8      `json:"salary_min"`
+	SalaryMax        pgtype.Float8      `json:"salary_max"`
+	PostingFeeUsd    int32              `json:"posting_fee_usd"`
+	PostingFeeStatus string             `json:"posting_fee_status"`
+	PostingFeePaidAt pgtype.Timestamptz `json:"posting_fee_paid_at"`
+	PublishedAt      pgtype.Timestamptz `json:"published_at"`
+	ClosedAt         pgtype.Timestamptz `json:"closed_at"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
-func (q *Queries) GetEmployerJobByID(ctx context.Context, id int64) (*GetEmployerJobByIDRow, error) {
+func (q *Queries) GetEmployerJobByID(ctx context.Context, id int32) (*GetEmployerJobByIDRow, error) {
 	row := q.db.QueryRow(ctx, getEmployerJobByID, id)
 	var i GetEmployerJobByIDRow
 	err := row.Scan(
@@ -222,13 +222,13 @@ LIMIT 1
 `
 
 type GetEmployerJobForMemberCheckRow struct {
-	ID               int64  `json:"id"`
-	OrganizationID   int64  `json:"organization_id"`
+	ID               int32  `json:"id"`
+	OrganizationID   int32  `json:"organization_id"`
 	Status           string `json:"status"`
 	PostingFeeStatus string `json:"posting_fee_status"`
 }
 
-func (q *Queries) GetEmployerJobForMemberCheck(ctx context.Context, id int64) (*GetEmployerJobForMemberCheckRow, error) {
+func (q *Queries) GetEmployerJobForMemberCheck(ctx context.Context, id int32) (*GetEmployerJobForMemberCheckRow, error) {
 	row := q.db.QueryRow(ctx, getEmployerJobForMemberCheck, id)
 	var i GetEmployerJobForMemberCheckRow
 	err := row.Scan(
@@ -249,8 +249,8 @@ LIMIT 1
 `
 
 type GetEmployerOrganizationMemberRoleParams struct {
-	OrganizationID int64 `json:"organization_id"`
-	UserID         int64 `json:"user_id"`
+	OrganizationID int32 `json:"organization_id"`
+	UserID         int32 `json:"user_id"`
 }
 
 func (q *Queries) GetEmployerOrganizationMemberRole(ctx context.Context, arg GetEmployerOrganizationMemberRoleParams) (string, error) {
@@ -270,11 +270,11 @@ LIMIT 1
 `
 
 type GetOwnerEmployerOrganizationByUserRow struct {
-	OrganizationID int64  `json:"organization_id"`
+	OrganizationID int32  `json:"organization_id"`
 	Role           string `json:"role"`
 }
 
-func (q *Queries) GetOwnerEmployerOrganizationByUser(ctx context.Context, userID int64) (*GetOwnerEmployerOrganizationByUserRow, error) {
+func (q *Queries) GetOwnerEmployerOrganizationByUser(ctx context.Context, userID int32) (*GetOwnerEmployerOrganizationByUserRow, error) {
 	row := q.db.QueryRow(ctx, getOwnerEmployerOrganizationByUser, userID)
 	var i GetOwnerEmployerOrganizationByUserRow
 	err := row.Scan(&i.OrganizationID, &i.Role)
@@ -287,11 +287,11 @@ VALUES ($1, $2, $3, $4, $5)
 `
 
 type InsertEmployerJobAuditEventParams struct {
-	EmployerJobID int64       `json:"employer_job_id"`
-	ActorUserID   pgtype.Int8 `json:"actor_user_id"`
-	EventType     string      `json:"event_type"`
-	DetailJson    pgtype.Text `json:"detail_json"`
-	CreatedAt     string      `json:"created_at"`
+	EmployerJobID int32              `json:"employer_job_id"`
+	ActorUserID   pgtype.Int4        `json:"actor_user_id"`
+	EventType     string             `json:"event_type"`
+	DetailJson    []byte             `json:"detail_json"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) InsertEmployerJobAuditEvent(ctx context.Context, arg InsertEmployerJobAuditEventParams) error {
@@ -316,20 +316,20 @@ ORDER BY j.updated_at DESC, j.id DESC
 `
 
 type ListEmployerJobIDsByUserParams struct {
-	UserID  int64       `json:"user_id"`
+	UserID  int32       `json:"user_id"`
 	Column2 interface{} `json:"column_2"`
 	Column3 interface{} `json:"column_3"`
 }
 
-func (q *Queries) ListEmployerJobIDsByUser(ctx context.Context, arg ListEmployerJobIDsByUserParams) ([]int64, error) {
+func (q *Queries) ListEmployerJobIDsByUser(ctx context.Context, arg ListEmployerJobIDsByUserParams) ([]int32, error) {
 	rows, err := q.db.Query(ctx, listEmployerJobIDsByUser, arg.UserID, arg.Column2, arg.Column3)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []int64
+	var items []int32
 	for rows.Next() {
-		var id int64
+		var id int32
 		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
@@ -350,12 +350,12 @@ ORDER BY o.created_at DESC, o.id DESC
 `
 
 type ListEmployerOrganizationsByUserRow struct {
-	ID   int64  `json:"id"`
+	ID   int32  `json:"id"`
 	Name string `json:"name"`
 	Role string `json:"role"`
 }
 
-func (q *Queries) ListEmployerOrganizationsByUser(ctx context.Context, userID int64) ([]*ListEmployerOrganizationsByUserRow, error) {
+func (q *Queries) ListEmployerOrganizationsByUser(ctx context.Context, userID int32) ([]*ListEmployerOrganizationsByUserRow, error) {
 	rows, err := q.db.Query(ctx, listEmployerOrganizationsByUser, userID)
 	if err != nil {
 		return nil, err
@@ -384,9 +384,9 @@ WHERE id = $3
 `
 
 type MarkEmployerJobPostingFeePaidParams struct {
-	PostingFeePaidAt pgtype.Text `json:"posting_fee_paid_at"`
-	UpdatedAt        string      `json:"updated_at"`
-	ID               int64       `json:"id"`
+	PostingFeePaidAt pgtype.Timestamptz `json:"posting_fee_paid_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	ID               int32              `json:"id"`
 }
 
 func (q *Queries) MarkEmployerJobPostingFeePaid(ctx context.Context, arg MarkEmployerJobPostingFeePaidParams) error {
@@ -418,25 +418,25 @@ WHERE id = $19
 `
 
 type UpdateEmployerJobPatchParams struct {
-	Title          pgtype.Text   `json:"title"`
-	Department     pgtype.Text   `json:"department"`
-	Description    pgtype.Text   `json:"description"`
-	Requirements   pgtype.Text   `json:"requirements"`
-	Benefits       pgtype.Text   `json:"benefits"`
-	EmploymentType pgtype.Text   `json:"employment_type"`
-	LocationType   pgtype.Text   `json:"location_type"`
-	LocationsJson  pgtype.Text   `json:"locations_json"`
-	Seniority      pgtype.Text   `json:"seniority"`
-	TechStack      pgtype.Text   `json:"tech_stack"`
-	ApplyUrl       pgtype.Text   `json:"apply_url"`
-	ApplyEmail     pgtype.Text   `json:"apply_email"`
-	SalaryCurrency pgtype.Text   `json:"salary_currency"`
-	SalaryPeriod   pgtype.Text   `json:"salary_period"`
-	SalaryMin      pgtype.Float8 `json:"salary_min"`
-	SalaryMax      pgtype.Float8 `json:"salary_max"`
-	Status         string        `json:"status"`
-	UpdatedAt      string        `json:"updated_at"`
-	ID             int64         `json:"id"`
+	Title          pgtype.Text        `json:"title"`
+	Department     pgtype.Text        `json:"department"`
+	Description    pgtype.Text        `json:"description"`
+	Requirements   pgtype.Text        `json:"requirements"`
+	Benefits       pgtype.Text        `json:"benefits"`
+	EmploymentType pgtype.Text        `json:"employment_type"`
+	LocationType   pgtype.Text        `json:"location_type"`
+	LocationsJson  []byte             `json:"locations_json"`
+	Seniority      pgtype.Text        `json:"seniority"`
+	TechStack      []byte             `json:"tech_stack"`
+	ApplyUrl       pgtype.Text        `json:"apply_url"`
+	ApplyEmail     pgtype.Text        `json:"apply_email"`
+	SalaryCurrency pgtype.Text        `json:"salary_currency"`
+	SalaryPeriod   pgtype.Text        `json:"salary_period"`
+	SalaryMin      pgtype.Float8      `json:"salary_min"`
+	SalaryMax      pgtype.Float8      `json:"salary_max"`
+	Status         string             `json:"status"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ID             int32              `json:"id"`
 }
 
 func (q *Queries) UpdateEmployerJobPatch(ctx context.Context, arg UpdateEmployerJobPatchParams) error {
@@ -472,9 +472,9 @@ WHERE id = $3
 `
 
 type UpdateEmployerJobSlugParams struct {
-	Slug      pgtype.Text `json:"slug"`
-	UpdatedAt string      `json:"updated_at"`
-	ID        int64       `json:"id"`
+	Slug      pgtype.Text        `json:"slug"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ID        int32              `json:"id"`
 }
 
 func (q *Queries) UpdateEmployerJobSlug(ctx context.Context, arg UpdateEmployerJobSlugParams) error {
@@ -491,10 +491,10 @@ WHERE id = $4
 `
 
 type UpdateEmployerJobStatusClosedParams struct {
-	Status    string      `json:"status"`
-	ClosedAt  pgtype.Text `json:"closed_at"`
-	UpdatedAt string      `json:"updated_at"`
-	ID        int64       `json:"id"`
+	Status    string             `json:"status"`
+	ClosedAt  pgtype.Timestamptz `json:"closed_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ID        int32              `json:"id"`
 }
 
 func (q *Queries) UpdateEmployerJobStatusClosed(ctx context.Context, arg UpdateEmployerJobStatusClosedParams) error {
@@ -518,11 +518,11 @@ WHERE id = $5
 `
 
 type UpdateEmployerJobStatusPublishedParams struct {
-	Status      string      `json:"status"`
-	PublishedAt pgtype.Text `json:"published_at"`
-	ExpiresAt   pgtype.Text `json:"expires_at"`
-	UpdatedAt   string      `json:"updated_at"`
-	ID          int64       `json:"id"`
+	Status      string             `json:"status"`
+	PublishedAt pgtype.Timestamptz `json:"published_at"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID          int32              `json:"id"`
 }
 
 func (q *Queries) UpdateEmployerJobStatusPublished(ctx context.Context, arg UpdateEmployerJobStatusPublishedParams) error {
@@ -544,9 +544,9 @@ WHERE id = $3
 `
 
 type UpdateEmployerJobStatusSimpleParams struct {
-	Status    string `json:"status"`
-	UpdatedAt string `json:"updated_at"`
-	ID        int64  `json:"id"`
+	Status    string             `json:"status"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ID        int32              `json:"id"`
 }
 
 func (q *Queries) UpdateEmployerJobStatusSimple(ctx context.Context, arg UpdateEmployerJobStatusSimpleParams) error {

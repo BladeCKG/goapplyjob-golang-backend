@@ -26,7 +26,7 @@ func (s *Service) RecheckSkippable(ctx context.Context, batchSize int) (int, int
 	clearedTotal := 0
 	var lastID int64
 	for {
-		rows, err := s.DB.SQL.QueryContext(ctx, `SELECT id, url FROM raw_us_jobs WHERE is_skippable = 1 AND id > ? ORDER BY id ASC LIMIT ?`, lastID, batchSize)
+		rows, err := s.DB.SQL.QueryContext(ctx, `SELECT id, url FROM raw_us_jobs WHERE is_skippable = true AND id > ? ORDER BY id ASC LIMIT ?`, lastID, batchSize)
 		if err != nil {
 			return checkedTotal, clearedTotal, err
 		}
@@ -67,7 +67,7 @@ func (s *Service) RecheckSkippable(ctx context.Context, batchSize int) (int, int
 			}
 		}
 		for _, jobID := range clearedIDs {
-			if _, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_skippable = 0, is_ready = 0 WHERE id = ?`, jobID); err != nil {
+			if _, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_skippable = false, is_ready = false WHERE id = ?`, jobID); err != nil {
 				return checkedTotal, clearedTotal, err
 			}
 			clearedTotal++

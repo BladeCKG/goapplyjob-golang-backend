@@ -19,20 +19,20 @@ RETURNING id
 `
 
 type CreatePaidInternalPaymentParams struct {
-	UserID        int64       `json:"user_id"`
-	PricingPlanID int64       `json:"pricing_plan_id"`
-	PaidAt        pgtype.Text `json:"paid_at"`
-	CreatedAt     string      `json:"created_at"`
+	UserID        int32              `json:"user_id"`
+	PricingPlanID int32              `json:"pricing_plan_id"`
+	PaidAt        pgtype.Timestamptz `json:"paid_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
-func (q *Queries) CreatePaidInternalPayment(ctx context.Context, arg CreatePaidInternalPaymentParams) (int64, error) {
+func (q *Queries) CreatePaidInternalPayment(ctx context.Context, arg CreatePaidInternalPaymentParams) (int32, error) {
 	row := q.db.QueryRow(ctx, createPaidInternalPayment,
 		arg.UserID,
 		arg.PricingPlanID,
 		arg.PaidAt,
 		arg.CreatedAt,
 	)
-	var id int64
+	var id int32
 	err := row.Scan(&id)
 	return id, err
 }
@@ -45,15 +45,15 @@ RETURNING id
 `
 
 type CreatePendingPaymentParams struct {
-	UserID        int64  `json:"user_id"`
-	PricingPlanID int64  `json:"pricing_plan_id"`
-	Provider      string `json:"provider"`
-	PaymentMethod string `json:"payment_method"`
-	AmountMinor   int32  `json:"amount_minor"`
-	CreatedAt     string `json:"created_at"`
+	UserID        int32              `json:"user_id"`
+	PricingPlanID int32              `json:"pricing_plan_id"`
+	Provider      string             `json:"provider"`
+	PaymentMethod string             `json:"payment_method"`
+	AmountMinor   int32              `json:"amount_minor"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
-func (q *Queries) CreatePendingPayment(ctx context.Context, arg CreatePendingPaymentParams) (int64, error) {
+func (q *Queries) CreatePendingPayment(ctx context.Context, arg CreatePendingPaymentParams) (int32, error) {
 	row := q.db.QueryRow(ctx, createPendingPayment,
 		arg.UserID,
 		arg.PricingPlanID,
@@ -62,22 +62,22 @@ func (q *Queries) CreatePendingPayment(ctx context.Context, arg CreatePendingPay
 		arg.AmountMinor,
 		arg.CreatedAt,
 	)
-	var id int64
+	var id int32
 	err := row.Scan(&id)
 	return id, err
 }
 
 const createUserSubscriptionActive = `-- name: CreateUserSubscriptionActive :exec
 INSERT INTO user_subscriptions (user_id, pricing_plan_id, starts_at, ends_at, is_active, created_at)
-VALUES ($1, $2, $3, $4, 1, $5)
+VALUES ($1, $2, $3, $4, true, $5)
 `
 
 type CreateUserSubscriptionActiveParams struct {
-	UserID        int64  `json:"user_id"`
-	PricingPlanID int64  `json:"pricing_plan_id"`
-	StartsAt      string `json:"starts_at"`
-	EndsAt        string `json:"ends_at"`
-	CreatedAt     string `json:"created_at"`
+	UserID        int32              `json:"user_id"`
+	PricingPlanID int32              `json:"pricing_plan_id"`
+	StartsAt      pgtype.Timestamptz `json:"starts_at"`
+	EndsAt        pgtype.Timestamptz `json:"ends_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) CreateUserSubscriptionActive(ctx context.Context, arg CreateUserSubscriptionActiveParams) error {
@@ -93,24 +93,24 @@ func (q *Queries) CreateUserSubscriptionActive(ctx context.Context, arg CreateUs
 
 const deactivateActiveSubscriptionsByUser = `-- name: DeactivateActiveSubscriptionsByUser :exec
 UPDATE user_subscriptions
-SET is_active = 0
+SET is_active = false
 WHERE user_id = $1
-  AND is_active = 1
+  AND is_active = true
 `
 
-func (q *Queries) DeactivateActiveSubscriptionsByUser(ctx context.Context, userID int64) error {
+func (q *Queries) DeactivateActiveSubscriptionsByUser(ctx context.Context, userID int32) error {
 	_, err := q.db.Exec(ctx, deactivateActiveSubscriptionsByUser, userID)
 	return err
 }
 
 const deactivateSubscriptionByID = `-- name: DeactivateSubscriptionByID :exec
 UPDATE user_subscriptions
-SET is_active = 0
+SET is_active = false
 WHERE id = $1
-  AND is_active = 1
+  AND is_active = true
 `
 
-func (q *Queries) DeactivateSubscriptionByID(ctx context.Context, id int64) error {
+func (q *Queries) DeactivateSubscriptionByID(ctx context.Context, id int32) error {
 	_, err := q.db.Exec(ctx, deactivateSubscriptionByID, id)
 	return err
 }
@@ -119,12 +119,12 @@ const getActivePricingPlanByCode = `-- name: GetActivePricingPlanByCode :one
 SELECT id, code, name, duration_days, price_usd
 FROM pricing_plans
 WHERE code = $1
-  AND is_active = 1
+  AND is_active = true
 LIMIT 1
 `
 
 type GetActivePricingPlanByCodeRow struct {
-	ID           int64  `json:"id"`
+	ID           int32  `json:"id"`
 	Code         string `json:"code"`
 	Name         string `json:"name"`
 	DurationDays int32  `json:"duration_days"`
@@ -155,14 +155,14 @@ LIMIT 1
 `
 
 type GetLatestPaidPaymentMetaByUserAndPlanParams struct {
-	UserID        int64 `json:"user_id"`
-	PricingPlanID int64 `json:"pricing_plan_id"`
+	UserID        int32 `json:"user_id"`
+	PricingPlanID int32 `json:"pricing_plan_id"`
 }
 
 type GetLatestPaidPaymentMetaByUserAndPlanRow struct {
-	Provider        string      `json:"provider"`
-	PaymentMethod   string      `json:"payment_method"`
-	ProviderPayload pgtype.Text `json:"provider_payload"`
+	Provider        string `json:"provider"`
+	PaymentMethod   string `json:"payment_method"`
+	ProviderPayload []byte `json:"provider_payload"`
 }
 
 func (q *Queries) GetLatestPaidPaymentMetaByUserAndPlan(ctx context.Context, arg GetLatestPaidPaymentMetaByUserAndPlanParams) (*GetLatestPaidPaymentMetaByUserAndPlanRow, error) {
@@ -177,21 +177,21 @@ SELECT s.id, p.id, p.code, p.name, s.starts_at, s.ends_at
 FROM user_subscriptions s
 JOIN pricing_plans p ON p.id = s.pricing_plan_id
 WHERE s.user_id = $1
-  AND p.is_active = 1
+  AND p.is_active = true
 ORDER BY s.ends_at DESC
 LIMIT 1
 `
 
 type GetLatestSubscriptionWithPlanByUserRow struct {
-	ID       int64  `json:"id"`
-	ID_2     int64  `json:"id_2"`
-	Code     string `json:"code"`
-	Name     string `json:"name"`
-	StartsAt string `json:"starts_at"`
-	EndsAt   string `json:"ends_at"`
+	ID       int32              `json:"id"`
+	ID_2     int32              `json:"id_2"`
+	Code     string             `json:"code"`
+	Name     string             `json:"name"`
+	StartsAt pgtype.Timestamptz `json:"starts_at"`
+	EndsAt   pgtype.Timestamptz `json:"ends_at"`
 }
 
-func (q *Queries) GetLatestSubscriptionWithPlanByUser(ctx context.Context, userID int64) (*GetLatestSubscriptionWithPlanByUserRow, error) {
+func (q *Queries) GetLatestSubscriptionWithPlanByUser(ctx context.Context, userID int32) (*GetLatestSubscriptionWithPlanByUserRow, error) {
 	row := q.db.QueryRow(ctx, getLatestSubscriptionWithPlanByUser, userID)
 	var i GetLatestSubscriptionWithPlanByUserRow
 	err := row.Scan(
@@ -213,13 +213,13 @@ LIMIT 1
 `
 
 type GetPaymentByIDRow struct {
-	ID            int64  `json:"id"`
-	UserID        int64  `json:"user_id"`
-	PricingPlanID int64  `json:"pricing_plan_id"`
+	ID            int32  `json:"id"`
+	UserID        int32  `json:"user_id"`
+	PricingPlanID int32  `json:"pricing_plan_id"`
 	Status        string `json:"status"`
 }
 
-func (q *Queries) GetPaymentByID(ctx context.Context, id int64) (*GetPaymentByIDRow, error) {
+func (q *Queries) GetPaymentByID(ctx context.Context, id int32) (*GetPaymentByIDRow, error) {
 	row := q.db.QueryRow(ctx, getPaymentByID, id)
 	var i GetPaymentByIDRow
 	err := row.Scan(
@@ -240,14 +240,14 @@ LIMIT 1
 `
 
 type GetPaymentByIDAndUserParams struct {
-	ID     int64 `json:"id"`
-	UserID int64 `json:"user_id"`
+	ID     int32 `json:"id"`
+	UserID int32 `json:"user_id"`
 }
 
 type GetPaymentByIDAndUserRow struct {
-	ID            int64  `json:"id"`
-	UserID        int64  `json:"user_id"`
-	PricingPlanID int64  `json:"pricing_plan_id"`
+	ID            int32  `json:"id"`
+	UserID        int32  `json:"user_id"`
+	PricingPlanID int32  `json:"pricing_plan_id"`
 	Status        string `json:"status"`
 }
 
@@ -280,18 +280,18 @@ LIMIT 1
 `
 
 type GetPaymentForUserParams struct {
-	ID     int64 `json:"id"`
-	UserID int64 `json:"user_id"`
+	ID     int32 `json:"id"`
+	UserID int32 `json:"user_id"`
 }
 
 type GetPaymentForUserRow struct {
-	ID                 int64       `json:"id"`
-	UserID             int64       `json:"user_id"`
-	PricingPlanID      int64       `json:"pricing_plan_id"`
+	ID                 int32       `json:"id"`
+	UserID             int32       `json:"user_id"`
+	PricingPlanID      int32       `json:"pricing_plan_id"`
 	Status             string      `json:"status"`
 	Provider           string      `json:"provider"`
 	ProviderCheckoutID pgtype.Text `json:"provider_checkout_id"`
-	ProviderPayload    pgtype.Text `json:"provider_payload"`
+	ProviderPayload    []byte      `json:"provider_payload"`
 	DurationDays       int32       `json:"duration_days"`
 }
 
@@ -320,9 +320,9 @@ LIMIT 1
 `
 
 type GetPaymentForWebhookByCheckoutIDRow struct {
-	ID            int64 `json:"id"`
-	UserID        int64 `json:"user_id"`
-	PricingPlanID int64 `json:"pricing_plan_id"`
+	ID            int32 `json:"id"`
+	UserID        int32 `json:"user_id"`
+	PricingPlanID int32 `json:"pricing_plan_id"`
 	DurationDays  int32 `json:"duration_days"`
 }
 
@@ -347,13 +347,13 @@ LIMIT 1
 `
 
 type GetPaymentForWebhookByPaymentIDRow struct {
-	ID            int64 `json:"id"`
-	UserID        int64 `json:"user_id"`
-	PricingPlanID int64 `json:"pricing_plan_id"`
+	ID            int32 `json:"id"`
+	UserID        int32 `json:"user_id"`
+	PricingPlanID int32 `json:"pricing_plan_id"`
 	DurationDays  int32 `json:"duration_days"`
 }
 
-func (q *Queries) GetPaymentForWebhookByPaymentID(ctx context.Context, id int64) (*GetPaymentForWebhookByPaymentIDRow, error) {
+func (q *Queries) GetPaymentForWebhookByPaymentID(ctx context.Context, id int32) (*GetPaymentForWebhookByPaymentIDRow, error) {
 	row := q.db.QueryRow(ctx, getPaymentForWebhookByPaymentID, id)
 	var i GetPaymentForWebhookByPaymentIDRow
 	err := row.Scan(
@@ -382,19 +382,19 @@ LIMIT 1
 `
 
 type GetPaymentStatusViewByIDAndUserParams struct {
-	ID     int64 `json:"id"`
-	UserID int64 `json:"user_id"`
+	ID     int32 `json:"id"`
+	UserID int32 `json:"user_id"`
 }
 
 type GetPaymentStatusViewByIDAndUserRow struct {
-	ID              int64       `json:"id"`
-	Code            string      `json:"code"`
-	Provider        string      `json:"provider"`
-	PaymentMethod   string      `json:"payment_method"`
-	Status          string      `json:"status"`
-	CheckoutUrl     pgtype.Text `json:"checkout_url"`
-	PaidAt          pgtype.Text `json:"paid_at"`
-	ProviderPayload pgtype.Text `json:"provider_payload"`
+	ID              int32              `json:"id"`
+	Code            string             `json:"code"`
+	Provider        string             `json:"provider"`
+	PaymentMethod   string             `json:"payment_method"`
+	Status          string             `json:"status"`
+	CheckoutUrl     pgtype.Text        `json:"checkout_url"`
+	PaidAt          pgtype.Timestamptz `json:"paid_at"`
+	ProviderPayload []byte             `json:"provider_payload"`
 }
 
 func (q *Queries) GetPaymentStatusViewByIDAndUser(ctx context.Context, arg GetPaymentStatusViewByIDAndUserParams) (*GetPaymentStatusViewByIDAndUserRow, error) {
@@ -420,7 +420,7 @@ WHERE id = $1
 LIMIT 1
 `
 
-func (q *Queries) GetPlanDurationByID(ctx context.Context, id int64) (int32, error) {
+func (q *Queries) GetPlanDurationByID(ctx context.Context, id int32) (int32, error) {
 	row := q.db.QueryRow(ctx, getPlanDurationByID, id)
 	var duration_days int32
 	err := row.Scan(&duration_days)
@@ -432,7 +432,7 @@ SELECT p.id, p.provider_payload
 FROM pricing_payments p
 JOIN user_subscriptions s ON s.pricing_plan_id = p.pricing_plan_id
 WHERE s.user_id = $1
-  AND s.is_active = 1
+  AND s.is_active = true
   AND p.user_id = $2
   AND p.provider = 'stripe'
   AND p.status = 'paid'
@@ -441,13 +441,13 @@ LIMIT 1
 `
 
 type GetStripeCancelablePaymentByUserParams struct {
-	UserID   int64 `json:"user_id"`
-	UserID_2 int64 `json:"user_id_2"`
+	UserID   int32 `json:"user_id"`
+	UserID_2 int32 `json:"user_id_2"`
 }
 
 type GetStripeCancelablePaymentByUserRow struct {
-	ID              int64       `json:"id"`
-	ProviderPayload pgtype.Text `json:"provider_payload"`
+	ID              int32  `json:"id"`
+	ProviderPayload []byte `json:"provider_payload"`
 }
 
 func (q *Queries) GetStripeCancelablePaymentByUser(ctx context.Context, arg GetStripeCancelablePaymentByUserParams) (*GetStripeCancelablePaymentByUserRow, error) {
@@ -460,7 +460,7 @@ func (q *Queries) GetStripeCancelablePaymentByUser(ctx context.Context, arg GetS
 const listActivePricingPlans = `-- name: ListActivePricingPlans :many
 SELECT code, name, billing_cycle, duration_days, price_usd
 FROM pricing_plans
-WHERE is_active = 1
+WHERE is_active = true
 ORDER BY price_usd ASC
 `
 
@@ -506,8 +506,8 @@ WHERE id = $2
 `
 
 type MarkPaymentPaidByIDParams struct {
-	PaidAt pgtype.Text `json:"paid_at"`
-	ID     int64       `json:"id"`
+	PaidAt pgtype.Timestamptz `json:"paid_at"`
+	ID     int32              `json:"id"`
 }
 
 func (q *Queries) MarkPaymentPaidByID(ctx context.Context, arg MarkPaymentPaidByIDParams) error {
@@ -526,8 +526,8 @@ WHERE id = $4
 type UpdatePaymentCheckoutInfoParams struct {
 	ProviderCheckoutID pgtype.Text `json:"provider_checkout_id"`
 	CheckoutUrl        pgtype.Text `json:"checkout_url"`
-	ProviderPayload    pgtype.Text `json:"provider_payload"`
-	ID                 int64       `json:"id"`
+	ProviderPayload    []byte      `json:"provider_payload"`
+	ID                 int32       `json:"id"`
 }
 
 func (q *Queries) UpdatePaymentCheckoutInfo(ctx context.Context, arg UpdatePaymentCheckoutInfoParams) error {
@@ -546,7 +546,7 @@ SET status = 'failed'
 WHERE id = $1
 `
 
-func (q *Queries) UpdatePaymentFailedByID(ctx context.Context, id int64) error {
+func (q *Queries) UpdatePaymentFailedByID(ctx context.Context, id int32) error {
 	_, err := q.db.Exec(ctx, updatePaymentFailedByID, id)
 	return err
 }
@@ -558,8 +558,8 @@ WHERE id = $2
 `
 
 type UpdatePaymentPayloadByIDParams struct {
-	ProviderPayload pgtype.Text `json:"provider_payload"`
-	ID              int64       `json:"id"`
+	ProviderPayload []byte `json:"provider_payload"`
+	ID              int32  `json:"id"`
 }
 
 func (q *Queries) UpdatePaymentPayloadByID(ctx context.Context, arg UpdatePaymentPayloadByIDParams) error {

@@ -727,7 +727,7 @@ func (s *Service) loadState(ctx context.Context) (string, string, error) {
 	var stateJSON sql.NullString
 	err := s.DB.SQL.QueryRowContext(
 		ctx,
-		`SELECT COALESCE(state_json, '')
+		`SELECT COALESCE(state_json::text, '')
 		 FROM watcher_states
 		 WHERE source = ?
 		 LIMIT 1`,
@@ -829,7 +829,7 @@ func (s *Service) saveDeltaPayloadForSource(source, sourceURL, payloadType, body
 
 func (s *Service) loadStatePayload(source string) (map[string]any, error) {
 	var stateJSON sql.NullString
-	err := s.DB.SQL.QueryRowContext(context.Background(), `SELECT COALESCE(state_json, '') FROM watcher_states WHERE source = ? LIMIT 1`, source).Scan(&stateJSON)
+	err := s.DB.SQL.QueryRowContext(context.Background(), `SELECT COALESCE(state_json::text, '') FROM watcher_states WHERE source = ? LIMIT 1`, source).Scan(&stateJSON)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return map[string]any{}, nil
@@ -916,7 +916,7 @@ func (s *Service) upsertHiringCafeJobs(jobs []hiringcafe.NormalizedJob) (int, in
 		payloadRaw, _ := json.Marshal(row.RawPayload)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				if _, execErr := tx.Exec(`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 0, 0, ?)`,
+				if _, execErr := tx.Exec(`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, true, false, false, 0, ?)`,
 					sourceHiringCafe, row.URL, row.PostDate.UTC().Format(time.RFC3339Nano), string(payloadRaw)); execErr != nil {
 					return 0, 0, execErr
 				}
@@ -929,7 +929,7 @@ func (s *Service) upsertHiringCafeJobs(jobs []hiringcafe.NormalizedJob) (int, in
 		if existingPostDate != nil && !row.PostDate.After(*existingPostDate) {
 			continue
 		}
-		if _, execErr := tx.Exec(`UPDATE raw_us_jobs SET post_date = ?, is_ready = 1, is_skippable = 0, is_parsed = 0, retry_count = 0, raw_json = ? WHERE id = ?`,
+		if _, execErr := tx.Exec(`UPDATE raw_us_jobs SET post_date = ?, is_ready = true, is_skippable = false, is_parsed = false, retry_count = 0, raw_json = ? WHERE id = ?`,
 			row.PostDate.UTC().Format(time.RFC3339Nano), string(payloadRaw), existingID); execErr != nil {
 			return 0, 0, execErr
 		}

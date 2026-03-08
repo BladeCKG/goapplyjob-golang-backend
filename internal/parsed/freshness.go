@@ -18,7 +18,7 @@ func (s *Service) ResetStaleParsed(ctx context.Context, batchSize int) (int, int
 		query := `SELECT r.id, r.post_date, p.id, p.created_at_source
 			FROM raw_us_jobs r
 			INNER JOIN parsed_jobs p ON p.raw_us_job_id = r.id
-			WHERE r.is_parsed = 1`
+			WHERE r.is_parsed = true`
 		args := []any{}
 		if maxIDCursor != nil {
 			query += ` AND r.id < ?`
@@ -78,7 +78,7 @@ func (s *Service) ResetStaleParsed(ctx context.Context, batchSize int) (int, int
 				tx.Rollback()
 				return checkedCount, staleCount, err
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE raw_us_jobs SET is_ready = 0, raw_json = NULL, is_parsed = 0 WHERE id = ?`, row.rawID); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE raw_us_jobs SET is_ready = false, raw_json = NULL, is_parsed = false WHERE id = ?`, row.rawID); err != nil {
 				tx.Rollback()
 				return checkedCount, staleCount, err
 			}

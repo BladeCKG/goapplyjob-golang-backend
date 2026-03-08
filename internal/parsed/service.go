@@ -419,7 +419,7 @@ func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle str
 		if applySkillFilter && len(normalizedSkillValues) > 0 {
 			conditions := make([]string, 0, len(normalizedSkillValues))
 			for _, skill := range normalizedSkillValues {
-				conditions = append(conditions, `LOWER(COALESCE(p.tech_stack, '')) LIKE ?`)
+				conditions = append(conditions, `LOWER(COALESCE(p.tech_stack::text, '')) LIKE ?`)
 				args = append(args, `%`+"\""+skill+"\""+"%")
 			}
 			query += " AND (" + strings.Join(conditions, " OR ") + ")"
@@ -594,7 +594,7 @@ func (s *Service) findExactNormalizedCategoryMatch(ctx context.Context, normaliz
 	if applySkillFilter && len(normalizedSkillValues) > 0 {
 		conditions := make([]string, 0, len(normalizedSkillValues))
 		for _, skill := range normalizedSkillValues {
-			conditions = append(conditions, `LOWER(COALESCE(p.tech_stack, '')) LIKE ?`)
+			conditions = append(conditions, `LOWER(COALESCE(p.tech_stack::text, '')) LIKE ?`)
 			args = append(args, `%`+"\""+skill+"\""+"%")
 		}
 		query += " AND (" + strings.Join(conditions, " OR ") + ")"
@@ -912,7 +912,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	if batchSize <= 0 {
 		batchSize = 100
 	}
-	rows, err := s.DB.SQL.QueryContext(ctx, `SELECT id, raw_json, COALESCE(source, '') FROM raw_us_jobs WHERE is_ready = 1 AND is_parsed = 0 ORDER BY post_date DESC, id DESC LIMIT ?`, batchSize)
+	rows, err := s.DB.SQL.QueryContext(ctx, `SELECT id, raw_json, COALESCE(source, '') FROM raw_us_jobs WHERE is_ready = true AND is_parsed = false ORDER BY post_date DESC, id DESC LIMIT ?`, batchSize)
 	if err != nil {
 		return 0, err
 	}
@@ -941,7 +941,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	for _, row := range pending {
 		payload := map[string]any{}
 		if !row.rawJSON.Valid || row.rawJSON.String == "" {
-			if _, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = 1 WHERE id = ?`, row.id); err != nil {
+			if _, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true WHERE id = ?`, row.id); err != nil {
 				return processed, err
 			}
 			processed++
@@ -949,7 +949,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			continue
 		}
 		if err := json.Unmarshal([]byte(row.rawJSON.String), &payload); err != nil {
-			if _, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = 1 WHERE id = ?`, row.id); err != nil {
+			if _, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true WHERE id = ?`, row.id); err != nil {
 				return processed, err
 			}
 			processed++
@@ -1042,7 +1042,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			return processed, err
 		}
 		if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
-			_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = 1 WHERE id = ?`, row.id)
+			_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true WHERE id = ?`, row.id)
 			return err
 		}); err != nil {
 			return processed, err

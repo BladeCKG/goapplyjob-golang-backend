@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS watcher_events (
-    id BIGSERIAL PRIMARY KEY,
+    id SERIAL PRIMARY KEY,
     source VARCHAR(32),
     detail TEXT,
     created_at TIMESTAMPTZ
@@ -10,7 +10,7 @@ ALTER TABLE raw_us_jobs
 
 ALTER TABLE auth_users
     ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ,
-    ADD COLUMN IF NOT EXISTS last_job_filters_json JSONB;
+    ADD COLUMN IF NOT EXISTS last_job_filters_json JSON;
 
 ALTER TABLE parsed_companies
     ADD COLUMN IF NOT EXISTS sponsors_uk_skilled_worker_visa BOOLEAN,
@@ -25,11 +25,11 @@ ALTER TABLE parsed_companies
     ADD COLUMN IF NOT EXISTS linkedin_description_brazil TEXT,
     ADD COLUMN IF NOT EXISTS linkedin_description_france TEXT,
     ADD COLUMN IF NOT EXISTS linkedin_description_germany TEXT,
-    ADD COLUMN IF NOT EXISTS funding_data JSONB,
-    ADD COLUMN IF NOT EXISTS chatgpt_industries JSONB,
-    ADD COLUMN IF NOT EXISTS industry_specialities_brazil JSONB,
-    ADD COLUMN IF NOT EXISTS industry_specialities_france JSONB,
-    ADD COLUMN IF NOT EXISTS industry_specialities_germany JSONB,
+    ADD COLUMN IF NOT EXISTS funding_data JSON,
+    ADD COLUMN IF NOT EXISTS chatgpt_industries JSON,
+    ADD COLUMN IF NOT EXISTS industry_specialities_brazil JSON,
+    ADD COLUMN IF NOT EXISTS industry_specialities_france JSON,
+    ADD COLUMN IF NOT EXISTS industry_specialities_germany JSON,
     ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
 
 ALTER TABLE parsed_jobs
@@ -63,6 +63,21 @@ ALTER TABLE parsed_jobs
     ADD COLUMN IF NOT EXISTS salary_currency_code VARCHAR(16),
     ADD COLUMN IF NOT EXISTS salary_currency_symbol VARCHAR(16),
     ADD COLUMN IF NOT EXISTS salary_human_text TEXT;
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'parsed_jobs'
+          AND column_name = 'created_at_source'
+          AND data_type IN ('text', 'character varying')
+    ) THEN
+        ALTER TABLE parsed_jobs
+            ALTER COLUMN created_at_source TYPE TIMESTAMPTZ
+            USING NULLIF(btrim(created_at_source::text), '')::timestamptz;
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_watcher_events_source ON watcher_events (source);
 CREATE INDEX IF NOT EXISTS idx_watcher_payloads_source ON watcher_payloads (source);

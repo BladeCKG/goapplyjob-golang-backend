@@ -279,11 +279,11 @@ func TestJobsTopCategoriesRespectsLocationAndWindow(t *testing.T) {
 func TestJobsDefaultSortUsesCreatedAtSource(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
-	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (3001, 'https://example.com/old-updated', ?, 1, 0, 1, 0, '{}')`, time.Now().UTC().Format(time.RFC3339Nano))
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (3001, 'https://example.com/old-updated', ?, true, false, true, 0, '{}')`, time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (3002, 'https://example.com/new-updated', ?, 1, 0, 1, 0, '{}')`, time.Now().UTC().Format(time.RFC3339Nano))
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (3002, 'https://example.com/new-updated', ?, true, false, true, 0, '{}')`, time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -480,7 +480,7 @@ func TestJobsPaginationStableWithCompanyJoin(t *testing.T) {
 	for idx := 0; idx < 25; idx++ {
 		rawID := idx + 5000
 		createdAt := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
-		_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 1, 0, '{}')`, rawID, "https://example.com/pagination/"+strconv.Itoa(idx), createdAt.Format(time.RFC3339Nano))
+		_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, true, false, true, 0, '{}')`, rawID, "https://example.com/pagination/"+strconv.Itoa(idx), createdAt.Format(time.RFC3339Nano))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -555,11 +555,16 @@ func TestJobsTitleFilterMatchesRoleTitleVariants(t *testing.T) {
 	var body map[string]any
 	decodeBody(t, rec.Body.Bytes(), &body)
 	items := body["items"].([]any)
-	if len(items) != 1 {
-		t.Fatalf("expected exact role-title match when exact value exists, got %#v", body)
+	if len(items) != 2 {
+		t.Fatalf("expected fuzzy role-title matches like page-extract, got %#v", body)
 	}
-	if items[0].(map[string]any)["role_title"].(string) != "backend" {
-		t.Fatalf("unexpected exact role-title match %#v", body)
+	seen := map[string]bool{}
+	for _, item := range items {
+		roleTitle, _ := item.(map[string]any)["role_title"].(string)
+		seen[roleTitle] = true
+	}
+	if !seen["backend"] || !seen["Senior Backend Platform Engineer"] {
+		t.Fatalf("unexpected fuzzy role-title matches %#v", body)
 	}
 }
 
@@ -634,7 +639,7 @@ func TestJobsTechStackFilterAndOptions(t *testing.T) {
 		t.Fatalf("unexpected tech stack options %#v", optionsBody)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/jobs?tech_stack=go", nil)
+	req := httptest.NewRequest(http.MethodGet, "/jobs?tech_stack=Go", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	assertStatus(t, rec.Code, http.StatusOK)
@@ -648,6 +653,26 @@ func TestJobsTechStackFilterAndOptions(t *testing.T) {
 	firstItem := items[0].(map[string]any)
 	if len(firstItem["tech_stack"].([]any)) != 2 {
 		t.Fatalf("expected tech stack in job item, got %#v", firstItem)
+	}
+}
+
+func TestJobsTechStackFilterSnakeCase(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJobWithTechStack(t, db, 83, "Platform Engineer", []string{"Go", "SQL"})
+	insertJobWithTechStack(t, db, 84, "Frontend Engineer", []string{"TypeScript"})
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?tech_stack=Go", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	items := body["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("expected one tech stack match, got %#v", body)
 	}
 }
 
@@ -786,6 +811,83 @@ func TestJobsStateAndCountryFiltersUseORAndNormalizeState(t *testing.T) {
 	}
 	if _, ok := rawIDs[8403]; ok {
 		t.Fatalf("did not expect Washington/US-only job in result %#v", body)
+	}
+}
+
+func TestJobsSeniorityFilter(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJob(t, db, 8461, "https://example.com/exp-a", "Austin", "Texas", 100, 130, true, time.Now().UTC())
+	insertJob(t, db, 8462, "https://example.com/exp-b", "Austin", "Texas", 100, 130, false, time.Now().UTC())
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?seniority=senior&per_page=50", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	items := body["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("expected one seniority match, got %#v", body)
+	}
+	if int(items[0].(map[string]any)["raw_us_job_id"].(float64)) != 8461 {
+		t.Fatalf("unexpected seniority item %#v", body)
+	}
+}
+
+func TestJobsTechStackFilterDoesNotFailOnNonJSONArrayData(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJobWithTechStack(t, db, 8471, "Platform Engineer", []string{"Go"})
+	if _, err := db.SQL.ExecContext(
+		context.Background(),
+		`UPDATE parsed_jobs
+		 SET tech_stack = '"Go"'
+		 WHERE raw_us_job_id = 12471`,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?techstack=go&per_page=50", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+}
+
+func TestJobsFiltersCombineTechLocationAndSeniority(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJobWithTechStack(t, db, 8451, "Platform Engineer", []string{"Go", "SQL"})
+	insertJobWithTechStack(t, db, 8452, "Frontend Engineer", []string{"TypeScript"})
+	if _, err := db.SQL.ExecContext(
+		context.Background(),
+		`UPDATE parsed_jobs
+		 SET location_city = 'Austin',
+		     location_us_states = '["Texas"]',
+		     location_countries = '["United States"]',
+		     is_senior = true
+		 WHERE raw_us_job_id = 12451`,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?tech_stack=Go&location=Texas&seniority=senior&per_page=50", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	items := body["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("expected one combined-filter match, got %#v", body)
+	}
+	if int(items[0].(map[string]any)["raw_us_job_id"].(float64)) != 12451 {
+		t.Fatalf("unexpected combined-filter item %#v", body)
 	}
 }
 
@@ -1004,10 +1106,10 @@ func TestJobsListFiltersByCompanySlug(t *testing.T) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (91001, 'https://example.com/company-acme', ?, 1, 0, 1, 0, '{}')`, now); err != nil {
+	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (91001, 'https://example.com/company-acme', ?, true, false, true, 0, '{}')`, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (91002, 'https://example.com/company-globex', ?, 1, 0, 1, 0, '{}')`, now); err != nil {
+	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (91002, 'https://example.com/company-globex', ?, true, false, true, 0, '{}')`, now); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, company_id, role_title, created_at_source, url) VALUES (91001, ?, 'Backend Engineer', ?, 'https://jobs.example.com/company-acme')`, acmeID, now); err != nil {
@@ -1041,7 +1143,7 @@ func TestCompanyProfileEndpointReturnsCompanyAndStats(t *testing.T) {
 	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO parsed_companies (name, slug, tagline, industry_specialities) VALUES ('Acme', 'acme', 'Builds tools', ?) RETURNING id`, string(industries)).Scan(&companyID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (92001, 'https://example.com/company-profile-job', ?, 1, 0, 1, 0, '{}')`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (92001, 'https://example.com/company-profile-job', ?, true, false, true, 0, '{}')`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, company_id, role_title, created_at_source, url) VALUES (92001, ?, 'Staff Engineer', ?, 'https://jobs.example.com/company-profile-job')`, companyID, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)); err != nil {
@@ -1074,7 +1176,7 @@ func TestCompaniesSitemapEndpointListsCompanySlugs(t *testing.T) {
 	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO parsed_companies (name, slug) VALUES ('Acme', 'acme') RETURNING id`).Scan(&companyID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (93001, 'https://example.com/company-sitemap-job', ?, 1, 0, 1, 0, '{}')`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (93001, 'https://example.com/company-sitemap-job', ?, true, false, true, 0, '{}')`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, company_id, role_title, created_at_source, url) VALUES (93001, ?, 'Engineer', ?, 'https://jobs.example.com/company-sitemap-job')`, companyID, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)); err != nil {
@@ -1198,7 +1300,7 @@ func TestDefaultFreeSubscriptionAndUpgradePreview(t *testing.T) {
 		t.Fatalf("expected one active free subscription, got %d", activeCount)
 	}
 
-	_, err = db.SQL.ExecContext(context.Background(), `UPDATE user_subscriptions SET ends_at = ?, is_active = 0`, time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano))
+	_, err = db.SQL.ExecContext(context.Background(), `UPDATE user_subscriptions SET ends_at = ?, is_active = false`, time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1222,7 +1324,7 @@ func TestSubscriptionStatusHandlesExpiredState(t *testing.T) {
 	code := requestLoginCode(t, router, "expired-user@example.com")
 	cookie := verifyLoginCode(t, router, "expired-user@example.com", code)
 
-	_, err := db.SQL.ExecContext(context.Background(), `UPDATE user_subscriptions SET ends_at = ?, is_active = 1`, time.Now().UTC().Add(-2*time.Hour).Format(time.RFC3339Nano))
+	_, err := db.SQL.ExecContext(context.Background(), `UPDATE user_subscriptions SET ends_at = ?, is_active = true`, time.Now().UTC().Add(-2*time.Hour).Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1246,7 +1348,7 @@ func TestExpiredFreePlanIsNotRecreatedOnLogin(t *testing.T) {
 	code := requestLoginCode(t, router, "expired-free@example.com")
 	_ = verifyLoginCode(t, router, "expired-free@example.com", code)
 
-	_, err := db.SQL.ExecContext(context.Background(), `UPDATE user_subscriptions SET ends_at = ?, is_active = 0`, time.Now().UTC().Add(-2*time.Hour).Format(time.RFC3339Nano))
+	_, err := db.SQL.ExecContext(context.Background(), `UPDATE user_subscriptions SET ends_at = ?, is_active = false`, time.Now().UTC().Add(-2*time.Hour).Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1323,7 +1425,7 @@ func TestOxaPayWebhookRequestShapeMarksPaymentPaid(t *testing.T) {
 		t.Fatal(err)
 	}
 	var planID int64
-	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO pricing_plans (code, name, billing_cycle, duration_days, price_usd, is_active, created_at) VALUES (?, ?, ?, ?, ?, 1, ?) RETURNING id`, "weekly", "Weekly", "weekly", 7, 3, now).Scan(&planID); err != nil {
+	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO pricing_plans (code, name, billing_cycle, duration_days, price_usd, is_active, created_at) VALUES (?, ?, ?, ?, ?, true, ?) RETURNING id`, "weekly", "Weekly", "weekly", 7, 3, now).Scan(&planID); err != nil {
 		t.Fatal(err)
 	}
 	var paymentID int64
@@ -1773,7 +1875,7 @@ func testDatabaseURL(t *testing.T, name string) string {
 
 func insertJob(t *testing.T, db *database.DB, rawID int, rawURL, city, state string, salaryMin, salaryMax float64, isSenior bool, createdAt time.Time) {
 	t.Helper()
-	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 1, 0, '{}')`, rawID, rawURL, createdAt.Format(time.RFC3339Nano))
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, true, false, true, 0, '{}')`, rawID, rawURL, createdAt.Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1785,7 +1887,7 @@ func insertJob(t *testing.T, db *database.DB, rawID int, rawURL, city, state str
 
 func insertJobWithSalaryType(t *testing.T, db *database.DB, rawID int, category string, salaryMinUSD float64, salaryType string) {
 	t.Helper()
-	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 1, 0, '{}')`, rawID, "https://example.com/"+strconv.Itoa(rawID), time.Now().UTC().Format(time.RFC3339Nano))
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, true, false, true, 0, '{}')`, rawID, "https://example.com/"+strconv.Itoa(rawID), time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1802,7 +1904,7 @@ func insertJobWithSalaryType(t *testing.T, db *database.DB, rawID int, category 
 func insertCompany(t *testing.T, db *database.DB, name string) int64 {
 	t.Helper()
 	var id int64
-	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO parsed_companies (name, slug, tagline, profile_pic_url, home_page_url, linkedin_url, employee_range, founded_year, sponsors_h1b) VALUES (?, 'example-co', 'tagline', 'https://img', 'https://home', 'https://linkedin', '11-50', '2020', 1) RETURNING id`, name).Scan(&id); err != nil {
+	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO parsed_companies (name, slug, tagline, profile_pic_url, home_page_url, linkedin_url, employee_range, founded_year, sponsors_h1b) VALUES (?, 'example-co', 'tagline', 'https://img', 'https://home', 'https://linkedin', '11-50', '2020', true) RETURNING id`, name).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	return id
@@ -1810,13 +1912,13 @@ func insertCompany(t *testing.T, db *database.DB, name string) int64 {
 
 func insertRichJob(t *testing.T, db *database.DB, companyID int64) int {
 	t.Helper()
-	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (999, 'https://example.com/job-detail', ?, 1, 0, 1, 0, '{}')`, time.Now().UTC().Format(time.RFC3339Nano))
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (999, 'https://example.com/job-detail', ?, true, false, true, 0, '{}')`, time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var id int64
-	err = db.SQL.QueryRowContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, company_id, categorized_job_title, role_title, role_description, role_requirements, location, location_city, salary_min_usd, salary_max_usd, salary_type, employment_type, education_requirements_credential_category, experience_requirements_months, experience_in_place_of_education, required_languages, tech_stack, benefits, url) VALUES (999, ?, 'Software Engineer', 'Staff Backend Engineer', 'Build distributed systems.', 'Python
-FastAPI', 'United States', 'Austin', 150, 210, 'hourly', 'full-time', 'bachelor', 24, 1, '["English"]', '["Go","SQL"]', 'Great benefits', 'https://jobs.example.com/detail') RETURNING id`, companyID).Scan(&id)
+	err = db.SQL.QueryRowContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, company_id, categorized_job_title, role_title, role_description, role_requirements, location_countries, location_city, salary_min_usd, salary_max_usd, salary_type, employment_type, education_requirements_credential_category, experience_requirements_months, experience_in_place_of_education, required_languages, tech_stack, benefits, url) VALUES (999, ?, 'Software Engineer', 'Staff Backend Engineer', 'Build distributed systems.', 'Python
+FastAPI', '["United States"]', 'Austin', 150, 210, 'hourly', 'full-time', 'bachelor', 24, true, '["English"]', '["Go","SQL"]', 'Great benefits', 'https://jobs.example.com/detail') RETURNING id`, companyID).Scan(&id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1825,7 +1927,7 @@ FastAPI', 'United States', 'Austin', 150, 210, 'hourly', 'full-time', 'bachelor'
 
 func insertCSVJob(t *testing.T, db *database.DB, rawID int, title, region string, isMid bool, salaryMin float64, salaryType string) {
 	t.Helper()
-	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 1, 0, '{}')`, rawID+2000, "https://example.com/csv-"+strconv.Itoa(rawID), time.Now().UTC().Format(time.RFC3339Nano))
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, true, false, true, 0, '{}')`, rawID+2000, "https://example.com/csv-"+strconv.Itoa(rawID), time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1841,7 +1943,7 @@ func insertCSVJob(t *testing.T, db *database.DB, rawID int, title, region string
 
 func insertJobWithFunction(t *testing.T, db *database.DB, rawID int, categoryTitle, categoryFunction, roleTitle string) {
 	t.Helper()
-	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 1, 0, '{}')`, rawID+3000, "https://example.com/function-"+strconv.Itoa(rawID), time.Now().UTC().Format(time.RFC3339Nano))
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, true, false, true, 0, '{}')`, rawID+3000, "https://example.com/function-"+strconv.Itoa(rawID), time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1853,7 +1955,7 @@ func insertJobWithFunction(t *testing.T, db *database.DB, rawID int, categoryTit
 
 func insertJobWithTechStack(t *testing.T, db *database.DB, rawID int, roleTitle string, techStack []string) {
 	t.Helper()
-	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 1, 0, '{}')`, rawID+4000, "https://example.com/tech-"+strconv.Itoa(rawID), time.Now().UTC().Format(time.RFC3339Nano))
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, true, false, true, 0, '{}')`, rawID+4000, "https://example.com/tech-"+strconv.Itoa(rawID), time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1869,7 +1971,7 @@ func insertJobWithTechStack(t *testing.T, db *database.DB, rawID int, roleTitle 
 
 func insertDatedJob(t *testing.T, db *database.DB, rawID int, createdAt time.Time) {
 	t.Helper()
-	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 1, 0, '{}')`, rawID+5000, "https://example.com/date-"+strconv.Itoa(rawID), createdAt.Format(time.RFC3339Nano))
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, true, false, true, 0, '{}')`, rawID+5000, "https://example.com/date-"+strconv.Itoa(rawID), createdAt.Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1881,7 +1983,7 @@ func insertDatedJob(t *testing.T, db *database.DB, rawID int, createdAt time.Tim
 
 func insertEmploymentTypeJob(t *testing.T, db *database.DB, rawID int, employmentType string) {
 	t.Helper()
-	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 1, 0, '{}')`, rawID+6000, "https://example.com/employment-"+strconv.Itoa(rawID), time.Now().UTC().Format(time.RFC3339Nano))
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, true, false, true, 0, '{}')`, rawID+6000, "https://example.com/employment-"+strconv.Itoa(rawID), time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1893,7 +1995,7 @@ func insertEmploymentTypeJob(t *testing.T, db *database.DB, rawID int, employmen
 
 func insertJobWithCreatedAt(t *testing.T, db *database.DB, rawID int, category, location string, createdAt time.Time) {
 	t.Helper()
-	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 1, 0, '{}')`,
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, true, false, true, 0, '{}')`,
 		rawID+7000, "https://example.com/top-"+strconv.Itoa(rawID), createdAt.Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
@@ -1980,11 +2082,8 @@ func assertStatus(t *testing.T, got, want int) {
 	}
 }
 
-func boolToInt(value bool) int {
-	if value {
-		return 1
-	}
-	return 0
+func boolToInt(value bool) bool {
+	return value
 }
 
 func overlaps(left, right []int) bool {
