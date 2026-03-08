@@ -1,10 +1,19 @@
 version: 2.1
 
+orbs:
+  go: circleci/go@1.11.0
+
 jobs:
-  run-workers:
+  backend-workers-hourly:
     docker:
       - image: cimg/go:1.24
-    working_directory: ~/project
+    resource_class: medium
+    environment:
+      LOG_LEVEL: INFO
+      SQL_ECHO: "false"
+      # DATABASE_URL: set in CircleCI Project Settings / Context
+      # GROQ_API_KEY: set in CircleCI Project Settings / Context
+      # ENABLED_SOURCES: set in CircleCI Project Settings / Context
     steps:
       - checkout
       - run:
@@ -36,13 +45,14 @@ jobs:
           name: Run hourly import worker
           environment:
             RAW_IMPORT_RUN_ONCE: "true"
-            RAW_IMPORT_BATCH_SIZE: "100"
+            RAW_IMPORT_BATCH_SIZE: "1000"
             RAW_IMPORT_PAYLOADS_PER_CYCLE: "40"
           command: go run ./cmd/importer
       - run:
           name: Run hourly raw worker
           environment:
             RAW_JOB_WORKER_BATCH_SIZE: "100"
+            # RAW_JOB_RETENTION_DAYS: set in CircleCI Project Settings / Context
           command: go run ./cmd/skippablerecheck
       - run:
           name: Run hourly parsed worker
@@ -52,15 +62,7 @@ jobs:
           command: go run ./cmd/parsedfreshness
 
 workflows:
-  backend-workers-hourly:
-    triggers:
-      - schedule:
-          cron: "0 * * * *"
-          filters:
-            branches:
-              only:
-                - main
+  backend-workers:
     jobs:
-      - run-workers:
-          context:
-            - goapplyjob-backend
+      - backend-workers-hourly:
+          context: goapplyjob-backend
