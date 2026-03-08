@@ -16,6 +16,7 @@ import (
 	"goapplyjob-golang-backend/internal/auth"
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/locationnorm"
 
 	"github.com/gin-gonic/gin"
 )
@@ -453,6 +454,7 @@ func buildLocationParentsMap(rows [][2][]string) map[string][]string {
 		states := uniqueStrings(row[0])
 		countries := uniqueStrings(row[1])
 		for _, state := range states {
+			state = locationnorm.NormalizeUSStateName(state)
 			state = cleanFilterLabel(state)
 			if !isValidLocationOption(state) {
 				continue
@@ -461,6 +463,7 @@ func buildLocationParentsMap(rows [][2][]string) map[string][]string {
 				stateToCountries[state] = map[string]struct{}{}
 			}
 			for _, country := range countries {
+				country = locationnorm.NormalizeCountryName(country, true)
 				country = cleanFilterLabel(country)
 				if isValidLocationOption(country) {
 					stateToCountries[state][country] = struct{}{}
@@ -473,6 +476,7 @@ func buildLocationParentsMap(rows [][2][]string) map[string][]string {
 			addLocationOption(state, parents)
 		}
 		for _, country := range countries {
+			country = locationnorm.NormalizeCountryName(country, true)
 			country = cleanFilterLabel(country)
 			if isValidLocationOption(country) {
 				addLocationOption(country, nil)
@@ -1215,10 +1219,16 @@ func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includ
 	if len(states) > 0 {
 		parts := make([]string, 0, len(states))
 		for _, state := range states {
+			state = locationnorm.NormalizeUSStateName(state)
+			if state == "" {
+				continue
+			}
 			parts = append(parts, `p.location_us_states LIKE ?`)
 			args = append(args, "%"+state+"%")
 		}
-		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
+		if len(parts) > 0 {
+			filters = append(filters, "("+strings.Join(parts, " OR ")+")")
+		}
 	}
 	if len(countries) > 0 {
 		parts := make([]string, 0, len(countries))
