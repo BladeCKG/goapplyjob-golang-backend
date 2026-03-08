@@ -89,3 +89,24 @@ func TestToTargetJobURLForSourceBuiltinKeepsURLUnchanged(t *testing.T) {
 		t.Fatalf("expected builtin URL to remain unchanged")
 	}
 }
+
+func TestIsRemovedBuiltinJobHTMLDetectsRemovedMarkerCaseInsensitive(t *testing.T) {
+	html := "<html><body><span>Sorry, this job was removed at 05:05 p.m.</span></body></html>"
+	if !isRemovedBuiltinJobHTML("builtin", html) {
+		t.Fatalf("expected builtin removed marker to be detected")
+	}
+}
+
+func TestIsRemovedBuiltinJobHTMLIgnoresNonBuiltinSources(t *testing.T) {
+	html := "<html><body><span>Sorry, this job was removed.</span></body></html>"
+	if isRemovedBuiltinJobHTML("workable", html) {
+		t.Fatalf("expected non-builtin source to be ignored")
+	}
+}
+
+func TestIsRemovedBuiltinJobHTMLFalseWhenTextMissing(t *testing.T) {
+	html := "<html><body><span>Job still active</span></body></html>"
+	if isRemovedBuiltinJobHTML("builtin", html) {
+		t.Fatalf("expected false when removed marker is missing")
+	}
+}

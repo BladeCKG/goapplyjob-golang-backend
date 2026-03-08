@@ -19,6 +19,7 @@ const statusNotFound = 404
 const (
 	sourceRemoteRocketship = "remoterocketship"
 	sourceBuiltin          = "builtin"
+	builtinRemovedText     = "sorry, this job was removed"
 )
 
 type ReadHTMLFunc func(string) (string, int, error)
@@ -102,6 +103,13 @@ func parseHTMLForSource(source, html, sourceURL string) map[string]any {
 	return payload
 }
 
+func isRemovedBuiltinJobHTML(source, html string) bool {
+	if strings.ToLower(strings.TrimSpace(source)) != sourceBuiltin {
+		return false
+	}
+	return strings.Contains(strings.ToLower(html), builtinRemovedText)
+}
+
 func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error) {
 	if batchSize <= 0 {
 		batchSize = 100
@@ -143,6 +151,14 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			log.Printf("raw-us-job-worker fetch_result job_id=%d status=404", job.id)
 			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
 				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_skippable = 1, retry_count = retry_count + 1 WHERE id = ?`, job.id)
+				return err
+			}); err != nil {
+				return processed, err
+			}
+		case isRemovedBuiltinJobHTML(job.source, html):
+			log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s detected_builtin_removed_job", job.id, job.source)
+			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_ready = 1, is_skippable = 1, raw_json = NULL, retry_count = retry_count + 1 WHERE id = ?`, job.id)
 				return err
 			}); err != nil {
 				return processed, err
