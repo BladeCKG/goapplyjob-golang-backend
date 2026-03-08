@@ -362,6 +362,12 @@ func normalizeEmploymentTypeValue(value any) any {
 		return "full-time"
 	case "parttime", "part-time", "part time":
 		return "part-time"
+	case "contract", "contractor":
+		return "contract"
+	case "intern", "internship":
+		return "internship"
+	case "temp", "temporary":
+		return "temporary"
 	default:
 		return normalized
 	}
@@ -379,7 +385,20 @@ func normalizeStateName(value any) string {
 		return ""
 	}
 	normalized := strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(text, " "))
-	return normalized
+	if normalized == "" {
+		return ""
+	}
+	if regexp.MustCompile(`^[A-Za-z]{2,3}$`).MatchString(normalized) {
+		return strings.ToUpper(normalized)
+	}
+	parts := strings.Fields(strings.ToLower(normalized))
+	for idx, part := range parts {
+		if part == "" {
+			continue
+		}
+		parts[idx] = strings.ToUpper(part[:1]) + part[1:]
+	}
+	return strings.Join(parts, " ")
 }
 
 func normalizeLocationFields(rawLocation, rawCity, rawStates any) (any, any, any) {

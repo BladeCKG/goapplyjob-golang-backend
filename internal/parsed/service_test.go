@@ -243,6 +243,15 @@ func TestNormalizeEmploymentTypeValueCollapsesToFullTime(t *testing.T) {
 	if got := normalizeEmploymentTypeValue("Full Time"); got != "full-time" {
 		t.Fatalf("expected full-time, got %#v", got)
 	}
+	if got := normalizeEmploymentTypeValue("contractor"); got != "contract" {
+		t.Fatalf("expected contract, got %#v", got)
+	}
+	if got := normalizeEmploymentTypeValue("intern"); got != "internship" {
+		t.Fatalf("expected internship, got %#v", got)
+	}
+	if got := normalizeEmploymentTypeValue("temp"); got != "temporary" {
+		t.Fatalf("expected temporary, got %#v", got)
+	}
 }
 
 func TestNormalizeLocationFieldsPrefersUnitedStatesWhenMultipleCountries(t *testing.T) {
@@ -259,5 +268,18 @@ func TestNormalizeLocationFieldsPrefersUnitedStatesWhenMultipleCountries(t *test
 	}
 	if states != "[\"Wisconsin\"]" {
 		t.Fatalf("expected states json [\"Wisconsin\"], got %#v", states)
+	}
+}
+
+func TestNormalizeLocationFieldsTitleCasesCityAndState(t *testing.T) {
+	location, city, states := normalizeLocationFields("new york, new york, usa", nil, []any{})
+	if location != "United States" {
+		t.Fatalf("expected United States location, got %#v", location)
+	}
+	if city != "New York" {
+		t.Fatalf("expected New York city, got %#v", city)
+	}
+	if states != "[\"New York\"]" {
+		t.Fatalf("expected states json [\"New York\"], got %#v", states)
 	}
 }
