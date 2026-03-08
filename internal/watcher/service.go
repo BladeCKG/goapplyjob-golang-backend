@@ -8,7 +8,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
+	"net/http"
 	"net/url"
 	"regexp"
 	"sort"
@@ -18,18 +20,21 @@ import (
 
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/sources/builtin"
+	"goapplyjob-golang-backend/internal/sources/dailyremote"
 	"goapplyjob-golang-backend/internal/sources/hiringcafe"
 	"goapplyjob-golang-backend/internal/sources/remotive"
 	"goapplyjob-golang-backend/internal/sources/workable"
 )
 
 const (
-	sourceName       = "remoterocketship"
-	sourceBuiltin    = "builtin"
-	sourceRemotive   = "remotive"
-	sourceHiringCafe = "hiringcafe"
-	payloadTypeDelta = "delta"
-	payloadTypeXML   = "delta_xml"
+	sourceRemoterocketship        = "remoterocketship"
+	sourceBuiltin     = "builtin"
+	sourceRemotive    = "remotive"
+	sourceHiringCafe  = "hiringcafe"
+	sourceWorkable    = "workable"
+	sourceDailyremote = "dailyremote"
+	payloadTypeDelta  = "delta"
+	payloadTypeXML    = "delta_xml"
 )
 
 var (
@@ -42,22 +47,25 @@ var (
 )
 
 type Config struct {
-	Enabled                 bool
-	URL                     string
-	IntervalMinutes         float64
-	SampleKB                int
-	TimeoutSeconds          float64
-	BuiltinBaseURL          string
-	BuiltinMaxPage          int
-	BuiltinPagesPerCycle    int
-	BuiltinCheckpointPages  int
-	WorkableAPIURL          string
-	WorkablePageLimit       int
-	RemotiveSitemapURL      string
-	HiringCafeSearchAPIURL  string
-	HiringCafeTotalCountURL string
-	HiringCafePageSize      int
-	EnabledSources          map[string]struct{}
+	Enabled                  bool
+	URL                      string
+	IntervalMinutes          float64
+	SampleKB                 int
+	TimeoutSeconds           float64
+	BuiltinBaseURL           string
+	BuiltinMaxPage           int
+	BuiltinPagesPerCycle     int
+	BuiltinCheckpointPages   int
+	WorkableAPIURL           string
+	WorkablePageLimit        int
+	RemotiveSitemapURL       string
+	DailyRemoteBaseURL       string
+	DailyRemoteMaxPage       int
+	DailyRemotePagesPerCycle int
+	HiringCafeSearchAPIURL   string
+	HiringCafeTotalCountURL  string
+	HiringCafePageSize       int
+	EnabledSources           map[string]struct{}
 }
 
 type FetchSampleFunc func() ([]byte, error)
@@ -82,6 +90,9 @@ func New(config Config, db *database.DB) *Service {
 		"enabled_sources":             sortedSourceNames(config.EnabledSources),
 		"workable_api_url":            config.WorkableAPIURL,
 		"remotive_sitemap_url":        config.RemotiveSitemapURL,
+		"dailyremote_base_url":        config.DailyRemoteBaseURL,
+		"dailyremote_max_page":        config.DailyRemoteMaxPage,
+		"dailyremote_pages_per_cycle": config.DailyRemotePagesPerCycle,
 		"hiringcafe_search_api_url":   config.HiringCafeSearchAPIURL,
 		"hiringcafe_total_count_url":  config.HiringCafeTotalCountURL,
 		"hiringcafe_page_size":        config.HiringCafePageSize,
@@ -97,9 +108,60 @@ func New(config Config, db *database.DB) *Service {
 		"last_previous_first_lastmod": nil,
 		"last_delta_payload_id":       nil,
 	}
-	svc.FetchSample = func() ([]byte, error) { return nil, errors.New("fetch sample not configured") }
-	svc.FetchFull = func() ([]byte, error) { return nil, errors.New("fetch full not configured") }
-	svc.FetchText = func(string) (string, error) { return "", errors.New("fetch text not configured") }
+	timeoutSeconds := config.TimeoutSeconds
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 30
+	}
+	httpClient := &http.Client{Timeout: time.Duration(timeoutSeconds * float64(time.Second))}
+	userAgent := "goapplyjob-backend/watcher"
+	readBody := func(resp *http.Response, limitBytes int64) ([]byte, error) {
+		if limitBytes <= 0 {
+			limitBytes = 25 * 1024 * 1024
+		}
+		defer resp.Body.Close()
+		return io.ReadAll(io.LimitReader(resp.Body, limitBytes))
+	}
+	var doFetchBytes func(rawURL string, rangeHeader string) ([]byte, error)
+	doFetchBytes = func(rawURL string, rangeHeader string) ([]byte, error) {
+		if strings.TrimSpace(rawURL) == "" {
+			return nil, errors.New("empty url")
+		}
+		req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", userAgent)
+		if strings.TrimSpace(rangeHeader) != "" {
+			req.Header.Set("Range", rangeHeader)
+		}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			if resp.StatusCode == http.StatusRequestedRangeNotSatisfiable && rangeHeader != "" {
+				_ = resp.Body.Close()
+				return doFetchBytes(rawURL, "")
+			}
+			bodyPreview, _ := readBody(resp, 1024)
+			return nil, errors.New("http status " + strconv.Itoa(resp.StatusCode) + " body=" + strings.TrimSpace(string(bodyPreview)))
+		}
+		return readBody(resp, 25*1024*1024)
+	}
+	svc.FetchSample = func() ([]byte, error) {
+		sampleBytes := int64(max(config.SampleKB, 1) * 1024)
+		return doFetchBytes(config.URL, "bytes=0-"+strconv.FormatInt(sampleBytes-1, 10))
+	}
+	svc.FetchFull = func() ([]byte, error) {
+		return doFetchBytes(config.URL, "")
+	}
+	svc.FetchText = func(rawURL string) (string, error) {
+		data, err := doFetchBytes(rawURL, "")
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	}
 	return svc
 }
 
@@ -151,42 +213,144 @@ func (s *Service) RunForever(runOnce bool) error {
 
 func (s *Service) RunOnce() error {
 	log.Printf("watcher cycle_start enabled_sources=%v", sortedSourceNames(s.Config.EnabledSources))
-	if strings.TrimSpace(s.Config.URL) != "" && s.isSourceEnabled(sourceName) {
-		log.Printf("watcher source_start source=%s runner=runOnceRemoteRocketship", sourceName)
+	if strings.TrimSpace(s.Config.URL) != "" && s.isSourceEnabled(sourceRemoterocketship) {
+		log.Printf("watcher source_start source=%s runner=runOnceRemoteRocketship", sourceRemoterocketship)
 		if err := s.runOnceRemoteRocketship(); err != nil {
-			return err
+			log.Printf("watcher source_failed source=%s runner=runOnceRemoteRocketship error=%v", sourceRemoterocketship, err)
+			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
+		} else {
+			log.Printf("watcher source_done source=%s runner=runOnceRemoteRocketship", sourceRemoterocketship)
 		}
-		log.Printf("watcher source_done source=%s runner=runOnceRemoteRocketship", sourceName)
 	}
 	if strings.TrimSpace(s.Config.RemotiveSitemapURL) != "" && s.isSourceEnabled(sourceRemotive) {
 		log.Printf("watcher source_start source=%s runner=runOnceRemotive", sourceRemotive)
 		if err := s.runOnceRemotive(); err != nil {
-			return err
+			log.Printf("watcher source_failed source=%s runner=runOnceRemotive error=%v", sourceRemotive, err)
+			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
+		} else {
+			log.Printf("watcher source_done source=%s runner=runOnceRemotive", sourceRemotive)
 		}
-		log.Printf("watcher source_done source=%s runner=runOnceRemotive", sourceRemotive)
-	}
-	if strings.TrimSpace(s.Config.BuiltinBaseURL) != "" && s.isSourceEnabled(sourceBuiltin) {
-		log.Printf("watcher source_start source=%s runner=runOnceBuiltin", sourceBuiltin)
-		if err := s.runOnceBuiltin(); err != nil {
-			return err
-		}
-		log.Printf("watcher source_done source=%s runner=runOnceBuiltin", sourceBuiltin)
 	}
 	if strings.TrimSpace(s.Config.WorkableAPIURL) != "" && s.isSourceEnabled("workable") {
 		log.Printf("watcher source_start source=workable runner=runOnceWorkable")
 		if err := s.runOnceWorkable(); err != nil {
-			return err
+			log.Printf("watcher source_failed source=workable runner=runOnceWorkable error=%v", err)
+			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
+		} else {
+			log.Printf("watcher source_done source=workable runner=runOnceWorkable")
 		}
-		log.Printf("watcher source_done source=workable runner=runOnceWorkable")
+	}
+	if strings.TrimSpace(s.Config.DailyRemoteBaseURL) != "" && strings.Contains(s.Config.DailyRemoteBaseURL, "{page}") && s.Config.DailyRemoteMaxPage >= 1 && s.Config.DailyRemotePagesPerCycle >= 1 && s.isSourceEnabled(sourceDailyremote) {
+		log.Printf("watcher source_start source=%s runner=runOnceDailyremote", sourceDailyremote)
+		if err := s.runOnceDailyremote(); err != nil {
+			log.Printf("watcher source_failed source=%s runner=runOnceDailyremote error=%v", sourceDailyremote, err)
+			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
+		} else {
+			log.Printf("watcher source_done source=%s runner=runOnceDailyremote", sourceDailyremote)
+		}
+	}
+	if strings.TrimSpace(s.Config.BuiltinBaseURL) != "" && s.isSourceEnabled(sourceBuiltin) {
+		log.Printf("watcher source_start source=%s runner=runOnceBuiltin", sourceBuiltin)
+		if err := s.runOnceBuiltin(); err != nil {
+			log.Printf("watcher source_failed source=%s runner=runOnceBuiltin error=%v", sourceBuiltin, err)
+			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
+		} else {
+			log.Printf("watcher source_done source=%s runner=runOnceBuiltin", sourceBuiltin)
+		}
 	}
 	if strings.TrimSpace(s.Config.HiringCafeSearchAPIURL) != "" && strings.TrimSpace(s.Config.HiringCafeTotalCountURL) != "" && s.isSourceEnabled(sourceHiringCafe) {
 		log.Printf("watcher source_start source=%s runner=runOnceHiringCafe", sourceHiringCafe)
 		if err := s.runOnceHiringCafe(); err != nil {
-			return err
+			log.Printf("watcher source_failed source=%s runner=runOnceHiringCafe error=%v", sourceHiringCafe, err)
+			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
+		} else {
+			log.Printf("watcher source_done source=%s runner=runOnceHiringCafe", sourceHiringCafe)
 		}
-		log.Printf("watcher source_done source=%s runner=runOnceHiringCafe", sourceHiringCafe)
 	}
 	return nil
+}
+
+func (s *Service) runOnceDailyremote() error {
+	statePayload, err := s.loadStatePayload(sourceDailyremote)
+	if err != nil {
+		return err
+	}
+	previousLatestExternalID := intFromAny(statePayload["latest_external_id"], 0)
+	newestExternalID := previousLatestExternalID
+	pagesScanned := 0
+	payloadRows := make([]map[string]any, 0)
+
+	for page := 1; page <= s.Config.DailyRemoteMaxPage && pagesScanned < s.Config.DailyRemotePagesPerCycle; page++ {
+		pageURL := strings.ReplaceAll(s.Config.DailyRemoteBaseURL, "{page}", strconv.Itoa(page))
+		log.Printf("DailyRemote fetch_start page=%d url=%s", page, pageURL)
+		htmlText, err := s.FetchText(pageURL)
+		if err != nil {
+			return err
+		}
+		pagesScanned++
+
+		listings := dailyremote.ExtractJobListings(htmlText, pageURL, time.Now().UTC())
+		if len(listings) == 0 {
+			break
+		}
+		firstExternalID := intFromAny(listings[0]["external_id"], 0)
+		if firstExternalID > newestExternalID {
+			newestExternalID = firstExternalID
+		}
+
+		stopScan := false
+		for _, listing := range listings {
+			externalID := intFromAny(listing["external_id"], 0)
+			if externalID <= 0 {
+				continue
+			}
+			postDate, _ := listing["post_date"].(time.Time)
+			rowURL, _ := listing["url"].(string)
+			if strings.TrimSpace(rowURL) == "" || postDate.IsZero() {
+				continue
+			}
+			if previousLatestExternalID > 0 && externalID <= previousLatestExternalID {
+				stopScan = true
+				break
+			}
+			payloadRows = append(payloadRows, map[string]any{
+				"url":       strings.TrimSpace(rowURL),
+				"post_date": postDate.UTC(),
+			})
+		}
+		if stopScan {
+			break
+		}
+	}
+
+	var payloadID any
+	if len(payloadRows) > 0 {
+		savedID, err := s.saveDeltaPayloadForSource(
+			sourceDailyremote,
+			strings.ReplaceAll(s.Config.DailyRemoteBaseURL, "{page}", "1"),
+			dailyremote.PayloadType,
+			dailyremote.SerializeImportRows(payloadRows),
+		)
+		if err != nil {
+			return err
+		}
+		payloadID = savedID
+	}
+
+	latestExternalIDValue := any(nil)
+	switch {
+	case newestExternalID > 0:
+		latestExternalIDValue = newestExternalID
+	case previousLatestExternalID > 0:
+		latestExternalIDValue = previousLatestExternalID
+	}
+
+	return s.saveStatePayload(sourceDailyremote, map[string]any{
+		"latest_external_id":       latestExternalIDValue,
+		"pages_scanned_last_cycle": pagesScanned,
+		"latest_delta_count":       len(payloadRows),
+		"latest_delta_payload_id":  payloadID,
+	})
 }
 
 func (s *Service) runOnceRemoteRocketship() error {
@@ -401,42 +565,131 @@ func (s *Service) runOnceBuiltin() error {
 }
 
 func (s *Service) runOnceWorkable() error {
-	currentURL := workable.BuildAPIURL(s.Config.WorkableAPIURL, "", max(s.Config.WorkablePageLimit, 1))
-	pageCount := 0
-	payloadsCreated := 0
-	log.Printf("Workable watcher cycle_start page_limit=%d", s.Config.WorkablePageLimit)
-	for currentURL != "" && pageCount < 10 {
-		log.Printf("Workable fetch_start url=%s", currentURL)
-		htmlText, err := s.FetchText(currentURL)
+	statePayload, err := s.loadStatePayload(sourceWorkable)
+	if err != nil {
+		return err
+	}
+	previousFirstJobPostDate, _ := statePayload["first_job_post_date"].(string)
+	previousFirstJobURL, _ := statePayload["first_job_url"].(string)
+	previousFirstDT := parseISOTime(previousFirstJobPostDate)
+	isBootstrap := previousFirstDT == nil
+
+	pagesScanned := 0
+	insertedRows := 0
+	updatedRows := 0
+	var firstPageLatestPostDate *time.Time
+	firstPageFirstURL := previousFirstJobURL
+	nextToken := ""
+
+	log.Printf("Workable watcher cycle_start previous_first_job_post_date=%s page_limit=%d", previousFirstJobPostDate, s.Config.WorkablePageLimit)
+
+	for {
+		pageURL := workable.BuildAPIURL(s.Config.WorkableAPIURL, nextToken, max(s.Config.WorkablePageLimit, 1))
+		log.Printf("Workable fetch_start token=%s url=%s", valueOrNil(nextToken), pageURL)
+
+		bodyText, err := s.FetchText(pageURL)
 		if err != nil {
 			return err
 		}
-		rows, skipped := workable.NormalizeJobs(htmlText)
-		if len(rows) == 0 && skipped > 0 {
+
+		var response map[string]any
+		if err := json.Unmarshal([]byte(bodyText), &response); err != nil || response == nil {
 			break
 		}
-		log.Printf("Workable fetch_done jobs=%d", len(rows))
-		if len(rows) > 0 {
-			if _, err := s.saveDeltaPayloadForSource("workable", currentURL, payloadTypeDelta, workable.SerializeImportRows(rows)); err != nil {
+		jobsRaw, _ := response["jobs"].([]any)
+		if len(jobsRaw) == 0 {
+			break
+		}
+
+		if pagesScanned == 0 {
+			firstItem, _ := jobsRaw[0].(map[string]any)
+			if firstItem != nil {
+				if urlValue, ok := firstItem["url"].(string); ok {
+					urlValue = strings.TrimSpace(urlValue)
+					if urlValue != "" {
+						firstPageFirstURL = urlValue
+					}
+				}
+				createdDT := parseISOTime(stringValue(firstItem["created"]))
+				updatedDT := parseISOTime(stringValue(firstItem["updated"]))
+				switch {
+				case createdDT != nil && updatedDT != nil:
+					if updatedDT.After(*createdDT) {
+						firstPageLatestPostDate = updatedDT
+					} else {
+						firstPageLatestPostDate = createdDT
+					}
+				case createdDT != nil:
+					firstPageLatestPostDate = createdDT
+				case updatedDT != nil:
+					firstPageLatestPostDate = updatedDT
+				}
+			}
+		}
+
+		rows, _ := workable.NormalizeJobs(bodyText)
+		if len(rows) == 0 {
+			break
+		}
+		log.Printf("Workable fetch_done jobs=%d token=%s", len(rows), valueOrNil(nextToken))
+
+		toUpsert := rows
+		if !isBootstrap && previousFirstDT != nil {
+			urls := make([]string, 0, len(rows))
+			for _, row := range rows {
+				if rowURL, ok := row["url"].(string); ok && strings.TrimSpace(rowURL) != "" {
+					urls = append(urls, strings.TrimSpace(rowURL))
+				}
+			}
+			existingURLs, err := s.findExistingSourceURLs(sourceWorkable, urls)
+			if err != nil {
 				return err
 			}
-			payloadsCreated++
+			filtered := make([]map[string]any, 0, len(rows))
+			for _, row := range rows {
+				rowURL, _ := row["url"].(string)
+				rowURL = strings.TrimSpace(rowURL)
+				if rowURL == "" {
+					continue
+				}
+				rowDT, _ := row["post_date"].(time.Time)
+				_, seen := existingURLs[rowURL]
+				isNewer := !rowDT.IsZero() && rowDT.After(*previousFirstDT)
+				if !seen || isNewer {
+					filtered = append(filtered, row)
+				}
+			}
+			toUpsert = filtered
 		}
-		var payload map[string]any
-		if err := json.Unmarshal([]byte(htmlText), &payload); err != nil {
+
+		if len(toUpsert) > 0 {
+			inserted, updated, err := s.upsertWorkableJobs(toUpsert)
+			if err != nil {
+				return err
+			}
+			insertedRows += inserted
+			updatedRows += updated
+		}
+
+		pagesScanned++
+		nextValue, _ := response["nextPageToken"].(string)
+		nextToken = strings.TrimSpace(nextValue)
+		if nextToken == "" {
 			break
 		}
-		nextToken, _ := payload["nextPageToken"].(string)
-		if strings.TrimSpace(nextToken) == "" {
-			break
-		}
-		currentURL = workable.BuildAPIURL(s.Config.WorkableAPIURL, nextToken, max(s.Config.WorkablePageLimit, 1))
-		pageCount++
 	}
-	return s.saveStatePayload("workable", map[string]any{
-		"last_scan_at":                utcNowISO(),
-		"pages_scanned_last_cycle":    pageCount + 1,
-		"payloads_created_last_cycle": payloadsCreated,
+
+	firstJobPostDate := valueOrNil(previousFirstJobPostDate)
+	if firstPageLatestPostDate != nil {
+		firstJobPostDate = firstPageLatestPostDate.UTC().Format(time.RFC3339Nano)
+	}
+	return s.saveStatePayload(sourceWorkable, map[string]any{
+		"first_job_post_date": firstJobPostDate,
+		"first_job_url":       valueOrNil(firstPageFirstURL),
+		"last_scan_at":        utcNowISO(),
+		"pages_scanned":       pagesScanned,
+		"inserted_rows":       insertedRows,
+		"updated_rows":        updatedRows,
 	})
 }
 
@@ -547,7 +800,7 @@ func (s *Service) runOnceRemotive() error {
 
 	var payloadID any
 	if len(deltaRows) > 0 {
-		if savedID, err := s.saveDeltaPayloadForSource(sourceRemotive, latestURL, payloadTypeDelta, remotive.SerializeImportRows(deltaRows)); err != nil {
+		if savedID, err := s.saveDeltaPayloadForSource(sourceRemotive, latestURL, remotive.PayloadType, remotive.SerializeImportRows(deltaRows)); err != nil {
 			return err
 		} else {
 			payloadID = savedID
@@ -730,8 +983,9 @@ func (s *Service) loadState(ctx context.Context) (string, string, error) {
 		`SELECT COALESCE(state_json::text, '')
 		 FROM watcher_states
 		 WHERE source = ?
+		 ORDER BY updated_at DESC, id DESC
 		 LIMIT 1`,
-		sourceName,
+		sourceRemoterocketship,
 	).Scan(&stateJSON)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -753,20 +1007,38 @@ func (s *Service) saveState(ctx context.Context, sampleHash, firstLastmod string
 	if s.DB == nil {
 		return nil
 	}
-	_, err := s.DB.SQL.ExecContext(
+	stateJSON := mustMarshalJSON(map[string]any{
+		"source_url":    s.Config.URL,
+		"sample_hash":   sampleHash,
+		"first_lastmod": emptyToNil(firstLastmod),
+	})
+	updatedAt := utcNowISO()
+	updateResult, err := s.DB.SQL.ExecContext(
+		ctx,
+		`UPDATE watcher_states
+		 SET state_json = ?, updated_at = ?
+		 WHERE source = ?`,
+		stateJSON,
+		updatedAt,
+		sourceRemoterocketship,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := updateResult.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected > 0 {
+		return nil
+	}
+	_, err = s.DB.SQL.ExecContext(
 		ctx,
 		`INSERT INTO watcher_states (source, state_json, updated_at)
-		 VALUES (?, ?, ?)
-		 ON CONFLICT(source) DO UPDATE SET
-		   state_json = excluded.state_json,
-		   updated_at = excluded.updated_at`,
-		sourceName,
-		mustMarshalJSON(map[string]any{
-			"source_url":    s.Config.URL,
-			"sample_hash":   sampleHash,
-			"first_lastmod": emptyToNil(firstLastmod),
-		}),
-		utcNowISO(),
+		 VALUES (?, ?, ?)`,
+		sourceRemoterocketship,
+		stateJSON,
+		updatedAt,
 	)
 	return err
 }
@@ -793,7 +1065,7 @@ func (s *Service) saveDeltaPayload(ctx context.Context, bodyText string) (int64,
 		`INSERT INTO watcher_payloads (source, source_url, payload_type, body_text, created_at)
 		 VALUES (?, ?, ?, ?, ?)
 		 RETURNING id`,
-		sourceName,
+		sourceRemoterocketship,
 		s.Config.URL,
 		payloadTypeXML,
 		bodyText,
@@ -809,8 +1081,28 @@ func (s *Service) saveDeltaPayloadForSource(source, sourceURL, payloadType, body
 	if s.DB == nil {
 		return 0, nil
 	}
-	var payloadID int64
+	var existingID sql.NullInt64
+	var existingBody sql.NullString
 	err := s.DB.SQL.QueryRowContext(
+		context.Background(),
+		`SELECT id, COALESCE(body_text, '')
+		 FROM watcher_payloads
+		 WHERE source = ? AND source_url = ? AND payload_type = ? AND consumed_at IS NULL
+		 ORDER BY id DESC
+		 LIMIT 1`,
+		source,
+		sourceURL,
+		payloadType,
+	).Scan(&existingID, &existingBody)
+	if err == nil && existingID.Valid && existingBody.Valid && existingBody.String == bodyText {
+		return existingID.Int64, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
+	}
+
+	var payloadID int64
+	err = s.DB.SQL.QueryRowContext(
 		context.Background(),
 		`INSERT INTO watcher_payloads (source, source_url, payload_type, body_text, created_at)
 		 VALUES (?, ?, ?, ?, ?)
@@ -829,7 +1121,7 @@ func (s *Service) saveDeltaPayloadForSource(source, sourceURL, payloadType, body
 
 func (s *Service) loadStatePayload(source string) (map[string]any, error) {
 	var stateJSON sql.NullString
-	err := s.DB.SQL.QueryRowContext(context.Background(), `SELECT COALESCE(state_json::text, '') FROM watcher_states WHERE source = ? LIMIT 1`, source).Scan(&stateJSON)
+	err := s.DB.SQL.QueryRowContext(context.Background(), `SELECT COALESCE(state_json::text, '') FROM watcher_states WHERE source = ? ORDER BY updated_at DESC, id DESC LIMIT 1`, source).Scan(&stateJSON)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return map[string]any{}, nil
@@ -844,13 +1136,33 @@ func (s *Service) loadStatePayload(source string) (map[string]any, error) {
 }
 
 func (s *Service) saveStatePayload(source string, payload map[string]any) error {
-	_, err := s.DB.SQL.ExecContext(context.Background(),
-		`INSERT INTO watcher_states (source, state_json, updated_at)
-		 VALUES (?, ?, ?)
-		 ON CONFLICT(source) DO UPDATE SET state_json = excluded.state_json, updated_at = excluded.updated_at`,
+	ctx := context.Background()
+	stateJSON := mustMarshalJSON(payload)
+	updatedAt := utcNowISO()
+	updateResult, err := s.DB.SQL.ExecContext(ctx,
+		`UPDATE watcher_states
+		 SET state_json = ?, updated_at = ?
+		 WHERE source = ?`,
+		stateJSON,
+		updatedAt,
 		source,
-		mustMarshalJSON(payload),
-		utcNowISO(),
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := updateResult.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected > 0 {
+		return nil
+	}
+	_, err = s.DB.SQL.ExecContext(ctx,
+		`INSERT INTO watcher_states (source, state_json, updated_at)
+		 VALUES (?, ?, ?)`,
+		source,
+		stateJSON,
+		updatedAt,
 	)
 	return err
 }
@@ -884,6 +1196,76 @@ func (s *Service) findExistingSourceURLs(source string, urls []string) (map[stri
 		out[rowURL] = struct{}{}
 	}
 	return out, rows.Err()
+}
+
+func (s *Service) upsertWorkableJobs(rows []map[string]any) (int, int, error) {
+	if len(rows) == 0 {
+		return 0, 0, nil
+	}
+	tx, err := s.DB.SQL.Begin()
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback()
+	inserted := 0
+	updated := 0
+	for _, row := range rows {
+		rowURL, _ := row["url"].(string)
+		rowURL = strings.TrimSpace(rowURL)
+		postDate, _ := row["post_date"].(time.Time)
+		rawPayload, _ := row["raw_payload"].(map[string]any)
+		if rowURL == "" || postDate.IsZero() || rawPayload == nil {
+			continue
+		}
+
+		var existingID int64
+		var existingSource string
+		var existingPostDateRaw string
+		var existingRawJSON sql.NullString
+		err := tx.QueryRow(`SELECT id, source, post_date, raw_json FROM raw_us_jobs WHERE url = ? LIMIT 1`, rowURL).Scan(&existingID, &existingSource, &existingPostDateRaw, &existingRawJSON)
+		rawPayloadText := mustMarshalJSON(rawPayload)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				if _, execErr := tx.Exec(
+					`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
+					 VALUES (?, ?, ?, true, false, false, 0, ?)`,
+					sourceWorkable,
+					rowURL,
+					postDate.UTC().Format(time.RFC3339Nano),
+					rawPayloadText,
+				); execErr != nil {
+					return 0, 0, execErr
+				}
+				inserted++
+				continue
+			}
+			return 0, 0, err
+		}
+
+		if existingSource != sourceWorkable {
+			continue
+		}
+		existingPostDate := parseISOTime(existingPostDateRaw)
+		needsUpdate := existingPostDate == nil || postDate.After(*existingPostDate) || !existingRawJSON.Valid || strings.TrimSpace(existingRawJSON.String) == ""
+		if !needsUpdate {
+			continue
+		}
+		if _, execErr := tx.Exec(
+			`UPDATE raw_us_jobs
+			 SET post_date = ?, is_ready = true, is_skippable = false, is_parsed = false, retry_count = 0, raw_json = ?
+			 WHERE id = ?`,
+			postDate.UTC().Format(time.RFC3339Nano),
+			rawPayloadText,
+			existingID,
+		); execErr != nil {
+			return 0, 0, execErr
+		}
+		updated++
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, err
+	}
+	return inserted, updated, nil
 }
 
 func (s *Service) fetchJSON(rawURL string) (map[string]any, error) {
@@ -1130,4 +1512,9 @@ func sortedSourceNames(values map[string]struct{}) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func stringValue(value any) string {
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
 }

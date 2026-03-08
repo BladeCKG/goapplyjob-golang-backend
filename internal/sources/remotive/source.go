@@ -15,7 +15,7 @@ import (
 
 const (
 	Source      = "remotive"
-	PayloadType = "delta"
+	PayloadType = "delta_json"
 )
 
 var (

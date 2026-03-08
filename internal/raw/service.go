@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -27,10 +28,11 @@ type ReadHTMLFunc func(string) (string, int, error)
 type ParseHTMLFunc func(string) (map[string]any, error)
 
 type Service struct {
-	DB        *database.DB
-	ReadHTML  ReadHTMLFunc
-	ParseHTML ParseHTMLFunc
-	Status    StatusFunc
+	DB             *database.DB
+	ReadHTML       ReadHTMLFunc
+	ParseHTML      ParseHTMLFunc
+	Status         StatusFunc
+	EnabledSources map[string]struct{}
 }
 
 var scriptJSONBlockPattern = regexp.MustCompile(`(?is)<script[^>]*type=['"]application/json['"][^>]*>(.*?)</script>`)
@@ -117,8 +119,25 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	}
 	var rows *sql.Rows
 	var err error
+	query := `SELECT id, url, COALESCE(source, ''), post_date, COALESCE(extra_json, '') FROM raw_us_jobs WHERE is_ready = false AND is_skippable = false`
+	args := make([]any, 0, len(s.EnabledSources)+1)
+	if len(s.EnabledSources) > 0 {
+		names := make([]string, 0, len(s.EnabledSources))
+		for name := range s.EnabledSources {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		ph := make([]string, 0, len(names))
+		for _, name := range names {
+			ph = append(ph, "?")
+			args = append(args, name)
+		}
+		query += ` AND source IN (` + strings.Join(ph, ", ") + `)`
+	}
+	query += ` ORDER BY post_date DESC, id DESC LIMIT ?`
+	args = append(args, batchSize)
 	for attempt := 0; attempt < 3; attempt++ {
-		rows, err = s.DB.SQL.QueryContext(ctx, `SELECT id, url, COALESCE(source, '') FROM raw_us_jobs WHERE is_ready = false AND is_skippable = false ORDER BY post_date DESC, id DESC LIMIT ?`, batchSize)
+		rows, err = s.DB.SQL.QueryContext(ctx, query, args...)
 		if err == nil {
 			break
 		}
@@ -130,14 +149,16 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	defer rows.Close()
 
 	type rawJob struct {
-		id     int64
-		url    string
-		source string
+		id        int64
+		url       string
+		source    string
+		postDate  time.Time
+		extraJSON string
 	}
 	jobs := make([]rawJob, 0, batchSize)
 	for rows.Next() {
 		var job rawJob
-		if err := rows.Scan(&job.id, &job.url, &job.source); err != nil {
+		if err := rows.Scan(&job.id, &job.url, &job.source, &job.postDate, &job.extraJSON); err != nil {
 			return 0, err
 		}
 		jobs = append(jobs, job)
@@ -227,13 +248,24 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			if _, ok := payload["url"]; !ok {
 				payload["url"] = job.url
 			}
+			if _, ok := payload["created_at"]; !ok && !job.postDate.IsZero() {
+				payload["created_at"] = job.postDate.UTC().Format(time.RFC3339Nano)
+			}
+			extraPayload := parseExtraJSON(job.extraJSON)
+			if len(extraPayload) > 0 {
+				for key, value := range extraPayload {
+					if _, exists := payload[key]; !exists {
+						payload[key] = value
+					}
+				}
+			}
 			log.Printf("raw-us-job-worker parse_done job_id=%d parsed_keys=%d", job.id, len(payload))
 			rawJSON, err := json.Marshal(payload)
 			if err != nil {
 				return processed, err
 			}
 			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
-				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_ready = true, raw_json = ? WHERE id = ?`, string(rawJSON), job.id)
+				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_ready = true, raw_json = ?, extra_json = NULL WHERE id = ?`, string(rawJSON), job.id)
 				return err
 			}); err != nil {
 				return processed, err
@@ -242,6 +274,71 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		processed++
 	}
 	return processed, nil
+}
+
+func (s *Service) CleanupOldRawJobs(ctx context.Context, retentionDays, cleanupBatchSize int) (int64, int64, error) {
+	if retentionDays <= 0 {
+		return 0, 0, nil
+	}
+	if cleanupBatchSize <= 0 {
+		cleanupBatchSize = 5000
+	}
+	cutoff := time.Now().UTC().Add(-time.Duration(retentionDays) * 24 * time.Hour)
+	var deletedRaw int64
+	var deletedParsed int64
+	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+		tx, err := s.DB.SQL.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		rows, err := tx.QueryContext(ctx, `SELECT id FROM raw_us_jobs WHERE post_date < ? ORDER BY post_date ASC, id ASC LIMIT ?`, cutoff.Format(time.RFC3339Nano), cleanupBatchSize)
+		if err != nil {
+			return err
+		}
+		rawIDs := make([]int64, 0, cleanupBatchSize)
+		for rows.Next() {
+			var id int64
+			if scanErr := rows.Scan(&id); scanErr != nil {
+				_ = rows.Close()
+				return scanErr
+			}
+			rawIDs = append(rawIDs, id)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		_ = rows.Close()
+		if len(rawIDs) == 0 {
+			return tx.Commit()
+		}
+		ph := make([]string, 0, len(rawIDs))
+		args := make([]any, 0, len(rawIDs))
+		for _, id := range rawIDs {
+			ph = append(ph, "?")
+			args = append(args, id)
+		}
+		parsedResult, err := tx.ExecContext(ctx, `DELETE FROM parsed_jobs WHERE raw_us_job_id IN (`+strings.Join(ph, ", ")+`)`, args...)
+		if err != nil {
+			return err
+		}
+		rawResult, err := tx.ExecContext(ctx, `DELETE FROM raw_us_jobs WHERE id IN (`+strings.Join(ph, ", ")+`)`, args...)
+		if err != nil {
+			return err
+		}
+		if affected, err := parsedResult.RowsAffected(); err == nil {
+			deletedParsed = affected
+		}
+		if affected, err := rawResult.RowsAffected(); err == nil {
+			deletedRaw = affected
+		}
+		return tx.Commit()
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	return deletedRaw, deletedParsed, nil
 }
 
 var _ = sql.ErrNoRows
@@ -265,4 +362,16 @@ func isTransientDBError(err error) bool {
 		}
 	}
 	return false
+}
+
+func parseExtraJSON(value string) map[string]any {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return map[string]any{}
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil || payload == nil {
+		return map[string]any{}
+	}
+	return payload
 }

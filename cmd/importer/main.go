@@ -41,29 +41,28 @@ func main() {
 	}
 	enabledSources := config.GetenvCSVSet("ENABLED_SOURCES", "remoterocketship")
 	runOnce := config.GetenvBool("RAW_IMPORT_RUN_ONCE", false)
+	errorBackoffSeconds := config.GetenvInt("WORKER_ERROR_BACKOFF_SECONDS", 10)
+	if errorBackoffSeconds < 1 {
+		errorBackoffSeconds = 1
+	}
 
 	for {
 		payloads, err := svc.PickUnconsumedPayloads(payloadsPerCycle, enabledSources)
 		if err != nil {
-			log.Fatal(err)
+			log.Printf("raw-import-worker cycle_failed error=%v", err)
+			if runOnce {
+				return
+			}
+			time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
+			continue
 		}
 		remainingRowsBudget := batchSize
 		for _, payload := range payloads {
 			if remainingRowsBudget <= 0 {
 				break
 			}
-			var payloadRows []importer.SitemapRow
-			var skippedInvalid int
-			switch {
-			case payload.PayloadType == "delta_xml":
-				payloadRows, skippedInvalid = importer.ParseRowsForImport(payload.BodyText)
-			case payload.PayloadType == "delta" && payload.Source == "builtin":
-				payloadRows, skippedInvalid = importer.ParseRowsForBuiltinPayload(payload.BodyText)
-			case payload.PayloadType == "delta" && payload.Source == "workable":
-				payloadRows, skippedInvalid = importer.ParseRowsForWorkablePayload(payload.BodyText)
-			case payload.PayloadType == "delta" && payload.Source == "remotive":
-				payloadRows, skippedInvalid = importer.ParseRowsForRemotivePayload(payload.BodyText)
-			default:
+			payloadRows, skippedInvalid, supported := importer.ParseRowsForSourcePayload(payload.Source, payload.PayloadType, payload.BodyText)
+			if !supported {
 				log.Printf("importer skipping unsupported payload_id=%d source=%s payload_type=%s", payload.ID, payload.Source, payload.PayloadType)
 				continue
 			}
@@ -81,7 +80,8 @@ func main() {
 
 			stats, failedRows, _, err := svc.ImportRawUSJobsRows(rowsToProcess, batchSize, payload.Source)
 			if err != nil {
-				log.Fatal(err)
+				log.Printf("raw-import-worker payload_failed payload_id=%d source=%s error=%v", payload.ID, payload.Source, err)
+				continue
 			}
 			stats.SkippedInvalid = skippedInvalid
 			failedRowsList := importer.FailedImportRowsToList(failedRows)
@@ -92,23 +92,23 @@ func main() {
 				var err error
 				if payload.PayloadType == "delta" && payload.Source == "builtin" {
 					err = svc.ReplaceBuiltinPayloadRows(payload.ID, remainingRows)
-				} else if payload.PayloadType == "delta" && (payload.Source == "workable" || payload.Source == "remotive") {
+				} else {
 					serializedRows := make([]map[string]any, 0, len(remainingRows))
 					for _, row := range remainingRows {
 						serializedRows = append(serializedRows, map[string]any{"url": row.URL, "post_date": row.PostDate})
 					}
 					err = svc.ReplaceSourcePayloadRows(payload.ID, payload.Source, serializedRows)
-				} else {
-					err = svc.ReplacePayloadRows(payload.ID, remainingRows)
 				}
 				if err != nil {
-					log.Fatal(err)
+					log.Printf("raw-import-worker payload_update_failed payload_id=%d source=%s error=%v", payload.ID, payload.Source, err)
+					continue
 				}
 				log.Printf("importer partial payload_id=%d seen=%d inserted=%d updated=%d skipped_invalid=%d failed_db=%d remaining_rows=%d remaining_budget=%d", payload.ID, stats.Seen, stats.Inserted, stats.Updated, stats.SkippedInvalid, stats.FailedDB, len(remainingRows), remainingRowsBudget)
 				continue
 			}
 			if err := svc.DeletePayload(payload.ID); err != nil {
-				log.Fatal(err)
+				log.Printf("raw-import-worker payload_delete_failed payload_id=%d source=%s error=%v", payload.ID, payload.Source, err)
+				continue
 			}
 			log.Printf("importer imported payload_id=%d seen=%d inserted=%d updated=%d skipped_invalid=%d failed_db=%d", payload.ID, stats.Seen, stats.Inserted, stats.Updated, stats.SkippedInvalid, stats.FailedDB)
 		}

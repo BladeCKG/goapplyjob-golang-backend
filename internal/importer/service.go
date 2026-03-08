@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/sources/dailyremote"
 	"goapplyjob-golang-backend/internal/sources/plugins"
 	"goapplyjob-golang-backend/internal/sources/remotive"
 	"goapplyjob-golang-backend/internal/sources/workable"
@@ -55,6 +56,7 @@ const sourceName = "remoterocketship"
 const (
 	sourceBuiltin           = "builtin"
 	sourceRemotive          = "remotive"
+	sourceDailyremote       = "dailyremote"
 	sourceWorkable          = "workable"
 	payloadTypeXML          = "delta_xml"
 	payloadTypeJSON         = "delta"
@@ -154,6 +156,44 @@ func ParseRowsForRemotivePayload(payloadText string) ([]SitemapRow, int) {
 		out = append(out, SitemapRow{URL: stringValue(row["url"]), PostDate: postDate})
 	}
 	return out, skipped
+}
+
+func ParseRowsForDailyremotePayload(payloadText string) ([]SitemapRow, int) {
+	rows, skipped := dailyremote.ParseImportRows(payloadText)
+	out := make([]SitemapRow, 0, len(rows))
+	for _, row := range rows {
+		postDate, _ := row["post_date"].(time.Time)
+		out = append(out, SitemapRow{URL: stringValue(row["url"]), PostDate: postDate})
+	}
+	return out, skipped
+}
+
+func ParseRowsForSourcePayload(source, payloadType, payloadText string) ([]SitemapRow, int, bool) {
+	trimmedSource := strings.TrimSpace(source)
+	trimmedPayloadType := strings.TrimSpace(payloadType)
+	if trimmedPayloadType == payloadTypeXML {
+		rows, skipped := ParseRowsForImport(payloadText)
+		return rows, skipped, true
+	}
+	if trimmedSource == sourceBuiltin && trimmedPayloadType == payloadTypeJSON {
+		rows, skipped := ParseRowsForBuiltinPayload(payloadText)
+		return rows, skipped, true
+	}
+	plugin, ok := plugins.Get(trimmedSource)
+	if !ok || plugin.ParseImportRows == nil || strings.TrimSpace(plugin.PayloadType) == "" {
+		return nil, 0, false
+	}
+	if trimmedPayloadType != plugin.PayloadType {
+		return nil, 0, false
+	}
+	parsedRows, skipped := plugin.ParseImportRows(payloadText)
+	rows := make([]SitemapRow, 0, len(parsedRows))
+	for _, row := range parsedRows {
+		postDate, _ := row["post_date"].(time.Time)
+		rawPayload, _ := row["raw_payload"].(map[string]any)
+		rows = append(rows, SitemapRow{URL: stringValue(row["url"]), PostDate: postDate, RawJSON: rawPayload})
+	}
+	return rows, skipped, true
 }
 
 func iterSitemapRows(xmlPath string) ([][2]string, error) {

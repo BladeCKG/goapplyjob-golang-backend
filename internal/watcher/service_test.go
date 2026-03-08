@@ -75,7 +75,7 @@ func buildService(t *testing.T) *Service {
 		HiringCafeTotalCountURL: "",
 		HiringCafePageSize:      200,
 		EnabledSources: map[string]struct{}{
-			sourceName: {},
+			sourceRemoterocketship: {},
 		},
 	}, db)
 }
@@ -509,5 +509,69 @@ func TestHiringCafeWatcherUpsertsJobsWithoutImporter(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("expected 1 hiringcafe raw row, got %d", count)
+	}
+}
+
+func TestWorkableWatcherUpsertsJobsWithoutImporter(t *testing.T) {
+	service := buildService(t)
+	service.Config.URL = ""
+	service.Config.WorkableAPIURL = "https://jobs.workable.com/api/v1/jobs?location=United%20States&workplace=remote&day_range=1"
+	service.Config.WorkablePageLimit = 100
+	service.Config.EnabledSources = map[string]struct{}{sourceWorkable: {}}
+	service.FetchText = func(rawURL string) (string, error) {
+		if !strings.Contains(rawURL, "jobs.workable.com/api/v1/jobs") {
+			return "", errors.New("unexpected URL: " + rawURL)
+		}
+		return `{"jobs":[{"id":"w1","url":"https://jobs.workable.com/view/abc123","title":"Software Engineer","created":"2026-02-20T20:14:34Z","updated":"2026-02-20T20:14:34Z","employmentType":"full-time","workplace":"remote","language":"en","description":"Role","requirementsSection":"Req","benefitsSection":"Ben","socialSharingDescription":"Summary","company":{"id":"c1","title":"Acme","website":"https://acme.example","image":"https://acme.example/logo.png"},"location":{"city":"New York","subregion":"New York","countryName":"United States"},"locations":["New York, United States"]}]}`, nil
+	}
+
+	if err := service.RunOnce(); err != nil {
+		t.Fatal(err)
+	}
+
+	var count int
+	if err := service.DB.SQL.QueryRowContext(context.Background(), `SELECT COUNT(1) FROM raw_us_jobs WHERE source = ?`, sourceWorkable).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 workable raw row, got %d", count)
+	}
+
+	var payloadCount int
+	if err := service.DB.SQL.QueryRowContext(context.Background(), `SELECT COUNT(1) FROM watcher_payloads WHERE source = ?`, sourceWorkable).Scan(&payloadCount); err != nil {
+		t.Fatal(err)
+	}
+	if payloadCount != 0 {
+		t.Fatalf("expected 0 workable watcher payload rows, got %d", payloadCount)
+	}
+}
+
+func TestDailyremoteWatcherCreatesDeltaPayload(t *testing.T) {
+	service := buildService(t)
+	service.Config.URL = ""
+	service.Config.DailyRemoteBaseURL = "https://dailyremote.com/?page={page}"
+	service.Config.DailyRemoteMaxPage = 2
+	service.Config.DailyRemotePagesPerCycle = 2
+	service.Config.EnabledSources = map[string]struct{}{sourceDailyremote: {}}
+	service.FetchText = func(rawURL string) (string, error) {
+		if strings.Contains(rawURL, "page=1") {
+			return `<article class="card js-card"><h2 class="job-position"><a href="/remote-job/backend-engineer-1001">Backend Engineer</a></h2><span>1 hour ago</span></article>`, nil
+		}
+		return "", nil
+	}
+	if err := service.saveStatePayload(sourceDailyremote, map[string]any{"latest_external_id": 1000}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := service.RunOnce(); err != nil {
+		t.Fatal(err)
+	}
+
+	var payloadType string
+	if err := service.DB.SQL.QueryRowContext(context.Background(), `SELECT payload_type FROM watcher_payloads WHERE source = ? ORDER BY id DESC LIMIT 1`, sourceDailyremote).Scan(&payloadType); err != nil {
+		t.Fatal(err)
+	}
+	if payloadType != "delta_dailyremote_json" {
+		t.Fatalf("expected delta_dailyremote_json payload type, got %s", payloadType)
 	}
 }

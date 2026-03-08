@@ -4,29 +4,38 @@ import (
 	"time"
 
 	"goapplyjob-golang-backend/internal/sources/builtin"
+	"goapplyjob-golang-backend/internal/sources/dailyremote"
 	"goapplyjob-golang-backend/internal/sources/hiringcafe"
-	"goapplyjob-golang-backend/internal/sources/remotive"
 	"goapplyjob-golang-backend/internal/sources/remoterocketship"
+	"goapplyjob-golang-backend/internal/sources/remotive"
 	"goapplyjob-golang-backend/internal/sources/workable"
 )
 
 type SourcePlugin struct {
-	Source              string
-	PayloadType         string
-	ToTargetJobURL      func(string) string
-	ParseRawHTML        func(string, string) map[string]any
-	ParseImportRows     func(string) ([]map[string]any, int)
-	SerializeImportRows func([]map[string]any) string
+	Source               string
+	PayloadType          string
+	ToTargetJobURL       func(string) string
+	ParseRawHTML         func(string, string) map[string]any
+	ParseImportRows      func(string) ([]map[string]any, int)
+	SerializeImportRows  func([]map[string]any) string
+	UseExternalCompanyID bool
+	UseCompanyMatchKeys  bool
+	RunDuplicateCheck    bool
+	InferCategories      bool
 }
 
 var registry = map[string]SourcePlugin{
 	remoterocketship.Source: {
-		Source:              remoterocketship.Source,
-		PayloadType:         remoterocketship.PayloadType,
-		ToTargetJobURL:      remoterocketship.ToTargetJobURL,
-		ParseRawHTML:        remoterocketship.ParseRawHTML,
-		ParseImportRows:     remoterocketship.ParseImportRows,
-		SerializeImportRows: remoterocketship.SerializeImportRows,
+		Source:               remoterocketship.Source,
+		PayloadType:          remoterocketship.PayloadType,
+		ToTargetJobURL:       remoterocketship.ToTargetJobURL,
+		ParseRawHTML:         remoterocketship.ParseRawHTML,
+		ParseImportRows:      remoterocketship.ParseImportRows,
+		SerializeImportRows:  remoterocketship.SerializeImportRows,
+		UseExternalCompanyID: true,
+		UseCompanyMatchKeys:  true,
+		RunDuplicateCheck:    true,
+		InferCategories:      false,
 	},
 	builtin.Source: {
 		Source:      builtin.Source,
@@ -53,30 +62,58 @@ var registry = map[string]SourcePlugin{
 			}
 			return builtin.SerializeImportRows(items)
 		},
+		UseExternalCompanyID: false,
+		UseCompanyMatchKeys:  true,
+		RunDuplicateCheck:    true,
+		InferCategories:      true,
 	},
 	workable.Source: {
-		Source:              workable.Source,
-		PayloadType:         workable.PayloadType,
-		ToTargetJobURL:      workable.ToTargetJobURL,
-		ParseRawHTML:        workable.ParseRawHTML,
-		ParseImportRows:     workable.ParseImportRows,
-		SerializeImportRows: workable.SerializeImportRows,
+		Source:               workable.Source,
+		PayloadType:          workable.PayloadType,
+		ToTargetJobURL:       workable.ToTargetJobURL,
+		ParseRawHTML:         workable.ParseRawHTML,
+		ParseImportRows:      workable.ParseImportRows,
+		SerializeImportRows:  workable.SerializeImportRows,
+		UseExternalCompanyID: false,
+		UseCompanyMatchKeys:  true,
+		RunDuplicateCheck:    true,
+		InferCategories:      true,
 	},
 	hiringcafe.Source: {
-		Source:              hiringcafe.Source,
-		PayloadType:         hiringcafe.PayloadType,
-		ToTargetJobURL:      hiringcafe.ToTargetJobURL,
-		ParseRawHTML:        hiringcafe.ParseRawHTML,
-		ParseImportRows:     hiringcafe.ParseImportRows,
-		SerializeImportRows: hiringcafe.SerializeImportRows,
+		Source:               hiringcafe.Source,
+		PayloadType:          hiringcafe.PayloadType,
+		ToTargetJobURL:       hiringcafe.ToTargetJobURL,
+		ParseRawHTML:         hiringcafe.ParseRawHTML,
+		ParseImportRows:      hiringcafe.ParseImportRows,
+		SerializeImportRows:  hiringcafe.SerializeImportRows,
+		UseExternalCompanyID: false,
+		UseCompanyMatchKeys:  true,
+		RunDuplicateCheck:    true,
+		InferCategories:      true,
 	},
 	remotive.Source: {
-		Source:              remotive.Source,
-		PayloadType:         remotive.PayloadType,
-		ToTargetJobURL:      remotive.ToTargetJobURL,
-		ParseRawHTML:        remotive.ParseRawHTML,
-		ParseImportRows:     remotive.ParseImportRows,
-		SerializeImportRows: remotive.SerializeImportRows,
+		Source:               remotive.Source,
+		PayloadType:          remotive.PayloadType,
+		ToTargetJobURL:       remotive.ToTargetJobURL,
+		ParseRawHTML:         remotive.ParseRawHTML,
+		ParseImportRows:      remotive.ParseImportRows,
+		SerializeImportRows:  remotive.SerializeImportRows,
+		UseExternalCompanyID: false,
+		UseCompanyMatchKeys:  true,
+		RunDuplicateCheck:    true,
+		InferCategories:      true,
+	},
+	dailyremote.Source: {
+		Source:               dailyremote.Source,
+		PayloadType:          dailyremote.PayloadType,
+		ToTargetJobURL:       dailyremote.ToTargetJobURL,
+		ParseRawHTML:         dailyremote.ParseRawHTML,
+		ParseImportRows:      dailyremote.ParseImportRows,
+		SerializeImportRows:  dailyremote.SerializeImportRows,
+		UseExternalCompanyID: false,
+		UseCompanyMatchKeys:  true,
+		RunDuplicateCheck:    true,
+		InferCategories:      true,
 	},
 }
 

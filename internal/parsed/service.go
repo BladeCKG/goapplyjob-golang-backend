@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/sources/plugins"
 )
 
 const (
@@ -160,7 +161,8 @@ var (
 )
 
 type Service struct {
-	DB *database.DB
+	DB             *database.DB
+	EnabledSources map[string]struct{}
 }
 
 func New(db *database.DB) *Service { return &Service{DB: db} }
@@ -912,7 +914,24 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	if batchSize <= 0 {
 		batchSize = 100
 	}
-	rows, err := s.DB.SQL.QueryContext(ctx, `SELECT id, raw_json, COALESCE(source, '') FROM raw_us_jobs WHERE is_ready = true AND is_parsed = false ORDER BY post_date DESC, id DESC LIMIT ?`, batchSize)
+	query := `SELECT id, raw_json, COALESCE(source, '') FROM raw_us_jobs WHERE is_ready = true AND is_parsed = false`
+	args := make([]any, 0, len(s.EnabledSources)+1)
+	if len(s.EnabledSources) > 0 {
+		sources := make([]string, 0, len(s.EnabledSources))
+		for source := range s.EnabledSources {
+			sources = append(sources, source)
+		}
+		sort.Strings(sources)
+		placeholders := make([]string, 0, len(sources))
+		for _, source := range sources {
+			placeholders = append(placeholders, "?")
+			args = append(args, source)
+		}
+		query += ` AND source IN (` + strings.Join(placeholders, ", ") + `)`
+	}
+	query += ` ORDER BY post_date DESC, id DESC LIMIT ?`
+	args = append(args, batchSize)
+	rows, err := s.DB.SQL.QueryContext(ctx, query, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -959,6 +978,11 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		log.Printf("parsed-job-worker upsert_start raw_job_id=%d source=%s", row.id, row.source)
 		sourceCreatedAt := parseDT(payload["created_at"])
 		normalizedTechStack := normalizeTechStack(payload["techStack"])
+		plugin, pluginOK := plugins.Get(strings.TrimSpace(row.source))
+		inferCategories := row.source == sourceBuiltin
+		if pluginOK {
+			inferCategories = plugin.InferCategories
+		}
 		categorizedTitle := stringFromPayload(payload["categorizedJobTitle"])
 		categorizedFunction := stringFromPayload(payload["categorizedJobFunction"])
 		if title, ok := categorizedTitle.(string); ok && strings.TrimSpace(title) != "" && categorizedFunction == nil {
@@ -970,7 +994,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				categorizedFunction = resolvedFunction
 			}
 		}
-		if row.source == sourceBuiltin && categorizedTitle == nil {
+		if inferCategories && categorizedTitle == nil {
 			if len(normalizedTechStack) == 0 {
 				groqCategory := classifyJobTitleWithGroqSync(stringValue(payload["roleTitle"]), stringValue(payload["roleDescription"]))
 				if strings.TrimSpace(groqCategory) != "" {
@@ -1002,12 +1026,30 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		)
 		normalizedLocationCountries := normalizeLocationCountries(payload["locationCountries"])
 		normalizedTechStackJSON := jsonStringOrNil(normalizedTechStack)
+		companyID, companyErr := s.upsertCompanyFromPayload(ctx, payload, plugin, pluginOK)
+		if companyErr != nil {
+			return processed, companyErr
+		}
+		if duplicateID, isDuplicate, duplicateErr := s.findDuplicateCrossSourceParsedJob(ctx, row.id, row.source, payload, companyID); duplicateErr != nil {
+			return processed, duplicateErr
+		} else if isDuplicate {
+			log.Printf("parsed-job-worker duplicate_cross_source_skip raw_job_id=%d source=%s duplicate_parsed_job_id=%d", row.id, row.source, duplicateID)
+			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+				_, execErr := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true WHERE id = ?`, row.id)
+				return execErr
+			}); err != nil {
+				return processed, err
+			}
+			processed++
+			continue
+		}
 		err = database.RetryLocked(8, 50*time.Millisecond, func() error {
 			_, execErr := s.DB.SQL.ExecContext(
 				ctx,
-				`INSERT INTO parsed_jobs (raw_us_job_id, external_job_id, created_at_source, url, categorized_job_title, categorized_job_function, role_title, employment_type, location_city, location_us_states, location_countries, education_requirements_credential_category, tech_stack, updated_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				`INSERT INTO parsed_jobs (raw_us_job_id, company_id, external_job_id, created_at_source, url, categorized_job_title, categorized_job_function, role_title, employment_type, location_city, location_us_states, location_countries, education_requirements_credential_category, tech_stack, updated_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				 ON CONFLICT(raw_us_job_id) DO UPDATE SET
+				   company_id = excluded.company_id,
 				   external_job_id = excluded.external_job_id,
 				   created_at_source = excluded.created_at_source,
 				   url = excluded.url,
@@ -1022,6 +1064,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				   role_title = excluded.role_title,
 				   updated_at = excluded.updated_at`,
 				row.id,
+				companyID,
 				stringFromPayload(payload["id"]),
 				formatNullableTime(sourceCreatedAt),
 				stringFromPayload(payload["url"]),
@@ -1052,6 +1095,185 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	}
 	log.Printf("parsed-job-worker batch_done rows=%d processed=%d skipped=%d", len(pending), processed, skipped)
 	return processed, nil
+}
+
+func (s *Service) upsertCompanyFromPayload(ctx context.Context, payload map[string]any, plugin plugins.SourcePlugin, pluginOK bool) (any, error) {
+	companyPayload, _ := payload["company"].(map[string]any)
+	if len(companyPayload) == 0 {
+		return nil, nil
+	}
+
+	externalCompanyID := strings.TrimSpace(stringValue(companyPayload["id"]))
+	name := strings.TrimSpace(stringValue(companyPayload["name"]))
+	slug := strings.TrimSpace(stringValue(companyPayload["slug"]))
+	tagline := strings.TrimSpace(stringValue(companyPayload["tagline"]))
+	homePageURL := strings.TrimSpace(stringValue(companyPayload["homePageURL"]))
+	linkedInURL := strings.TrimSpace(stringValue(companyPayload["linkedInURL"]))
+	employeeRange := strings.TrimSpace(stringValue(companyPayload["employeeRange"]))
+	profilePicURL := strings.TrimSpace(stringValue(companyPayload["profilePicURL"]))
+	industrySpecialitiesJSON := normalizedJSONText(companyPayload["industrySpecialities"])
+
+	useExternalID := pluginOK && plugin.UseExternalCompanyID
+	useMatchKeys := !pluginOK || plugin.UseCompanyMatchKeys
+	var companyID sql.NullInt64
+
+	if useExternalID && externalCompanyID != "" {
+		err := s.DB.SQL.QueryRowContext(ctx, `SELECT id FROM parsed_companies WHERE external_company_id = ? LIMIT 1`, externalCompanyID).Scan(&companyID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+	}
+	if !companyID.Valid && useMatchKeys {
+		err := s.DB.SQL.QueryRowContext(
+			ctx,
+			`SELECT id
+			   FROM parsed_companies
+			  WHERE (? <> '' AND LOWER(COALESCE(name, '')) = LOWER(?))
+			     OR (? <> '' AND LOWER(COALESCE(home_page_url, '')) = LOWER(?))
+			     OR (? <> '' AND LOWER(COALESCE(linkedin_url, '')) = LOWER(?))
+			  ORDER BY id DESC
+			  LIMIT 1`,
+			name, name,
+			homePageURL, homePageURL,
+			linkedInURL, linkedInURL,
+		).Scan(&companyID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+	}
+
+	updatedAt := time.Now().UTC().Format(time.RFC3339Nano)
+	if companyID.Valid {
+		_, err := s.DB.SQL.ExecContext(
+			ctx,
+			`UPDATE parsed_companies
+			    SET external_company_id = COALESCE(NULLIF(?, ''), external_company_id),
+			        name = COALESCE(NULLIF(?, ''), name),
+			        slug = COALESCE(NULLIF(?, ''), slug),
+			        tagline = COALESCE(NULLIF(?, ''), tagline),
+			        home_page_url = COALESCE(NULLIF(?, ''), home_page_url),
+			        linkedin_url = COALESCE(NULLIF(?, ''), linkedin_url),
+			        employee_range = COALESCE(NULLIF(?, ''), employee_range),
+			        profile_pic_url = COALESCE(NULLIF(?, ''), profile_pic_url),
+			        industry_specialities = COALESCE(?, industry_specialities),
+			        updated_at = ?
+			  WHERE id = ?`,
+			externalCompanyID,
+			name,
+			slug,
+			tagline,
+			homePageURL,
+			linkedInURL,
+			employeeRange,
+			profilePicURL,
+			industrySpecialitiesJSON,
+			updatedAt,
+			companyID.Int64,
+		)
+		if err != nil {
+			return nil, err
+		}
+		return companyID.Int64, nil
+	}
+
+	var insertedID int64
+	err := s.DB.SQL.QueryRowContext(
+		ctx,
+		`INSERT INTO parsed_companies (external_company_id, name, slug, tagline, home_page_url, linkedin_url, employee_range, profile_pic_url, industry_specialities, updated_at)
+		 VALUES (NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?)
+		 RETURNING id`,
+		externalCompanyID,
+		name,
+		slug,
+		tagline,
+		homePageURL,
+		linkedInURL,
+		employeeRange,
+		profilePicURL,
+		industrySpecialitiesJSON,
+		updatedAt,
+	).Scan(&insertedID)
+	if err != nil {
+		return nil, err
+	}
+	return insertedID, nil
+}
+
+func (s *Service) findDuplicateCrossSourceParsedJob(ctx context.Context, rawJobID int64, source string, payload map[string]any, companyID any) (int64, bool, error) {
+	plugin, ok := plugins.Get(strings.TrimSpace(source))
+	if ok && !plugin.RunDuplicateCheck {
+		return 0, false, nil
+	}
+	rawURL := strings.TrimSpace(stringValue(payload["url"]))
+	externalID := strings.TrimSpace(stringValue(payload["id"]))
+	roleTitle := strings.TrimSpace(stringValue(payload["roleTitle"]))
+	companyIDInt, companyIDOK := companyID.(int64)
+	if rawURL == "" && externalID == "" && (!companyIDOK || roleTitle == "") {
+		return 0, false, nil
+	}
+	conditions := make([]string, 0, 3)
+	args := make([]any, 0, 8)
+	args = append(args, source, rawJobID)
+	if rawURL != "" {
+		conditions = append(conditions, `p.url = ?`)
+		args = append(args, rawURL)
+	}
+	if externalID != "" {
+		conditions = append(conditions, `p.external_job_id = ?`)
+		args = append(args, externalID)
+	}
+	if companyIDOK && roleTitle != "" {
+		conditions = append(conditions, `(p.company_id = ? AND LOWER(COALESCE(p.role_title, '')) = LOWER(?))`)
+		args = append(args, companyIDInt, roleTitle)
+	}
+	if len(conditions) == 0 {
+		return 0, false, nil
+	}
+	var duplicateID sql.NullInt64
+	err := s.DB.SQL.QueryRowContext(
+		ctx,
+		`SELECT p.id
+		   FROM parsed_jobs p
+		   JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
+		  WHERE r.source <> ?
+		    AND p.raw_us_job_id <> ?
+		    AND (`+strings.Join(conditions, " OR ")+`)
+		  ORDER BY p.updated_at DESC, p.id DESC
+		  LIMIT 1`,
+		args...,
+	).Scan(&duplicateID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, false, err
+	}
+	if !duplicateID.Valid {
+		return 0, false, nil
+	}
+	return duplicateID.Int64, true, nil
+}
+
+func normalizedJSONText(value any) any {
+	switch item := value.(type) {
+	case []any:
+		body, err := json.Marshal(item)
+		if err != nil {
+			return nil
+		}
+		return string(body)
+	case []string:
+		body, err := json.Marshal(item)
+		if err != nil {
+			return nil
+		}
+		return string(body)
+	case map[string]any:
+		body, err := json.Marshal(item)
+		if err != nil {
+			return nil
+		}
+		return string(body)
+	default:
+		return nil
+	}
 }
 
 func formatNullableTime(value *time.Time) any {

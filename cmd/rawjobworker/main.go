@@ -30,6 +30,10 @@ func main() {
 		pollSeconds = 5
 	}
 	runOnce := config.GetenvBool("RAW_JOB_RUN_ONCE", false)
+	errorBackoffSeconds := config.GetenvInt("WORKER_ERROR_BACKOFF_SECONDS", 10)
+	if errorBackoffSeconds < 1 {
+		errorBackoffSeconds = 1
+	}
 	retries429 := config.GetenvInt("RAW_JOB_HTTP_429_RETRIES", 3)
 	if retries429 < 0 {
 		retries429 = 0
@@ -40,12 +44,35 @@ func main() {
 	}
 
 	svc := raw.New(db)
+	svc.EnabledSources = config.GetenvCSVSet("ENABLED_SOURCES", "remoterocketship")
 	svc.ReadHTML = makeReadHTMLWith429Retry(retries429, time.Duration(retryDelaySeconds)*time.Second)
+	retentionDays := config.GetenvInt("RAW_JOB_RETENTION_DAYS", 365)
+	retentionCleanupBatch := config.GetenvInt("RAW_JOB_RETENTION_CLEANUP_BATCH", 5000)
+	if retentionCleanupBatch < 1 {
+		retentionCleanupBatch = 1
+	}
 
 	for {
+		deletedRaw, deletedParsed, cleanupErr := svc.CleanupOldRawJobs(context.Background(), retentionDays, retentionCleanupBatch)
+		if cleanupErr != nil {
+			log.Printf("raw-us-job-worker cleanup_failed error=%v", cleanupErr)
+			if runOnce {
+				return
+			}
+			time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
+			continue
+		}
+		if deletedRaw > 0 || deletedParsed > 0 {
+			log.Printf("raw-us-job-worker cleanup_done raw_jobs=%d parsed_jobs=%d", deletedRaw, deletedParsed)
+		}
 		processed, err := svc.ProcessPending(context.Background(), batchSize)
 		if err != nil {
-			log.Fatal(err)
+			log.Printf("raw-us-job-worker cycle_failed error=%v", err)
+			if runOnce {
+				return
+			}
+			time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
+			continue
 		}
 		if runOnce {
 			log.Printf("raw-us-job-worker run-once completed processed=%d", processed)

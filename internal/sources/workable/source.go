@@ -150,30 +150,42 @@ func normalizeJob(item map[string]any) map[string]any {
 }
 
 func buildRawPayload(item map[string]any, urlValue string, postDate time.Time) map[string]any {
-	title := stringValue(item["title"])
+	title, _ := item["title"].(string)
 	company, _ := item["company"].(map[string]any)
 	location, _ := item["location"].(map[string]any)
 	locationItems, _ := item["locations"].([]any)
+	language, _ := item["language"].(string)
+	workplace, _ := item["workplace"].(string)
+	employmentType, _ := item["employmentType"].(string)
+
+	locationCity := stripRemotePrefix(stringValue(location["city"]))
+	locationState := stripRemotePrefix(stringValue(location["subregion"]))
+	if isCountryLike(locationCity) {
+		locationCity = ""
+	}
+	if isCountryLike(locationState) {
+		locationState = ""
+	}
+	locationCountry := stringValue(location["countryName"])
+
 	locationParts := []string{}
 	for _, entry := range locationItems {
 		value := strings.TrimSpace(stringValue(entry))
-		if value == "" || strings.EqualFold(value, "TELECOMMUTE") {
+		if value == "" || strings.EqualFold(value, "TELECOMMUTE") || isRemoteToken(value) {
 			continue
 		}
 		locationParts = append(locationParts, value)
 	}
 	if len(locationParts) == 0 {
-		for _, value := range []string{stringValue(location["city"]), stringValue(location["subregion"]), stringValue(location["countryName"])} {
+		for _, value := range []string{locationCity, locationState, locationCountry} {
 			if strings.TrimSpace(value) != "" {
 				locationParts = append(locationParts, value)
 			}
 		}
 	}
 	isEntry, isJunior, isMid, isSenior, isLead := inferSeniority(title)
-	companySlug := slugify(stringValue(company["title"]))
-	if companySlug == "" {
-		companySlug = "workable-company"
-	}
+	companyTitle := stringValue(company["title"])
+	companySlug := slugify(companyTitle)
 	jobSlug := firstNonEmpty(
 		slugify(title),
 		slugFromURLPath(urlValue),
@@ -181,24 +193,36 @@ func buildRawPayload(item map[string]any, urlValue string, postDate time.Time) m
 	if jobSlug == "" {
 		jobSlug = "workable-job"
 	}
+	requiredLanguages := []string{}
+	if strings.TrimSpace(language) != "" {
+		requiredLanguages = []string{strings.TrimSpace(language)}
+	}
+	locationUSStates := []string{}
+	if strings.TrimSpace(locationState) != "" {
+		locationUSStates = []string{strings.TrimSpace(locationState)}
+	}
+	locationCountries := []string{}
+	if strings.TrimSpace(locationCountry) != "" {
+		locationCountries = []string{strings.TrimSpace(locationCountry)}
+	}
 	return map[string]any{
-		"id":                           stringOrNil(item["id"]),
+		"id":                           intOrStringOrNil(item["id"]),
 		"created_at":                   postDate.UTC().Format(time.RFC3339Nano),
 		"validUntilDate":               nil,
 		"dateDeleted":                  nil,
-		"descriptionLanguage":          stringOrNil(item["language"]),
+		"descriptionLanguage":          stringOrNil(language),
 		"roleTitle":                    stringOrNil(title),
-		"roleDescription":              stringOrNil(item["description"]),
-		"roleRequirements":             stringOrNil(item["requirementsSection"]),
-		"benefits":                     stringOrNil(item["benefitsSection"]),
-		"jobDescriptionSummary":        stringOrNil(item["socialSharingDescription"]),
-		"twoLineJobDescriptionSummary": stringOrNil(item["socialSharingDescription"]),
+		"roleDescription":              item["description"],
+		"roleRequirements":             item["requirementsSection"],
+		"benefits":                     item["benefitsSection"],
+		"jobDescriptionSummary":        item["socialSharingDescription"],
+		"twoLineJobDescriptionSummary": item["socialSharingDescription"],
 		"url":                          urlValue,
 		"slug":                         jobSlug,
-		"employmentType":               stringOrNil(item["employmentType"]),
-		"location":                     strings.Join(locationParts, ", "),
-		"locationType":                 stringOrNil(item["workplace"]),
-		"locationCity":                 stringOrNil(location["city"]),
+		"employmentType":               stringOrNil(employmentType),
+		"location":                     stringOrNil(strings.Join(locationParts, ", ")),
+		"locationType":                 stringOrNil(workplace),
+		"locationCity":                 stringOrNil(locationCity),
 		"categorizedJobTitle":          nil,
 		"categorizedJobFunction":       nil,
 		"educationRequirementsCredentialCategory":  nil,
@@ -211,15 +235,15 @@ func buildRawPayload(item map[string]any, urlValue string, postDate time.Time) m
 		"isMidLevel":        isMid,
 		"isSenior":          isSenior,
 		"isLead":            isLead,
-		"requiredLanguages": []string{stringValue(item["language"])},
-		"locationUSStates":  sliceIfValue(location["subregion"]),
-		"locationCountries": sliceIfValue(location["countryName"]),
+		"requiredLanguages": requiredLanguages,
+		"locationUSStates":  locationUSStates,
+		"locationCountries": locationCountries,
 		"techStack":         []string{},
 		"salaryRange":       map[string]any{},
 		"company": map[string]any{
-			"id":                   stringOrNil(company["id"]),
-			"name":                 stringOrNil(company["title"]),
-			"slug":                 companySlug,
+			"id":                   intOrStringOrNil(company["id"]),
+			"name":                 stringOrNil(companyTitle),
+			"slug":                 stringOrNil(companySlug),
 			"tagline":              nil,
 			"foundedYear":          nil,
 			"homePageURL":          stringOrNil(company["website"]),
@@ -229,6 +253,63 @@ func buildRawPayload(item map[string]any, urlValue string, postDate time.Time) m
 			"fundingData":          []any{},
 			"industrySpecialities": nil,
 		},
+	}
+}
+
+func isRemoteToken(value string) bool {
+	normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(strings.TrimSpace(value)), " ")
+	normalized = strings.TrimSpace(normalized)
+	return normalized == "remote" || strings.HasPrefix(normalized, "remote ")
+}
+
+func stripRemotePrefix(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	parts := strings.Split(value, ",")
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || isRemoteToken(part) {
+			continue
+		}
+		filtered = append(filtered, part)
+	}
+	if len(filtered) == 0 {
+		return ""
+	}
+	return filtered[0]
+}
+
+func isCountryLike(value string) bool {
+	normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(strings.TrimSpace(value)), " ")
+	normalized = strings.TrimSpace(normalized)
+	switch normalized {
+	case "us", "usa", "united states", "united states of america":
+		return true
+	default:
+		return false
+	}
+}
+
+func intOrStringOrNil(value any) any {
+	switch item := value.(type) {
+	case int:
+		return item
+	case int32:
+		return int(item)
+	case int64:
+		return int(item)
+	case float64:
+		return int(item)
+	case string:
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			return nil
+		}
+		return trimmed
+	default:
+		return nil
 	}
 }
 

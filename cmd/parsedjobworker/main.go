@@ -28,12 +28,22 @@ func main() {
 		pollSeconds = 5
 	}
 	runOnce := config.GetenvBool("PARSED_JOB_RUN_ONCE", false)
+	errorBackoffSeconds := config.GetenvInt("WORKER_ERROR_BACKOFF_SECONDS", 10)
+	if errorBackoffSeconds < 1 {
+		errorBackoffSeconds = 1
+	}
 
 	svc := parsed.New(db)
+	svc.EnabledSources = config.GetenvCSVSet("ENABLED_SOURCES", "remoterocketship")
 	for {
 		processed, err := svc.ProcessPending(context.Background(), batchSize)
 		if err != nil {
-			log.Fatal(err)
+			log.Printf("parsed-job-worker cycle_failed error=%v", err)
+			if runOnce {
+				return
+			}
+			time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
+			continue
 		}
 		if runOnce {
 			log.Printf("parsed-job-worker run-once completed processed=%d", processed)
