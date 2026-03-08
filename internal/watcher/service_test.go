@@ -374,6 +374,61 @@ func TestRemotiveWatcherScansBackwardPartitionsUntilCrossingWatermark(t *testing
 	}
 }
 
+func TestRemotiveWatcherUsesNowForDateOnlyLastmodWhenToday(t *testing.T) {
+	service := buildService(t)
+	service.Config.URL = ""
+	service.Config.RemotiveSitemapURL = "https://remotive.com/sitemap-job-postings-10.xml"
+	service.Config.EnabledSources = map[string]struct{}{sourceRemotive: {}}
+	if err := service.saveStatePayload(sourceRemotive, map[string]any{"latest_job_id": 4_999_999}); err != nil {
+		t.Fatal(err)
+	}
+	today := time.Now().UTC().Format("2006-01-02")
+	yesterdayDate := time.Now().UTC().Add(-24 * time.Hour)
+	yesterday := yesterdayDate.Format("2006-01-02")
+	sitemap := `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://remotive.com/remote-jobs/software-dev/job-5000001</loc><lastmod>` + today + `</lastmod></url>
+  <url><loc>https://remotive.com/remote-jobs/software-dev/job-5000000</loc><lastmod>` + yesterday + `</lastmod></url>
+</urlset>`
+	service.FetchText = func(rawURL string) (string, error) {
+		if rawURL != service.Config.RemotiveSitemapURL {
+			return "", errors.New("unexpected URL: " + rawURL)
+		}
+		return sitemap, nil
+	}
+
+	beforeRun := time.Now().UTC()
+	if err := service.runOnceRemotive(); err != nil {
+		t.Fatal(err)
+	}
+	afterRun := time.Now().UTC()
+
+	var body string
+	if err := service.DB.SQL.QueryRowContext(context.Background(), `SELECT body_text FROM watcher_payloads WHERE source = ? ORDER BY id DESC LIMIT 1`, sourceRemotive).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	rows, skipped := remotive.ParseImportRows(body)
+	if skipped != 0 || len(rows) != 2 {
+		t.Fatalf("unexpected rows len=%d skipped=%d", len(rows), skipped)
+	}
+	rowByURL := map[string]time.Time{}
+	for _, row := range rows {
+		rowURL, _ := row["url"].(string)
+		postDate, _ := row["post_date"].(time.Time)
+		rowByURL[rowURL] = postDate.UTC()
+	}
+	todayDT := rowByURL["https://remotive.com/remote-jobs/software-dev/job-5000001"]
+	yesterdayDT := rowByURL["https://remotive.com/remote-jobs/software-dev/job-5000000"]
+
+	if todayDT.Before(beforeRun) || todayDT.After(afterRun) {
+		t.Fatalf("expected today date-only lastmod to map to now, got %s", todayDT.Format(time.RFC3339Nano))
+	}
+	expectedYesterday := time.Date(yesterdayDate.Year(), yesterdayDate.Month(), yesterdayDate.Day(), 0, 0, 0, 0, time.UTC)
+	if !yesterdayDT.Equal(expectedYesterday) {
+		t.Fatalf("expected yesterday midnight UTC %s got %s", expectedYesterday.Format(time.RFC3339Nano), yesterdayDT.Format(time.RFC3339Nano))
+	}
+}
+
 func builtinPageHTML(jobURL string, jobID int, publishedDate string) string {
 	return `<html><head><script type="application/ld+json">{"@graph":[{"@type":"ItemList","itemListElement":[{"@type":"ListItem","position":1,"url":"` + jobURL + `","name":"Role","description":"Desc"}]}]}</script></head><body><script>logBuiltinTrackEvent('job_board_view', {'jobs':[{'id':` + strconv.Itoa(jobID) + `,'published_date':'` + publishedDate + `'}],'filters':{}});</script></body></html>`
 }

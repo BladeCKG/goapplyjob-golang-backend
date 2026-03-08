@@ -444,6 +444,14 @@ func normalizeTime(value string) (time.Time, error) {
 	if parsed, err := time.Parse("2006-01-02 15:04:05", strings.TrimSpace(value)); err == nil {
 		return parsed.UTC(), nil
 	}
+	if parsed, err := time.Parse("2006-01-02", strings.TrimSpace(value)); err == nil {
+		dateOnly := parsed.UTC()
+		now := time.Now().UTC()
+		if dateOnly.Year() == now.Year() && dateOnly.YearDay() == now.YearDay() {
+			return now, nil
+		}
+		return dateOnly, nil
+	}
 	return time.Time{}, errors.New("invalid time format")
 }
 
