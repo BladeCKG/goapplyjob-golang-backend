@@ -223,11 +223,25 @@ func buildRawPayload(item map[string]any, urlValue string, postDate time.Time) m
 }
 
 func inferSeniority(title string) (bool, bool, bool, bool, bool) {
-	lower := strings.ToLower(title)
-	isEntry := strings.Contains(lower, "entry") || strings.Contains(lower, "intern")
-	isJunior := strings.Contains(lower, "junior") || strings.Contains(lower, "jr ")
-	isSenior := strings.Contains(lower, "senior") || strings.Contains(lower, "sr ")
-	isLead := strings.Contains(lower, "lead") || strings.Contains(lower, "principal") || strings.Contains(lower, "staff") || strings.Contains(lower, "head")
+	normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(title), " ")
+	tokens := map[string]struct{}{}
+	for _, token := range strings.Fields(strings.TrimSpace(normalized)) {
+		tokens[token] = struct{}{}
+	}
+	_, hasEntry := tokens["entry"]
+	_, hasIntern := tokens["intern"]
+	_, hasJunior := tokens["junior"]
+	_, hasJr := tokens["jr"]
+	_, hasSenior := tokens["senior"]
+	_, hasSr := tokens["sr"]
+	_, hasLead := tokens["lead"]
+	_, hasPrincipal := tokens["principal"]
+	_, hasStaff := tokens["staff"]
+	_, hasHead := tokens["head"]
+	isEntry := hasEntry || hasIntern
+	isJunior := hasJunior || hasJr
+	isSenior := hasSenior || hasSr
+	isLead := hasLead || hasPrincipal || hasStaff || hasHead
 	isMid := !(isEntry || isJunior || isSenior || isLead)
 	return isEntry, isJunior, isMid, isSenior, isLead
 }

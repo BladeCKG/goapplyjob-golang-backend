@@ -186,3 +186,13 @@ func TestExtractJobFromHTMLReturnsRetryMarkerWhenCompanyMissing(t *testing.T) {
 		t.Fatalf("expected retry reason, got %#v", payload["_skip_reason"])
 	}
 }
+
+func TestInferLevelFlagsDetectsSrWithPunctuation(t *testing.T) {
+	flags := inferLevelFlags("Sr., Software Engineer", "")
+	if flags["isSenior"] != true {
+		t.Fatalf("expected isSenior=true, got %#v", flags)
+	}
+	if flags["isMidLevel"] != false {
+		t.Fatalf("expected isMidLevel=false, got %#v", flags)
+	}
+}

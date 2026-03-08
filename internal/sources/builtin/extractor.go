@@ -596,13 +596,27 @@ func inferLevelFlags(roleTitle, seniorityLabel string) map[string]bool {
 	case "expert / leader":
 		return map[string]bool{"isEntryLevel": false, "isJunior": false, "isMidLevel": false, "isSenior": false, "isLead": true}
 	}
-	title := strings.ToLower(roleTitle)
+	normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(roleTitle), " ")
+	tokens := map[string]struct{}{}
+	for _, token := range strings.Fields(strings.TrimSpace(normalized)) {
+		tokens[token] = struct{}{}
+	}
+	_, hasEntry := tokens["entry"]
+	_, hasIntern := tokens["intern"]
+	_, hasJunior := tokens["junior"]
+	_, hasJr := tokens["jr"]
+	_, hasMid := tokens["mid"]
+	_, hasSenior := tokens["senior"]
+	_, hasSr := tokens["sr"]
+	_, hasLead := tokens["lead"]
+	_, hasPrincipal := tokens["principal"]
+	_, hasStaff := tokens["staff"]
 	return map[string]bool{
-		"isEntryLevel": strings.Contains(title, "entry") || strings.Contains(title, "intern"),
-		"isJunior":     strings.Contains(title, "junior") || strings.Contains(title, " jr"),
-		"isMidLevel":   strings.Contains(title, "mid"),
-		"isSenior":     strings.Contains(title, "senior") || strings.Contains(title, " sr"),
-		"isLead":       strings.Contains(title, "lead") || strings.Contains(title, "principal") || strings.Contains(title, "staff"),
+		"isEntryLevel": hasEntry || hasIntern,
+		"isJunior":     hasJunior || hasJr,
+		"isMidLevel":   hasMid,
+		"isSenior":     hasSenior || hasSr,
+		"isLead":       hasLead || hasPrincipal || hasStaff,
 	}
 }
 

@@ -2,6 +2,7 @@ package hiringcafe
 
 import (
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -103,6 +104,36 @@ func NormalizeJobs(results []map[string]any) []NormalizedJob {
 			continue
 		}
 		rawURL := "https://hiring.cafe/viewjob/" + requisitionID
+		roleTitle := firstNonEmpty(
+			valueString(v5Data["job_title_raw"]),
+			valueString(v5Data["core_job_title"]),
+		)
+		senioritySource := strings.TrimSpace(strings.ToLower(firstNonEmpty(valueString(v5Data["seniority_level"]), roleTitle)))
+		seniorityTokens := map[string]struct{}{}
+		if senioritySource != "" {
+			normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(senioritySource, " ")
+			for _, token := range strings.Fields(strings.TrimSpace(normalized)) {
+				seniorityTokens[token] = struct{}{}
+			}
+		}
+		_, isEntry := seniorityTokens["entry"]
+		_, hasIntern := seniorityTokens["intern"]
+		isEntry = isEntry || hasIntern
+		_, hasJunior := seniorityTokens["junior"]
+		_, hasJr := seniorityTokens["jr"]
+		isJunior := hasJunior || hasJr
+		_, hasMid := seniorityTokens["mid"]
+		_, hasSenior := seniorityTokens["senior"]
+		_, hasSr := seniorityTokens["sr"]
+		isSenior := hasSenior || hasSr
+		_, hasLead := seniorityTokens["lead"]
+		_, hasPrincipal := seniorityTokens["principal"]
+		_, hasStaff := seniorityTokens["staff"]
+		isLead := hasLead || hasPrincipal || hasStaff
+		isMid := hasMid
+		if !isEntry && !isJunior && !isMid && !isSenior && !isLead {
+			isMid = true
+		}
 		locationCountry := locationnorm.NormalizeCountryName("United States", true)
 		if locationCountry == "" {
 			locationCountry = "United States"
@@ -114,7 +145,7 @@ func NormalizeJobs(results []map[string]any) []NormalizedJob {
 				"id":               requisitionID,
 				"created_at":       postDate.UTC().Format(time.RFC3339Nano),
 				"url":              valueString(item["apply_url"]),
-				"roleTitle":        firstNonEmpty(valueString(v5Data["job_title_raw"]), valueString(v5Data["core_job_title"])),
+				"roleTitle":        roleTitle,
 				"employmentType":   normalizeEmploymentType(valueStringSlice(v5Data["commitment"])),
 				"location":         locationCountry,
 				"locationCity":     nil,
@@ -122,6 +153,11 @@ func NormalizeJobs(results []map[string]any) []NormalizedJob {
 				"locationCountries": []string{
 					locationCountry,
 				},
+				"isEntryLevel":                             isEntry,
+				"isJunior":                                 isJunior,
+				"isMidLevel":                               isMid,
+				"isSenior":                                 isSenior,
+				"isLead":                                   isLead,
 				"educationRequirementsCredentialCategory": nil,
 			},
 		})
