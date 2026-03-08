@@ -307,15 +307,15 @@ func uniqueStrings(values []string) []string {
 }
 
 func annualizedMinSalarySQL() string {
-	return `COALESCE(salary_min_usd, ` + annualizedSalarySQL(`salary_min`) + `)`
+	return `COALESCE(` + annualizedSalarySQL(`salary_min_usd`) + `, ` + annualizedSalarySQL(`salary_min`) + `)`
 }
 
 func annualizedMaxSalarySQL() string {
-	return `COALESCE(salary_max_usd, ` + annualizedSalarySQL(`salary_max`) + `, salary_min_usd, ` + annualizedSalarySQL(`salary_min`) + `)`
+	return `COALESCE(` + annualizedSalarySQL(`salary_max_usd`) + `, ` + annualizedSalarySQL(`salary_max`) + `, ` + annualizedSalarySQL(`salary_min_usd`) + `, ` + annualizedSalarySQL(`salary_min`) + `)`
 }
 
 func minSalaryFilterSQL() string {
-	return `(p.salary_min_usd >= ? OR (p.salary_min_usd IS NULL AND ` + annualizedSalarySQL(`p.salary_min`) + ` >= ?))`
+	return `(` + annualizedSalarySQL(`p.salary_min_usd`) + ` >= ? OR (p.salary_min_usd IS NULL AND ` + annualizedSalarySQL(`p.salary_min`) + ` >= ?))`
 }
 
 func cleanFilterLabel(value string) string {

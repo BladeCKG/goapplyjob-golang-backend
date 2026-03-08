@@ -350,6 +350,31 @@ func TestJobsFilterOptionsAnnualized(t *testing.T) {
 	}
 }
 
+func TestJobsMinSalaryAnnualizesUSDWithSalaryType(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJobWithSalaryType(t, db, 1901, "Monthly Mismatch Case", 15000, "monthly")
+
+	code := requestLoginCode(t, router, "min-salary-check@example.com")
+	cookie := verifyLoginCode(t, router, "min-salary-check@example.com", code)
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?min_salary=170000&per_page=50", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	if int(body["total"].(float64)) != 1 {
+		t.Fatalf("expected annualized usd min-salary match %#v", body)
+	}
+	if body["items"].([]any)[0].(map[string]any)["categorized_job_title"] != "Monthly Mismatch Case" {
+		t.Fatalf("unexpected item for min-salary annualized usd %#v", body)
+	}
+}
+
 func TestJobsFilterOptionsIncludesHierarchyMetadata(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
