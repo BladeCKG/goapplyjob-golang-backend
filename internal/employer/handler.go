@@ -118,14 +118,12 @@ func (h *Handler) createOrganization(c *gin.Context) {
 		return
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	result, err := h.db.SQL.ExecContext(c.Request.Context(), `INSERT INTO employer_organizations (name, created_by_user_id, created_at) VALUES (?, ?, ?)`, strings.TrimSpace(payload.Name), user.ID, now)
-	if err != nil {
+	var orgID int64
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `INSERT INTO employer_organizations (name, created_by_user_id, created_at) VALUES (?, ?, ?) RETURNING id`, strings.TrimSpace(payload.Name), user.ID, now).Scan(&orgID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create organization"})
 		return
 	}
-	orgID, _ := result.LastInsertId()
-	_, err = h.db.SQL.ExecContext(c.Request.Context(), `INSERT INTO employer_organization_members (organization_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)`, orgID, user.ID, now)
-	if err != nil {
+	if _, err := h.db.SQL.ExecContext(c.Request.Context(), `INSERT INTO employer_organization_members (organization_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)`, orgID, user.ID, now); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create organization membership"})
 		return
 	}
@@ -183,21 +181,21 @@ func (h *Handler) createJobDraft(c *gin.Context) {
 	now := time.Now().UTC()
 	locationsJSON := marshalStringSlice(payload.Locations)
 	techStackJSON := marshalStringSlice(payload.TechStack)
-	result, err := h.db.SQL.ExecContext(c.Request.Context(), `INSERT INTO employer_jobs (
+	var jobID int64
+	err = h.db.SQL.QueryRowContext(c.Request.Context(), `INSERT INTO employer_jobs (
 		organization_id, created_by_user_id, status, title, department, description, requirements, benefits,
 		employment_type, location_type, locations_json, seniority, tech_stack, apply_url, apply_email,
 		salary_currency, salary_period, salary_min, salary_max, posting_fee_usd, posting_fee_status, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?) RETURNING id`,
 		orgID, user.ID, statusDraft, payload.Title, payload.Department, payload.Description, payload.Requirements, payload.Benefits,
 		payload.EmploymentType, payload.LocationType, locationsJSON, payload.Seniority, techStackJSON, payload.ApplyURL, payload.ApplyEmail,
 		payload.SalaryCurrency, payload.SalaryPeriod, payload.SalaryMin, payload.SalaryMax, max(h.cfg.EmployerPostingFeeUSD, 0),
 		now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano),
-	)
+	).Scan(&jobID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create draft"})
 		return
 	}
-	jobID, _ := result.LastInsertId()
 	if payload.Title != nil && strings.TrimSpace(*payload.Title) != "" {
 		slug := slugify(*payload.Title) + "-" + strconv.FormatInt(jobID, 10)
 		_, _ = h.db.SQL.ExecContext(c.Request.Context(), `UPDATE employer_jobs SET slug = ?, updated_at = ? WHERE id = ?`, slug, time.Now().UTC().Format(time.RFC3339Nano), jobID)
@@ -452,11 +450,9 @@ func (h *Handler) resolveOrganizationForCreate(c *gin.Context, userID int64, req
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	name := strings.SplitN("user-"+strconv.FormatInt(userID, 10), "@", 2)[0] + " jobs"
-	result, err := h.db.SQL.ExecContext(c.Request.Context(), `INSERT INTO employer_organizations (name, created_by_user_id, created_at) VALUES (?, ?, ?)`, name, userID, now)
-	if err != nil {
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `INSERT INTO employer_organizations (name, created_by_user_id, created_at) VALUES (?, ?, ?) RETURNING id`, name, userID, now).Scan(&orgID); err != nil {
 		return 0, "", err
 	}
-	orgID, _ = result.LastInsertId()
 	_, err = h.db.SQL.ExecContext(c.Request.Context(), `INSERT INTO employer_organization_members (organization_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)`, orgID, userID, now)
 	return orgID, "owner", err
 }

@@ -40,7 +40,7 @@ func TestFreshnessMissingCreatedAtSourceReturnsFalse(t *testing.T) {
 }
 
 func TestResetStaleParsedRemovesStaleParsedRows(t *testing.T) {
-	db, err := database.Open("file:test_parsed_freshness?mode=memory&cache=shared")
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_freshness"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -187,15 +187,13 @@ func (h *Handler) upsertUserSubscription(c *gin.Context) {
 		isActiveInt = 1
 	}
 	if err == sql.ErrNoRows {
-		result, execErr := h.db.SQL.ExecContext(c.Request.Context(),
+		if execErr := h.db.SQL.QueryRowContext(c.Request.Context(),
 			`INSERT INTO user_subscriptions (user_id, pricing_plan_id, starts_at, ends_at, is_active, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?)`,
-			userID, planID, payload.StartsAt, payload.EndsAt, isActiveInt, now)
-		if execErr != nil {
+			 VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+			userID, planID, payload.StartsAt, payload.EndsAt, isActiveInt, now).Scan(&subscriptionID); execErr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to upsert subscription"})
 			return
 		}
-		subscriptionID, _ = result.LastInsertId()
 	} else if err == nil {
 		if _, execErr := h.db.SQL.ExecContext(c.Request.Context(),
 			`UPDATE user_subscriptions

@@ -34,7 +34,7 @@ func TestToTargetJobURLPreservesQueryAndFragment(t *testing.T) {
 }
 
 func TestProcessPendingUsesNormalizedURLForFetchAndKeepsOriginalPayloadURL(t *testing.T) {
-	db, err := database.Open("file:test_raw_process_pending?mode=memory&cache=shared")
+	db, err := database.Open(testDatabaseURL(t, "test_raw_process_pending"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestIsRemovedBuiltinJobHTMLFalseWhenTextMissing(t *testing.T) {
 }
 
 func TestProcessPendingSkipsReadyWhenParserRequestsRetry(t *testing.T) {
-	db, err := database.Open("file:test_raw_retry_marker?mode=memory&cache=shared")
+	db, err := database.Open(testDatabaseURL(t, "test_raw_retry_marker"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestProcessPendingSkipsReadyWhenParserRequestsRetry(t *testing.T) {
 }
 
 func TestProcessPendingSkipsRemainingSourceJobsAfter429(t *testing.T) {
-	db, err := database.Open("file:test_raw_429_throttle?mode=memory&cache=shared")
+	db, err := database.Open(testDatabaseURL(t, "test_raw_429_throttle"))
 	if err != nil {
 		t.Fatal(err)
 	}

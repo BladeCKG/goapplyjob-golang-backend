@@ -50,7 +50,7 @@ func TestNaiveAndAwareDatetimesAreComparedSafely(t *testing.T) {
 }
 
 func TestProcessPendingKeepsParsingWhenSourceCreatedAtIsOlderThanPostDate(t *testing.T) {
-	db, err := database.Open("file:test_parsed_stale?mode=memory&cache=shared")
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_stale"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestJaccardSimilarityWorksForOverlap(t *testing.T) {
 }
 
 func TestBuiltinBackfillsCategoriesFromSimilarRemoteJob(t *testing.T) {
-	db, err := database.Open("file:test_parsed_builtin_backfill?mode=memory&cache=shared")
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_builtin_backfill"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestOrderedTokenMatchScorePrefersSpecificCategory(t *testing.T) {
 }
 
 func TestFindSimilarRemoteCategoriesAvoidsGenericEngineer(t *testing.T) {
-	db, err := database.Open("file:test_parsed_weighted_similarity?mode=memory&cache=shared")
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_weighted_similarity"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestNormalizeRoleTitleForExactMatchHandlesCommonAbbreviations(t *testing.T)
 }
 
 func TestFindSimilarRemoteCategoriesPrefersExactNormalizedRoleTitle(t *testing.T) {
-	db, err := database.Open("file:test_parsed_exact_normalized?mode=memory&cache=shared")
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_exact_normalized"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestFindSimilarRemoteCategoriesPrefersExactNormalizedRoleTitle(t *testing.T
 }
 
 func TestFindSimilarRemoteCategoriesUsesTechStackFilter(t *testing.T) {
-	db, err := database.Open("file:test_parsed_tech_stack_filter?mode=memory&cache=shared")
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_tech_stack_filter"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +297,7 @@ func TestFindSimilarRemoteCategoriesUsesTechStackFilter(t *testing.T) {
 }
 
 func TestFindSimilarRemoteCategoriesFallsBackWhenTechStackFilterHasNoMatch(t *testing.T) {
-	db, err := database.Open("file:test_parsed_tech_stack_filter_fallback?mode=memory&cache=shared")
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_tech_stack_filter_fallback"))
 	if err != nil {
 		t.Fatal(err)
 	}

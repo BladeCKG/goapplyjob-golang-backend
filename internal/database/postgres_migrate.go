@@ -2,10 +2,14 @@ package database
 
 import (
 	"context"
+	"crypto/sha1"
 	"database/sql"
 	"embed"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
@@ -23,7 +27,9 @@ func runPostgresMigrations(_ context.Context, dsn string) error {
 	}
 	defer conn.Close()
 
-	driver, err := postgres.WithInstance(conn, &postgres.Config{})
+	driver, err := postgres.WithInstance(conn, &postgres.Config{
+		MigrationsTable: migrationTableName(dsn),
+	})
 	if err != nil {
 		return fmt.Errorf("create postgres migration driver: %w", err)
 	}
@@ -41,4 +47,22 @@ func runPostgresMigrations(_ context.Context, dsn string) error {
 		return fmt.Errorf("apply postgres migrations: %w", err)
 	}
 	return nil
+}
+
+func migrationTableName(dsn string) string {
+	parsed, err := url.Parse(dsn)
+	if err != nil {
+		return "schema_migrations"
+	}
+	rawSearchPath := strings.TrimSpace(parsed.Query().Get("search_path"))
+	if rawSearchPath == "" {
+		return "schema_migrations"
+	}
+	firstSchema := strings.TrimSpace(strings.Split(rawSearchPath, ",")[0])
+	if firstSchema == "" {
+		return "schema_migrations"
+	}
+	sum := sha1.Sum([]byte(strings.ToLower(firstSchema)))
+	suffix := hex.EncodeToString(sum[:4])
+	return "schema_migrations_" + suffix
 }

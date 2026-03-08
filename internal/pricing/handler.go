@@ -168,21 +168,20 @@ func (h *Handler) subscribe(c *gin.Context) {
 	}
 	if priceUSD == 0 {
 		now := time.Now().UTC()
-		result, err := h.db.SQL.ExecContext(
+		var paymentID int64
+		if err := h.db.SQL.QueryRowContext(
 			c.Request.Context(),
 			`INSERT INTO pricing_payments
 			(user_id, pricing_plan_id, provider, payment_method, currency, amount_minor, status, provider_checkout_id, checkout_url, provider_payload, paid_at, created_at)
-			VALUES (?, ?, 'internal', 'free', 'USD', 0, 'paid', NULL, NULL, '{}', ?, ?)`,
+			VALUES (?, ?, 'internal', 'free', 'USD', 0, 'paid', NULL, NULL, '{}', ?, ?) RETURNING id`,
 			user.ID,
 			planID,
 			now.Format(time.RFC3339Nano),
 			now.Format(time.RFC3339Nano),
-		)
-		if err != nil {
+		).Scan(&paymentID); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create payment"})
 			return
 		}
-		paymentID, _ := result.LastInsertId()
 		if err := h.activatePlan(c, user.ID, planID, durationDays, paymentID); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to activate subscription"})
 			return
@@ -210,23 +209,23 @@ func (h *Handler) subscribe(c *gin.Context) {
 		cancelURL = h.cfg.PaymentCancelURL
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	result, err := h.db.SQL.ExecContext(
+	var paymentID int64
+	err = h.db.SQL.QueryRowContext(
 		c.Request.Context(),
 		`INSERT INTO pricing_payments
 		(user_id, pricing_plan_id, provider, payment_method, currency, amount_minor, status, provider_checkout_id, checkout_url, provider_payload, created_at)
-		VALUES (?, ?, ?, ?, 'USD', ?, 'pending', NULL, NULL, '{}', ?)`,
+		VALUES (?, ?, ?, ?, 'USD', ?, 'pending', NULL, NULL, '{}', ?) RETURNING id`,
 		user.ID,
 		planID,
 		payload.Provider,
 		payload.PaymentMethod,
 		priceUSD*100,
 		now,
-	)
+	).Scan(&paymentID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create payment"})
 		return
 	}
-	paymentID, _ := result.LastInsertId()
 	successURL = appendQueryParam(successURL, "payment_id", strconv.FormatInt(paymentID, 10))
 	cancelURL = appendQueryParam(cancelURL, "payment_id", strconv.FormatInt(paymentID, 10))
 

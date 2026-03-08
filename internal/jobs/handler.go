@@ -86,15 +86,7 @@ var (
 		"senior": {},
 		"lead":   {},
 	}
-	nonAlphaTitleChars     = regexp.MustCompile(`[^A-Za-z\s]+`)
-	defaultEmploymentTypes = []string{
-		"full-time",
-		"part-time",
-		"contract",
-		"internship",
-		"temporary",
-		"other",
-	}
+	nonAlphaTitleChars = regexp.MustCompile(`[^A-Za-z\s]+`)
 )
 
 type jobItem struct {
@@ -573,12 +565,10 @@ func (h *Handler) refreshFilterCache(ctx context.Context) error {
 	rows, err := h.db.SQL.QueryContext(ctx,
 		`SELECT DISTINCT p.categorized_job_title, p.categorized_job_function
 		 FROM parsed_jobs p
-		 JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
-		 WHERE COALESCE(NULLIF(trim(r.source), ''), 'remoterocketship') = ?
-		   AND (
+		 WHERE (
 		     p.categorized_job_title IS NOT NULL
 		     OR p.categorized_job_function IS NOT NULL
-		   )`, "remoterocketship")
+		   )`)
 	if err != nil {
 		return err
 	}
@@ -614,6 +604,21 @@ func (h *Handler) refreshFilterCache(ctx context.Context) error {
 			techRows = append(techRows, values)
 		}
 	}
+	employmentTypeRowsRaw, err := h.db.SQL.QueryContext(ctx, `SELECT DISTINCT employment_type FROM parsed_jobs WHERE employment_type IS NOT NULL`)
+	if err != nil {
+		return err
+	}
+	defer employmentTypeRowsRaw.Close()
+	employmentRows := []string{}
+	for employmentTypeRowsRaw.Next() {
+		var employmentType sql.NullString
+		if err := employmentTypeRowsRaw.Scan(&employmentType); err != nil {
+			continue
+		}
+		if employmentType.Valid && strings.TrimSpace(employmentType.String) != "" {
+			employmentRows = append(employmentRows, employmentType.String)
+		}
+	}
 
 	h.filterCache.jobCategoryParents = buildJobCategoryParentsMap(categoryRows)
 	locationParents := map[string][]string{}
@@ -623,8 +628,27 @@ func (h *Handler) refreshFilterCache(ctx context.Context) error {
 	locationParents[unitedStatesCountry] = []string{}
 	h.filterCache.locationParents = locationParents
 	h.filterCache.techStacks = buildTechStacks(techRows)
-	h.filterCache.employmentTypes = buildEmploymentTypes(defaultEmploymentTypes)
+	h.filterCache.employmentTypes = buildEmploymentTypes(employmentRows)
 	return nil
+}
+
+func (h *Handler) hasExactTitleMatch(ctx context.Context, normalizedTitle string) bool {
+	if strings.TrimSpace(normalizedTitle) == "" {
+		return false
+	}
+	var count int
+	err := h.db.SQL.QueryRowContext(
+		ctx,
+		`SELECT COUNT(1)
+		 FROM parsed_jobs p
+		 WHERE lower(trim(COALESCE(p.categorized_job_title, ''))) = ?
+		    OR lower(trim(COALESCE(p.categorized_job_function, ''))) = ?
+		    OR lower(trim(COALESCE(p.role_title, ''))) = ?`,
+		normalizedTitle,
+		normalizedTitle,
+		normalizedTitle,
+	).Scan(&count)
+	return err == nil && count > 0
 }
 
 func (h *Handler) ensureFilterCacheFresh(ctx context.Context, force bool) error {
@@ -676,7 +700,10 @@ func (h *Handler) WarmFilterCache(_ context.Context) error {
 }
 
 func (h *Handler) filterOptions(c *gin.Context) {
-	h.scheduleFilterCacheRefresh(false)
+	if err := h.ensureFilterCacheFresh(c.Request.Context(), false); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
+		return
+	}
 	minSalaryOptions := []int{}
 	for salary := minSalaryStart; salary <= minSalaryEnd; salary += minSalaryStep {
 		minSalaryOptions = append(minSalaryOptions, salary)
@@ -1208,11 +1235,18 @@ func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includ
 			if normalizedTitle == "" {
 				continue
 			}
+			lowerTitle := strings.ToLower(normalizedTitle)
+			if h.hasExactTitleMatch(c.Request.Context(), lowerTitle) {
+				titlePredicates = append(titlePredicates, `(lower(trim(COALESCE(p.categorized_job_title, ''))) = ? OR lower(trim(COALESCE(p.categorized_job_function, ''))) = ? OR lower(trim(COALESCE(p.role_title, ''))) = ?)`)
+				args = append(args, lowerTitle, lowerTitle, lowerTitle)
+				continue
+			}
 			titleParts := []string{
 				`p.categorized_job_title ILIKE ?`,
+				`p.categorized_job_function ILIKE ?`,
 				`p.role_title ILIKE ?`,
 			}
-			args = append(args, "%"+normalizedTitle+"%", "%"+normalizedTitle+"%")
+			args = append(args, "%"+normalizedTitle+"%", "%"+normalizedTitle+"%", "%"+normalizedTitle+"%")
 			if tokens := tokenizeTitleSearchText(title); len(tokens) > 0 {
 				tokenParts := make([]string, 0, len(tokens))
 				for _, token := range tokens {
@@ -1294,8 +1328,12 @@ func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includ
 			if normalizedStack == "" {
 				continue
 			}
-			parts = append(parts, `COALESCE(NULLIF(trim(p.tech_stack), ''), '[]')::jsonb @> ?::jsonb`)
-			args = append(args, mustJSONStringArray(normalizedStack))
+			parts = append(parts, `EXISTS (
+				SELECT 1
+				FROM jsonb_array_elements_text(COALESCE(NULLIF(trim(p.tech_stack), ''), '[]')::jsonb) AS tech_item
+				WHERE lower(tech_item) = lower(?)
+			)`)
+			args = append(args, normalizedStack)
 		}
 		if len(parts) > 0 {
 			filters = append(filters, "("+strings.Join(parts, " OR ")+")")

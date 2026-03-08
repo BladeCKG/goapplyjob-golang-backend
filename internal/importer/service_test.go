@@ -3,14 +3,56 @@ package importer
 import (
 	"context"
 	"database/sql"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"goapplyjob-golang-backend/internal/database"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
+
+func requirePostgresTestDB(t *testing.T) {
+	t.Helper()
+	if !database.HasTestDatabaseURL() {
+		t.Skip("TEST_DATABASE_URL is required for DB-backed tests")
+	}
+}
+
+func testDatabaseURL(t *testing.T, schemaName string) string {
+	t.Helper()
+	requirePostgresTestDB(t)
+	baseURL := database.TestDatabaseBaseURL()
+	adminDB, err := sql.Open("pgx", baseURL)
+	if err != nil {
+		t.Fatalf("open test postgres connection: %v", err)
+	}
+	defer adminDB.Close()
+	schema := "test_" + strings.ReplaceAll(strings.ToLower(schemaName), "-", "_") + "_" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	if _, err := adminDB.ExecContext(context.Background(), `CREATE SCHEMA IF NOT EXISTS "`+schema+`"`); err != nil {
+		t.Fatalf("create test schema %q: %v", schema, err)
+	}
+	t.Cleanup(func() {
+		cleanupDB, openErr := sql.Open("pgx", baseURL)
+		if openErr != nil {
+			return
+		}
+		defer cleanupDB.Close()
+		_, _ = cleanupDB.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS "`+schema+`" CASCADE`)
+	})
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		t.Fatalf("parse TEST_DATABASE_URL: %v", err)
+	}
+	q := parsed.Query()
+	q.Set("search_path", schema)
+	parsed.RawQuery = q.Encode()
+	return parsed.String()
+}
 
 func TestExtractCompleteURLBlocksFromIncompleteXML(t *testing.T) {
 	xmlText := `<?xml version="1.0" encoding="UTF-8"?>
@@ -55,7 +97,8 @@ func TestIterSitemapRowsReturnsOnlyCompleteURLTags(t *testing.T) {
 
 func TestProcessImportFileKeepsFailedRowsAndExportsSuccesses(t *testing.T) {
 	dir := t.TempDir()
-	db, err := database.Open("file:test_importer_success?mode=memory&cache=shared")
+	requirePostgresTestDB(t)
+	db, err := database.Open(testDatabaseURL(t, "test_importer_success"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +143,8 @@ func TestProcessImportFileKeepsFailedRowsAndExportsSuccesses(t *testing.T) {
 
 func TestImportRawUSJobsReturnsFailedRowsAndSuccessesSeparately(t *testing.T) {
 	dir := t.TempDir()
-	db, err := database.Open("file:test_importer_fail?mode=memory&cache=shared")
+	requirePostgresTestDB(t)
+	db, err := database.Open(testDatabaseURL(t, "test_importer_fail"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +184,8 @@ func TestImportRawUSJobsReturnsFailedRowsAndSuccessesSeparately(t *testing.T) {
 }
 
 func TestImportRawUSJobsTextProcessesWatcherPayloadBody(t *testing.T) {
-	db, err := database.Open("file:test_importer_payloads?mode=memory&cache=shared")
+	requirePostgresTestDB(t)
+	db, err := database.Open(testDatabaseURL(t, "test_importer_payloads"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +227,8 @@ func TestImportRawUSJobsTextProcessesWatcherPayloadBody(t *testing.T) {
 }
 
 func TestPickUnconsumedPayloadsReturnsNewestFirst(t *testing.T) {
-	db, err := database.Open("file:test_importer_order?mode=memory&cache=shared")
+	requirePostgresTestDB(t)
+	db, err := database.Open(testDatabaseURL(t, "test_importer_order"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,22 +273,26 @@ func TestParseRowsForBuiltinPayload(t *testing.T) {
 }
 
 func TestReplacePayloadRowsKeepsRemainingRowsInOrder(t *testing.T) {
-	db, err := database.Open("file:test_importer_replace_rows?mode=memory&cache=shared")
+	requirePostgresTestDB(t)
+	db, err := database.Open(testDatabaseURL(t, "test_importer_replace_rows"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
 	svc := New(db)
 
-	result, err := db.SQL.ExecContext(context.Background(), `INSERT INTO watcher_payloads (source_url, payload_type, body_text, created_at) VALUES (?, 'delta_xml', ?, ?)`,
+	var payloadID int64
+	if err := db.SQL.QueryRowContext(
+		context.Background(),
+		`INSERT INTO watcher_payloads (source_url, payload_type, body_text, created_at)
+		 VALUES (?, 'delta_xml', ?, ?)
+		 RETURNING id`,
 		"https://example.com/jobs.xml",
 		`<urlset></urlset>`,
 		time.Now().UTC().Format(time.RFC3339Nano),
-	)
-	if err != nil {
+	).Scan(&payloadID); err != nil {
 		t.Fatal(err)
 	}
-	payloadID, _ := result.LastInsertId()
 
 	rows := []SitemapRow{
 		{URL: "https://example.com/new", PostDate: time.Date(2026, 2, 12, 18, 0, 0, 0, time.UTC)},
@@ -265,7 +315,8 @@ func TestReplacePayloadRowsKeepsRemainingRowsInOrder(t *testing.T) {
 }
 
 func TestDeleteConsumedPayloadsRemovesLegacyRows(t *testing.T) {
-	db, err := database.Open("file:test_importer_delete_consumed?mode=memory&cache=shared")
+	requirePostgresTestDB(t)
+	db, err := database.Open(testDatabaseURL(t, "test_importer_delete_consumed"))
 	if err != nil {
 		t.Fatal(err)
 	}

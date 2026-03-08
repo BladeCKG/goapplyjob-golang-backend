@@ -4,9 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"goapplyjob-golang-backend/internal/config"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -21,6 +27,30 @@ type SQLConn struct {
 
 type Tx struct {
 	inner *sql.Tx
+}
+
+var loadEnvOnce sync.Once
+
+func loadEnvForTests() {
+	loadEnvOnce.Do(func() {
+		_ = config.LoadDotEnvIfExists(".env")
+		if _, file, _, ok := runtime.Caller(0); ok {
+			repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+			_ = config.LoadDotEnvIfExists(filepath.Join(repoRoot, ".env"))
+		}
+	})
+}
+
+func TestDatabaseBaseURL() string {
+	loadEnvForTests()
+	if value := strings.TrimSpace(os.Getenv("TEST_DATABASE_URL")); value != "" {
+		return value
+	}
+	return ""
+}
+
+func HasTestDatabaseURL() bool {
+	return TestDatabaseBaseURL() != ""
 }
 
 func Open(dsn string) (*DB, error) {

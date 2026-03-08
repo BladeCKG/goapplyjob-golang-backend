@@ -787,40 +787,44 @@ func (s *Service) saveDeltaPayload(ctx context.Context, bodyText string) (int64,
 	if s.DB == nil {
 		return 0, nil
 	}
-	result, err := s.DB.SQL.ExecContext(
+	var payloadID int64
+	err := s.DB.SQL.QueryRowContext(
 		ctx,
 		`INSERT INTO watcher_payloads (source, source_url, payload_type, body_text, created_at)
-		 VALUES (?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?)
+		 RETURNING id`,
 		sourceName,
 		s.Config.URL,
 		payloadTypeXML,
 		bodyText,
 		utcNowISO(),
-	)
+	).Scan(&payloadID)
 	if err != nil {
 		return 0, err
 	}
-	return result.LastInsertId()
+	return payloadID, nil
 }
 
 func (s *Service) saveDeltaPayloadForSource(source, sourceURL, payloadType, bodyText string) (int64, error) {
 	if s.DB == nil {
 		return 0, nil
 	}
-	result, err := s.DB.SQL.ExecContext(
+	var payloadID int64
+	err := s.DB.SQL.QueryRowContext(
 		context.Background(),
 		`INSERT INTO watcher_payloads (source, source_url, payload_type, body_text, created_at)
-		 VALUES (?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?)
+		 RETURNING id`,
 		source,
 		sourceURL,
 		payloadType,
 		bodyText,
 		utcNowISO(),
-	)
+	).Scan(&payloadID)
 	if err != nil {
 		return 0, err
 	}
-	return result.LastInsertId()
+	return payloadID, nil
 }
 
 func (s *Service) loadStatePayload(source string) (map[string]any, error) {

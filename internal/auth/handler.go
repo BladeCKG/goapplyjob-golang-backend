@@ -524,11 +524,10 @@ func (h *Handler) getOrCreateUser(c *gin.Context, email string) (int64, error) {
 		return 0, err
 	}
 	now := utcNow().Format(time.RFC3339Nano)
-	result, err := h.db.SQL.ExecContext(c.Request.Context(), `INSERT INTO auth_users (email, created_at) VALUES (?, ?)`, email, now)
-	if err != nil {
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `INSERT INTO auth_users (email, created_at) VALUES (?, ?) RETURNING id`, email, now).Scan(&userID); err != nil {
 		return 0, err
 	}
-	return result.LastInsertId()
+	return userID, nil
 }
 
 func (h *Handler) createSessionForUser(c *gin.Context, userID int64) (string, error) {

@@ -115,7 +115,7 @@ func main() {
 	fmt.Printf("[%s] scanned=%d updated=%d sources=%v\n", mode, scanned, updated, label)
 }
 
-func run(ctx context.Context, db *sql.DB, sources []string, dryRun bool, batchSize int) (int, int, error) {
+func run(ctx context.Context, db *database.SQLConn, sources []string, dryRun bool, batchSize int) (int, int, error) {
 	query := `SELECT p.id, p.tech_stack
 		FROM parsed_jobs p
 		JOIN raw_us_jobs r ON r.id = p.raw_us_job_id`

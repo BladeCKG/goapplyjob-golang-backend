@@ -8,7 +8,7 @@ import (
 )
 
 func TestRecheckSkippableClearsRecoveringJobs(t *testing.T) {
-	db, err := database.Open("file:recheck-skippable-clear?mode=memory&cache=shared")
+	db, err := database.Open(testDatabaseURL(t, "recheck_skippable_clear"))
 	if err != nil {
 		t.Fatal(err)
 	}

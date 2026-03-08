@@ -5,10 +5,12 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha512"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -19,6 +21,7 @@ import (
 	"goapplyjob-golang-backend/internal/database"
 
 	"github.com/gin-gonic/gin"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func TestJobsPublicAccess(t *testing.T) {
@@ -108,7 +111,7 @@ func TestMagicLinkAuthFlow(t *testing.T) {
 
 func TestJobsPublicPreviewIsLimited(t *testing.T) {
 	cfg := config.Load()
-	cfg.DatabaseURL = "file:test_preview?mode=memory&cache=shared"
+	cfg.DatabaseURL = testDatabaseURL(t, "test_preview")
 	cfg.AuthDebugReturnCode = true
 	cfg.PublicJobsMaxPerPage = 3
 	cfg.PublicJobsMaxTotal = 5
@@ -149,7 +152,7 @@ func TestJobsPublicPreviewIsLimited(t *testing.T) {
 
 func TestJobsSitemapEndpointNotPreviewLimited(t *testing.T) {
 	cfg := config.Load()
-	cfg.DatabaseURL = "file:test_jobs_sitemap_not_preview_limited?mode=memory&cache=shared"
+	cfg.DatabaseURL = testDatabaseURL(t, "test_jobs_sitemap_not_preview_limited")
 	cfg.AuthDebugReturnCode = true
 	cfg.PublicJobsMaxPerPage = 2
 	cfg.PublicJobsMaxTotal = 2
@@ -740,6 +743,116 @@ func TestJobsEmploymentTypeFilterAndOptions(t *testing.T) {
 	}
 }
 
+func TestJobsStateAndCountryFiltersUseORAndNormalizeState(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJob(t, db, 8401, "https://example.com/location-a", "Austin", "Texas", 100, 130, true, time.Now().UTC())
+	insertJob(t, db, 8402, "https://example.com/location-b", "Toronto", "Ontario", 100, 130, true, time.Now().UTC())
+	insertJob(t, db, 8403, "https://example.com/location-c", "Seattle", "Washington", 100, 130, true, time.Now().UTC())
+
+	if _, err := db.SQL.ExecContext(
+		context.Background(),
+		`UPDATE parsed_jobs
+		 SET location_city = 'Toronto',
+		     location_us_states = '["Ontario"]',
+		     location_countries = '["Canada"]'
+		 WHERE raw_us_job_id = 8402`,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?us_states=TX&countries=Canada&per_page=50", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	if body["total"].(float64) != 2 {
+		t.Fatalf("expected 2 location-matched jobs, got %#v", body)
+	}
+
+	items := body["items"].([]any)
+	rawIDs := map[int]struct{}{}
+	for _, item := range items {
+		rawIDs[int(item.(map[string]any)["raw_us_job_id"].(float64))] = struct{}{}
+	}
+	if _, ok := rawIDs[8401]; !ok {
+		t.Fatalf("expected Texas job in result %#v", body)
+	}
+	if _, ok := rawIDs[8402]; !ok {
+		t.Fatalf("expected Canada job in result %#v", body)
+	}
+	if _, ok := rawIDs[8403]; ok {
+		t.Fatalf("did not expect Washington/US-only job in result %#v", body)
+	}
+}
+
+func TestJobsCategoryFunctionAndTitleFiltersCombineAsOR(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJobWithFunction(t, db, 8501, "Data Engineer", "Engineering", "Analytics Engineer")
+	insertJobWithFunction(t, db, 8502, "Platform Engineer", "Platform", "SRE")
+	insertJobWithFunction(t, db, 8503, "Product Designer", "Design", "UX Designer")
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?job_categories=Data+Engineer&job_functions=Platform&job_titles=SRE&per_page=50", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	if body["total"].(float64) != 2 {
+		t.Fatalf("expected OR-combined filters to match 2 jobs, got %#v", body)
+	}
+}
+
+func TestJobsUserJobActionNotAppliedExcludesAppliedAndHidden(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJob(t, db, 8601, "https://example.com/not-applied-a", "Austin", "Texas", 100, 130, true, time.Now().UTC())
+	insertJob(t, db, 8602, "https://example.com/not-applied-b", "Austin", "Texas", 100, 130, true, time.Now().UTC())
+	insertJob(t, db, 8603, "https://example.com/not-applied-c", "Austin", "Texas", 100, 130, true, time.Now().UTC())
+
+	code := requestLoginCode(t, router, "not-applied@example.com")
+	cookie := verifyLoginCode(t, router, "not-applied@example.com", code)
+
+	appliedBody, _ := json.Marshal(map[string]any{"is_applied": true})
+	appliedReq := httptest.NewRequest(http.MethodPut, "/job-actions/1", bytes.NewReader(appliedBody))
+	appliedReq.Header.Set("Content-Type", "application/json")
+	appliedReq.AddCookie(cookie)
+	appliedRec := httptest.NewRecorder()
+	router.ServeHTTP(appliedRec, appliedReq)
+	assertStatus(t, appliedRec.Code, http.StatusOK)
+
+	hiddenBody, _ := json.Marshal(map[string]any{"is_hidden": true})
+	hiddenReq := httptest.NewRequest(http.MethodPut, "/job-actions/2", bytes.NewReader(hiddenBody))
+	hiddenReq.Header.Set("Content-Type", "application/json")
+	hiddenReq.AddCookie(cookie)
+	hiddenRec := httptest.NewRecorder()
+	router.ServeHTTP(hiddenRec, hiddenReq)
+	assertStatus(t, hiddenRec.Code, http.StatusOK)
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?user_job_action=not_applied", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	if body["total"].(float64) != 1 {
+		t.Fatalf("expected only untouched jobs for not_applied filter, got %#v", body)
+	}
+	items := body["items"].([]any)
+	if len(items) != 1 || int(items[0].(map[string]any)["id"].(float64)) != 3 {
+		t.Fatalf("expected parsed job id 3 to remain, got %#v", body)
+	}
+}
+
 func TestJobsMetricsCountsWithFilters(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
@@ -881,16 +994,14 @@ func TestJobsListFiltersByCompanySlug(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
 
-	acmeResult, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_companies (name, slug) VALUES ('Acme', 'acme')`)
-	if err != nil {
+	var acmeID int64
+	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO parsed_companies (name, slug) VALUES ('Acme', 'acme') RETURNING id`).Scan(&acmeID); err != nil {
 		t.Fatal(err)
 	}
-	acmeID, _ := acmeResult.LastInsertId()
-	globexResult, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_companies (name, slug) VALUES ('Globex', 'globex')`)
-	if err != nil {
+	var globexID int64
+	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO parsed_companies (name, slug) VALUES ('Globex', 'globex') RETURNING id`).Scan(&globexID); err != nil {
 		t.Fatal(err)
 	}
-	globexID, _ := globexResult.LastInsertId()
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (91001, 'https://example.com/company-acme', ?, 1, 0, 1, 0, '{}')`, now); err != nil {
@@ -926,11 +1037,10 @@ func TestCompanyProfileEndpointReturnsCompanyAndStats(t *testing.T) {
 	defer db.Close()
 
 	industries, _ := json.Marshal([]string{"SaaS", "AI"})
-	result, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_companies (name, slug, tagline, industry_specialities) VALUES ('Acme', 'acme', 'Builds tools', ?)`, string(industries))
-	if err != nil {
+	var companyID int64
+	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO parsed_companies (name, slug, tagline, industry_specialities) VALUES ('Acme', 'acme', 'Builds tools', ?) RETURNING id`, string(industries)).Scan(&companyID); err != nil {
 		t.Fatal(err)
 	}
-	companyID, _ := result.LastInsertId()
 	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (92001, 'https://example.com/company-profile-job', ?, 1, 0, 1, 0, '{}')`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
@@ -960,11 +1070,10 @@ func TestCompaniesSitemapEndpointListsCompanySlugs(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
 
-	result, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_companies (name, slug) VALUES ('Acme', 'acme')`)
-	if err != nil {
+	var companyID int64
+	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO parsed_companies (name, slug) VALUES ('Acme', 'acme') RETURNING id`).Scan(&companyID); err != nil {
 		t.Fatal(err)
 	}
-	companyID, _ := result.LastInsertId()
 	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (93001, 'https://example.com/company-sitemap-job', ?, 1, 0, 1, 0, '{}')`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
@@ -1063,7 +1172,7 @@ func TestPricingProvidersEndpointReportsEnabledMethods(t *testing.T) {
 
 func TestDefaultFreeSubscriptionAndUpgradePreview(t *testing.T) {
 	cfg := config.Load()
-	cfg.DatabaseURL = "file:test_upgrade_preview?mode=memory&cache=shared"
+	cfg.DatabaseURL = testDatabaseURL(t, "test_upgrade_preview")
 	cfg.AuthDebugReturnCode = true
 	cfg.AuthEnableCodeLogin = true
 	cfg.PublicJobsMaxPerPage = 3
@@ -1156,9 +1265,10 @@ func TestExpiredFreePlanIsNotRecreatedOnLogin(t *testing.T) {
 
 func TestCryptoWebhookRequiresSignatureAndActivatesSubscription(t *testing.T) {
 	cfg := config.Load()
-	cfg.DatabaseURL = "file:test_crypto_webhook_paid?mode=memory&cache=shared"
+	cfg.DatabaseURL = testDatabaseURL(t, "test_crypto_webhook_paid")
 	cfg.AuthDebugReturnCode = true
 	cfg.AuthEnableCodeLogin = true
+	cfg.CryptoPaymentProvider = "nowpayments"
 	cfg.NowPaymentsIPNSecret = "secret-token"
 	db, err := database.Open(cfg.DatabaseURL)
 	if err != nil {
@@ -1197,7 +1307,7 @@ func TestCryptoWebhookRequiresSignatureAndActivatesSubscription(t *testing.T) {
 
 func TestOxaPayWebhookRequestShapeMarksPaymentPaid(t *testing.T) {
 	cfg := config.Load()
-	cfg.DatabaseURL = "file:test_oxapay_webhook_paid?mode=memory&cache=shared"
+	cfg.DatabaseURL = testDatabaseURL(t, "test_oxapay_webhook_paid")
 	cfg.CryptoPaymentProvider = "oxapay"
 	cfg.OxaPayMerchantAPIKey = "secret-token"
 	db, err := database.Open(cfg.DatabaseURL)
@@ -1208,21 +1318,18 @@ func TestOxaPayWebhookRequestShapeMarksPaymentPaid(t *testing.T) {
 	router := NewRouter(cfg, db)
 
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	result, err := db.SQL.ExecContext(context.Background(), `INSERT INTO auth_users (email, created_at) VALUES (?, ?)`, "oxapay-user@example.com", now)
-	if err != nil {
+	var userID int64
+	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO auth_users (email, created_at) VALUES (?, ?) RETURNING id`, "oxapay-user@example.com", now).Scan(&userID); err != nil {
 		t.Fatal(err)
 	}
-	userID, _ := result.LastInsertId()
-	result, err = db.SQL.ExecContext(context.Background(), `INSERT INTO pricing_plans (code, name, billing_cycle, duration_days, price_usd, is_active, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)`, "weekly", "Weekly", "weekly", 7, 3, now)
-	if err != nil {
+	var planID int64
+	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO pricing_plans (code, name, billing_cycle, duration_days, price_usd, is_active, created_at) VALUES (?, ?, ?, ?, ?, 1, ?) RETURNING id`, "weekly", "Weekly", "weekly", 7, 3, now).Scan(&planID); err != nil {
 		t.Fatal(err)
 	}
-	planID, _ := result.LastInsertId()
-	result, err = db.SQL.ExecContext(context.Background(), `INSERT INTO pricing_payments (user_id, pricing_plan_id, provider, payment_method, currency, amount_minor, status, provider_checkout_id, created_at) VALUES (?, ?, 'crypto', 'crypto', 'USD', 300, 'pending', ?, ?)`, userID, planID, "140013835", now)
-	if err != nil {
+	var paymentID int64
+	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO pricing_payments (user_id, pricing_plan_id, provider, payment_method, currency, amount_minor, status, provider_checkout_id, created_at) VALUES (?, ?, 'crypto', 'crypto', 'USD', 300, 'pending', ?, ?) RETURNING id`, userID, planID, "140013835", now).Scan(&paymentID); err != nil {
 		t.Fatal(err)
 	}
-	paymentID, _ := result.LastInsertId()
 
 	bodyObj := map[string]any{
 		"track_id":            "140013835",
@@ -1292,7 +1399,7 @@ func TestOxaPayWebhookRequestShapeMarksPaymentPaid(t *testing.T) {
 
 func TestPricingCryptoCurrenciesSupportsAmountFiltering(t *testing.T) {
 	cfg := config.Load()
-	cfg.DatabaseURL = "file:test_currency_filtering?mode=memory&cache=shared"
+	cfg.DatabaseURL = testDatabaseURL(t, "test_currency_filtering")
 	cfg.NowPaymentsCurrencyCandidates = "btc,eth,usdttrc20"
 	db, err := database.Open(cfg.DatabaseURL)
 	if err != nil {
@@ -1400,7 +1507,7 @@ func TestPasswordSignupAndLoginFlow(t *testing.T) {
 
 func TestSupabaseGoogleLoginFlow(t *testing.T) {
 	cfg := config.Load()
-	cfg.DatabaseURL = "file:test_supabase_login?mode=memory&cache=shared"
+	cfg.DatabaseURL = testDatabaseURL(t, "test_supabase_login")
 	cfg.AuthEnableGoogleLogin = true
 	cfg.SupabaseAnonKey = "anon-key"
 	supabase := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1449,7 +1556,7 @@ func TestSupabaseGoogleLoginFlow(t *testing.T) {
 
 func TestCodeLoginDisabled(t *testing.T) {
 	cfg := config.Load()
-	cfg.DatabaseURL = "file:test_code_login_disabled?mode=memory&cache=shared"
+	cfg.DatabaseURL = testDatabaseURL(t, "test_code_login_disabled")
 	cfg.AuthEnableCodeLogin = false
 	db, err := database.Open(cfg.DatabaseURL)
 	if err != nil {
@@ -1618,7 +1725,7 @@ func TestJobActionsFlow(t *testing.T) {
 func testRouter(t *testing.T) (*gin.Engine, *database.DB) {
 	t.Helper()
 	cfg := config.Load()
-	cfg.DatabaseURL = "file:test_page_extract?mode=memory&cache=shared"
+	cfg.DatabaseURL = testDatabaseURL(t, "test_page_extract")
 	cfg.AuthDebugReturnCode = true
 	cfg.AuthEnableCodeLogin = true
 	db, err := database.Open(cfg.DatabaseURL)
@@ -1626,6 +1733,42 @@ func testRouter(t *testing.T) (*gin.Engine, *database.DB) {
 		t.Fatal(err)
 	}
 	return NewRouter(cfg, db), db
+}
+
+func testDatabaseURL(t *testing.T, name string) string {
+	t.Helper()
+	baseURL := database.TestDatabaseBaseURL()
+	if baseURL == "" {
+		t.Skip("TEST_DATABASE_URL is required for PostgreSQL-backed tests")
+	}
+	schema := "test_" + strings.ReplaceAll(strings.ToLower(name), "-", "_") + "_" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	adminDB, err := sql.Open("pgx", baseURL)
+	if err != nil {
+		t.Fatalf("open test postgres connection: %v", err)
+	}
+	defer adminDB.Close()
+	if _, err := adminDB.ExecContext(context.Background(), `CREATE SCHEMA IF NOT EXISTS "`+schema+`"`); err != nil {
+		t.Fatalf("create test schema %q: %v", schema, err)
+	}
+	t.Cleanup(func() {
+		cleanupDB, openErr := sql.Open("pgx", baseURL)
+		if openErr != nil {
+			t.Logf("open cleanup postgres connection failed for schema %q: %v", schema, openErr)
+			return
+		}
+		defer cleanupDB.Close()
+		if _, err := cleanupDB.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS "`+schema+`" CASCADE`); err != nil {
+			t.Logf("drop test schema %q failed: %v", schema, err)
+		}
+	})
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		t.Fatalf("parse TEST_DATABASE_URL: %v", err)
+	}
+	query := parsed.Query()
+	query.Set("search_path", schema)
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }
 
 func insertJob(t *testing.T, db *database.DB, rawID int, rawURL, city, state string, salaryMin, salaryMax float64, isSenior bool, createdAt time.Time) {
@@ -1658,11 +1801,10 @@ func insertJobWithSalaryType(t *testing.T, db *database.DB, rawID int, category 
 
 func insertCompany(t *testing.T, db *database.DB, name string) int64 {
 	t.Helper()
-	result, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_companies (name, slug, tagline, profile_pic_url, home_page_url, linkedin_url, employee_range, founded_year, sponsors_h1b) VALUES (?, 'example-co', 'tagline', 'https://img', 'https://home', 'https://linkedin', '11-50', '2020', 1)`, name)
-	if err != nil {
+	var id int64
+	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO parsed_companies (name, slug, tagline, profile_pic_url, home_page_url, linkedin_url, employee_range, founded_year, sponsors_h1b) VALUES (?, 'example-co', 'tagline', 'https://img', 'https://home', 'https://linkedin', '11-50', '2020', 1) RETURNING id`, name).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
-	id, _ := result.LastInsertId()
 	return id
 }
 
@@ -1672,12 +1814,12 @@ func insertRichJob(t *testing.T, db *database.DB, companyID int64) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, company_id, categorized_job_title, role_title, role_description, role_requirements, location, location_city, salary_min_usd, salary_max_usd, salary_type, employment_type, education_requirements_credential_category, experience_requirements_months, experience_in_place_of_education, required_languages, tech_stack, benefits, url) VALUES (999, ?, 'Software Engineer', 'Staff Backend Engineer', 'Build distributed systems.', 'Python
-FastAPI', 'United States', 'Austin', 150, 210, 'hourly', 'full-time', 'bachelor', 24, 1, '["English"]', '["Go","SQL"]', 'Great benefits', 'https://jobs.example.com/detail')`, companyID)
+	var id int64
+	err = db.SQL.QueryRowContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, company_id, categorized_job_title, role_title, role_description, role_requirements, location, location_city, salary_min_usd, salary_max_usd, salary_type, employment_type, education_requirements_credential_category, experience_requirements_months, experience_in_place_of_education, required_languages, tech_stack, benefits, url) VALUES (999, ?, 'Software Engineer', 'Staff Backend Engineer', 'Build distributed systems.', 'Python
+FastAPI', 'United States', 'Austin', 150, 210, 'hourly', 'full-time', 'bachelor', 24, 1, '["English"]', '["Go","SQL"]', 'Great benefits', 'https://jobs.example.com/detail') RETURNING id`, companyID).Scan(&id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, _ := result.LastInsertId()
 	return int(id)
 }
 

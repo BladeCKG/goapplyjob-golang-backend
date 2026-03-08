@@ -57,7 +57,7 @@ func main() {
 	log.Printf("[%s] scanned=%d updated=%d sources=%v", mode, scanned, updated, sources)
 }
 
-func normalizeRows(ctx context.Context, db *sql.DB, sources []string, dryRun bool, batchSize int) (int, int, error) {
+func normalizeRows(ctx context.Context, db *database.SQLConn, sources []string, dryRun bool, batchSize int) (int, int, error) {
 	placeholders := make([]string, 0, len(sources))
 	args := make([]any, 0, len(sources))
 	for _, source := range sources {
