@@ -61,6 +61,8 @@ func main() {
 				payloadRows, skippedInvalid = importer.ParseRowsForBuiltinPayload(payload.BodyText)
 			case payload.PayloadType == "delta" && payload.Source == "workable":
 				payloadRows, skippedInvalid = importer.ParseRowsForWorkablePayload(payload.BodyText)
+			case payload.PayloadType == "delta" && payload.Source == "remotive":
+				payloadRows, skippedInvalid = importer.ParseRowsForRemotivePayload(payload.BodyText)
 			default:
 				log.Printf("importer skipping unsupported payload_id=%d source=%s payload_type=%s", payload.ID, payload.Source, payload.PayloadType)
 				continue
@@ -90,7 +92,7 @@ func main() {
 				var err error
 				if payload.PayloadType == "delta" && payload.Source == "builtin" {
 					err = svc.ReplaceBuiltinPayloadRows(payload.ID, remainingRows)
-				} else if payload.PayloadType == "delta" && payload.Source == "workable" {
+				} else if payload.PayloadType == "delta" && (payload.Source == "workable" || payload.Source == "remotive") {
 					serializedRows := make([]map[string]any, 0, len(remainingRows))
 					for _, row := range remainingRows {
 						serializedRows = append(serializedRows, map[string]any{"url": row.URL, "post_date": row.PostDate})

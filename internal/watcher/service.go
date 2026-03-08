@@ -19,12 +19,14 @@ import (
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/sources/builtin"
 	"goapplyjob-golang-backend/internal/sources/hiringcafe"
+	"goapplyjob-golang-backend/internal/sources/remotive"
 	"goapplyjob-golang-backend/internal/sources/workable"
 )
 
 const (
 	sourceName       = "remoterocketship"
 	sourceBuiltin    = "builtin"
+	sourceRemotive   = "remotive"
 	sourceHiringCafe = "hiringcafe"
 	payloadTypeDelta = "delta"
 	payloadTypeXML   = "delta_xml"
@@ -49,6 +51,7 @@ type Config struct {
 	BuiltinCheckpointPages  int
 	WorkableAPIURL          string
 	WorkablePageLimit       int
+	RemotiveSitemapURL      string
 	HiringCafeSearchAPIURL  string
 	HiringCafeTotalCountURL string
 	HiringCafePageSize      int
@@ -76,6 +79,7 @@ func New(config Config, db *database.DB) *Service {
 		"sample_kb":                   config.SampleKB,
 		"enabled_sources":             sortedSourceNames(config.EnabledSources),
 		"workable_api_url":            config.WorkableAPIURL,
+		"remotive_sitemap_url":        config.RemotiveSitemapURL,
 		"hiringcafe_search_api_url":   config.HiringCafeSearchAPIURL,
 		"hiringcafe_total_count_url":  config.HiringCafeTotalCountURL,
 		"hiringcafe_page_size":        config.HiringCafePageSize,
@@ -151,6 +155,13 @@ func (s *Service) RunOnce() error {
 			return err
 		}
 		log.Printf("watcher source_done source=%s runner=runOnceRemoteRocketship", sourceName)
+	}
+	if strings.TrimSpace(s.Config.RemotiveSitemapURL) != "" && s.isSourceEnabled(sourceRemotive) {
+		log.Printf("watcher source_start source=%s runner=runOnceRemotive", sourceRemotive)
+		if err := s.runOnceRemotive(); err != nil {
+			return err
+		}
+		log.Printf("watcher source_done source=%s runner=runOnceRemotive", sourceRemotive)
 	}
 	if strings.TrimSpace(s.Config.BuiltinBaseURL) != "" && s.isSourceEnabled(sourceBuiltin) {
 		log.Printf("watcher source_start source=%s runner=runOnceBuiltin", sourceBuiltin)
@@ -424,6 +435,29 @@ func (s *Service) runOnceWorkable() error {
 		"last_scan_at":                utcNowISO(),
 		"pages_scanned_last_cycle":    pageCount + 1,
 		"payloads_created_last_cycle": payloadsCreated,
+	})
+}
+
+func (s *Service) runOnceRemotive() error {
+	if strings.TrimSpace(s.Config.RemotiveSitemapURL) == "" {
+		return nil
+	}
+	xmlText, err := s.FetchText(s.Config.RemotiveSitemapURL)
+	if err != nil {
+		return err
+	}
+	rows, skipped := remotive.ParseSitemapRows(xmlText)
+	if len(rows) > 0 {
+		if _, err := s.saveDeltaPayloadForSource(sourceRemotive, s.Config.RemotiveSitemapURL, payloadTypeDelta, remotive.SerializeImportRows(rows)); err != nil {
+			return err
+		}
+	}
+	return s.saveStatePayload(sourceRemotive, map[string]any{
+		"sitemap_url":                s.Config.RemotiveSitemapURL,
+		"last_scan_at":               utcNowISO(),
+		"rows_seen_last_cycle":       len(rows),
+		"rows_skipped_last_cycle":    skipped,
+		"payloads_created_last_cycle": map[bool]int{true: 1, false: 0}[len(rows) > 0],
 	})
 }
 

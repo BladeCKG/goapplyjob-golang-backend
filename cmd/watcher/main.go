@@ -29,6 +29,7 @@ func main() {
 		BuiltinCheckpointPages:  config.GetenvInt("WATCH_BUILTIN_STATE_CHECKPOINT_PAGES", 5),
 		WorkableAPIURL:          config.Getenv("WATCH_WORKABLE_API_URL", "https://jobs.workable.com/api/v1/jobs?location=United States&workplace=remote&day_range=1"),
 		WorkablePageLimit:       config.GetenvInt("WATCH_WORKABLE_PAGE_LIMIT", 100),
+		RemotiveSitemapURL:      config.Getenv("WATCH_REMOTIVE_SITEMAP_URL", ""),
 		HiringCafeSearchAPIURL:  config.Getenv("WATCH_HIRINGCAFE_SEARCH_API_URL", ""),
 		HiringCafeTotalCountURL: config.Getenv("WATCH_HIRINGCAFE_TOTAL_COUNT_URL", ""),
 		HiringCafePageSize:      config.GetenvInt("WATCH_HIRINGCAFE_PAGE_SIZE", 200),

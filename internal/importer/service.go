@@ -16,6 +16,7 @@ import (
 
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/sources/plugins"
+	"goapplyjob-golang-backend/internal/sources/remotive"
 	"goapplyjob-golang-backend/internal/sources/workable"
 )
 
@@ -53,6 +54,7 @@ type Service struct {
 const sourceName = "remoterocketship"
 const (
 	sourceBuiltin           = "builtin"
+	sourceRemotive          = "remotive"
 	sourceWorkable          = "workable"
 	payloadTypeXML          = "delta_xml"
 	payloadTypeJSON         = "delta"
@@ -140,6 +142,16 @@ func ParseRowsForWorkablePayload(payloadText string) ([]SitemapRow, int) {
 		postDate, _ := row["post_date"].(time.Time)
 		rawPayload, _ := row["raw_payload"].(map[string]any)
 		out = append(out, SitemapRow{URL: stringValue(row["url"]), PostDate: postDate, RawJSON: rawPayload})
+	}
+	return out, skipped
+}
+
+func ParseRowsForRemotivePayload(payloadText string) ([]SitemapRow, int) {
+	rows, skipped := remotive.ParseImportRows(payloadText)
+	out := make([]SitemapRow, 0, len(rows))
+	for _, row := range rows {
+		postDate, _ := row["post_date"].(time.Time)
+		out = append(out, SitemapRow{URL: stringValue(row["url"]), PostDate: postDate})
 	}
 	return out, skipped
 }

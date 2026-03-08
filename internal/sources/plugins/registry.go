@@ -5,6 +5,7 @@ import (
 
 	"goapplyjob-golang-backend/internal/sources/builtin"
 	"goapplyjob-golang-backend/internal/sources/hiringcafe"
+	"goapplyjob-golang-backend/internal/sources/remotive"
 	"goapplyjob-golang-backend/internal/sources/remoterocketship"
 	"goapplyjob-golang-backend/internal/sources/workable"
 )
@@ -68,6 +69,14 @@ var registry = map[string]SourcePlugin{
 		ParseRawHTML:        hiringcafe.ParseRawHTML,
 		ParseImportRows:     hiringcafe.ParseImportRows,
 		SerializeImportRows: hiringcafe.SerializeImportRows,
+	},
+	remotive.Source: {
+		Source:              remotive.Source,
+		PayloadType:         remotive.PayloadType,
+		ToTargetJobURL:      remotive.ToTargetJobURL,
+		ParseRawHTML:        remotive.ParseRawHTML,
+		ParseImportRows:     remotive.ParseImportRows,
+		SerializeImportRows: remotive.SerializeImportRows,
 	},
 }
 

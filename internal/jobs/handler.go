@@ -229,11 +229,16 @@ func expandLocationQueryTerms(values []string) []string {
 		}
 		candidates := []string{value}
 		if strings.Contains(value, ",") {
+			parts := []string{}
 			for _, part := range strings.Split(value, ",") {
 				trimmed := strings.TrimSpace(part)
 				if trimmed != "" {
-					candidates = append(candidates, trimmed)
+					parts = append(parts, trimmed)
 				}
+			}
+			if len(parts) > 0 {
+				// Keep "State, United States" narrowed to the state token only.
+				candidates = append(candidates, parts[0])
 			}
 		}
 		for _, candidate := range candidates {
@@ -855,7 +860,23 @@ func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includ
 			filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 		}
 	}
-	if locations := parseCSVQuery(c.Query("location")); len(locations) > 0 {
+	locations := []string{}
+	rawLocationValue := strings.TrimSpace(c.Query("location"))
+	if rawLocationValue != "" {
+		rawParts := []string{}
+		for _, part := range strings.Split(rawLocationValue, ",") {
+			trimmed := strings.TrimSpace(part)
+			if trimmed != "" {
+				rawParts = append(rawParts, trimmed)
+			}
+		}
+		if len(rawParts) == 2 && strings.EqualFold(rawParts[1], "United States") {
+			locations = []string{rawLocationValue}
+		} else {
+			locations = parseCSVQuery(c.Query("location"))
+		}
+	}
+	if len(locations) > 0 {
 		locations = uniqueStrings(expandLocationQueryTerms(locations))
 		parts := make([]string, 0, len(locations))
 		for _, location := range locations {
