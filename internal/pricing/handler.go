@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +47,7 @@ func NewHandler(cfg config.Config, db *database.DB, authHandler *auth.Handler) *
 
 func (h *Handler) Register(router gin.IRouter) {
 	router.GET("/pricing/plans", h.listPlans)
+	router.GET("/pricing/providers", h.listProviders)
 	router.GET("/pricing/crypto/currencies", h.listCryptoCurrencies)
 	router.GET("/pricing/subscription", h.subscriptionStatus)
 	router.POST("/pricing/subscribe", h.subscribe)
@@ -53,6 +55,30 @@ func (h *Handler) Register(router gin.IRouter) {
 	router.POST("/pricing/payments/:paymentID/confirm", h.confirmPayment)
 	router.POST("/pricing/webhooks/stripe", h.stripeWebhook)
 	router.POST("/pricing/webhooks/crypto", h.cryptoWebhook)
+}
+
+func (h *Handler) listProviders(c *gin.Context) {
+	stripeEnabled := strings.TrimSpace(os.Getenv("STRIPE_SECRET_KEY")) != ""
+	cryptoEnabled := true
+	cryptoReason := any(nil)
+	if _, err := paymentcrypto.GetGateway(h.cfg); err != nil {
+		cryptoEnabled = false
+		cryptoReason = "Crypto gateway is not configured"
+	}
+	c.JSON(http.StatusOK, gin.H{"items": []gin.H{
+		{
+			"provider":        "stripe",
+			"payment_methods": []string{"card", "paypal"},
+			"enabled":         stripeEnabled,
+			"reason":          map[bool]any{true: nil, false: "Stripe is not configured"}[stripeEnabled],
+		},
+		{
+			"provider":        "crypto",
+			"payment_methods": []string{"crypto"},
+			"enabled":         cryptoEnabled,
+			"reason":          cryptoReason,
+		},
+	}})
 }
 
 func (h *Handler) listPlans(c *gin.Context) {

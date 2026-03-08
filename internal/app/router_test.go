@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -499,6 +500,42 @@ func TestPricingFlow(t *testing.T) {
 	confirmRec := httptest.NewRecorder()
 	router.ServeHTTP(confirmRec, confirmReq)
 	assertStatus(t, confirmRec.Code, http.StatusOK)
+}
+
+func TestPricingProvidersEndpointReportsEnabledMethods(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	_ = os.Setenv("STRIPE_SECRET_KEY", "sk_test_enabled")
+	t.Cleanup(func() { _ = os.Unsetenv("STRIPE_SECRET_KEY") })
+
+	req := httptest.NewRequest(http.MethodGet, "/pricing/providers", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	items := body["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("unexpected providers payload %#v", body)
+	}
+	var stripe, crypto map[string]any
+	for _, item := range items {
+		row := item.(map[string]any)
+		if row["provider"] == "stripe" {
+			stripe = row
+		}
+		if row["provider"] == "crypto" {
+			crypto = row
+		}
+	}
+	if stripe["enabled"] != true || len(stripe["payment_methods"].([]any)) == 0 {
+		t.Fatalf("unexpected stripe provider %#v", stripe)
+	}
+	if crypto["enabled"] != true || len(crypto["payment_methods"].([]any)) == 0 {
+		t.Fatalf("unexpected crypto provider %#v", crypto)
+	}
 }
 
 func TestDefaultFreeSubscriptionAndUpgradePreview(t *testing.T) {
