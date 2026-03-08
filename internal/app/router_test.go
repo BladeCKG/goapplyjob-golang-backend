@@ -144,6 +144,54 @@ func TestJobsPublicPreviewIsLimited(t *testing.T) {
 	}
 }
 
+func TestJobsSitemapEndpointNotPreviewLimited(t *testing.T) {
+	cfg := config.Load()
+	cfg.DatabaseURL = "file:test_jobs_sitemap_not_preview_limited?mode=memory&cache=shared"
+	cfg.AuthDebugReturnCode = true
+	cfg.PublicJobsMaxPerPage = 2
+	cfg.PublicJobsMaxTotal = 2
+	db, err := database.Open(cfg.DatabaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	router := NewRouter(cfg, db)
+
+	for idx := 0; idx < 7; idx++ {
+		insertJob(t, db, idx+9000, "https://example.com/sitemap-"+strconv.Itoa(idx), "City", "State", 100, 130, true, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC))
+	}
+
+	previewReq := httptest.NewRequest(http.MethodGet, "/jobs?page=1&per_page=100", nil)
+	previewRec := httptest.NewRecorder()
+	router.ServeHTTP(previewRec, previewReq)
+	assertStatus(t, previewRec.Code, http.StatusOK)
+	var previewPayload map[string]any
+	decodeBody(t, previewRec.Body.Bytes(), &previewPayload)
+	if len(previewPayload["items"].([]any)) != 2 || previewPayload["total"].(float64) != 7 {
+		t.Fatalf("unexpected preview payload %#v", previewPayload)
+	}
+
+	sitemapReq := httptest.NewRequest(http.MethodGet, "/jobs/sitemap?page=1&per_page=3", nil)
+	sitemapRec := httptest.NewRecorder()
+	router.ServeHTTP(sitemapRec, sitemapReq)
+	assertStatus(t, sitemapRec.Code, http.StatusOK)
+	var sitemapPayload map[string]any
+	decodeBody(t, sitemapRec.Body.Bytes(), &sitemapPayload)
+	if sitemapPayload["total"].(float64) != 7 || len(sitemapPayload["items"].([]any)) != 3 {
+		t.Fatalf("unexpected sitemap page1 payload %#v", sitemapPayload)
+	}
+
+	sitemapReq3 := httptest.NewRequest(http.MethodGet, "/jobs/sitemap?page=3&per_page=3", nil)
+	sitemapRec3 := httptest.NewRecorder()
+	router.ServeHTTP(sitemapRec3, sitemapReq3)
+	assertStatus(t, sitemapRec3.Code, http.StatusOK)
+	var sitemapPayload3 map[string]any
+	decodeBody(t, sitemapRec3.Body.Bytes(), &sitemapPayload3)
+	if len(sitemapPayload3["items"].([]any)) != 1 {
+		t.Fatalf("unexpected sitemap page3 payload %#v", sitemapPayload3)
+	}
+}
+
 func TestJobsDefaultSortUsesCreatedAtSource(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()

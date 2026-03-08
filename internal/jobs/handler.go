@@ -129,6 +129,13 @@ type jobDetail struct {
 	URL                                     *string  `json:"url"`
 }
 
+type jobSitemapItem struct {
+	ID               int64   `json:"id"`
+	RoleTitle        *string `json:"role_title"`
+	CategorizedTitle *string `json:"categorized_job_title"`
+	CreatedAtSource  *string `json:"created_at_source"`
+}
+
 func NewHandler(cfg config.Config, db *database.DB, authHandler *auth.Handler) *Handler {
 	return &Handler{cfg: cfg, db: db, auth: authHandler}
 }
@@ -136,6 +143,7 @@ func NewHandler(cfg config.Config, db *database.DB, authHandler *auth.Handler) *
 func (h *Handler) Register(router gin.IRouter) {
 	router.GET("/jobs/filter-options", h.filterOptions)
 	router.GET("/jobs/metrics", h.metrics)
+	router.GET("/jobs/sitemap", h.sitemap)
 	router.GET("/job/:jobID", h.jobDetail)
 	router.GET("/jobs/:jobID", h.jobDetail)
 	router.GET("/jobs", h.listJobs)
@@ -490,6 +498,47 @@ func (h *Handler) metrics(c *gin.Context) {
 		"jobs_today":           jobsToday,
 		"jobs_last_hour":       jobsLastHour,
 		"companies_hiring_now": companiesHiringNow,
+	})
+}
+
+func (h *Handler) sitemap(c *gin.Context) {
+	page := max(parseIntDefault(c.Query("page"), 1), 1)
+	perPage := max(parseIntDefault(c.Query("per_page"), 500), 1)
+	if perPage > 2000 {
+		perPage = 2000
+	}
+	offset := (page - 1) * perPage
+	var total int
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT COUNT(id) FROM parsed_jobs`).Scan(&total); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs sitemap"})
+		return
+	}
+	rows, err := h.db.SQL.QueryContext(c.Request.Context(),
+		`SELECT id, role_title, categorized_job_title, created_at_source
+		 FROM parsed_jobs
+		 ORDER BY created_at_source DESC, id DESC
+		 LIMIT ? OFFSET ?`, perPage, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs sitemap"})
+		return
+	}
+	defer rows.Close()
+	items := []jobSitemapItem{}
+	for rows.Next() {
+		var item jobSitemapItem
+		var roleTitle, categorizedTitle, createdAt sql.NullString
+		if err := rows.Scan(&item.ID, &roleTitle, &categorizedTitle, &createdAt); err == nil {
+			item.RoleTitle = nullableString(roleTitle)
+			item.CategorizedTitle = nullableString(categorizedTitle)
+			item.CreatedAtSource = nullableString(createdAt)
+			items = append(items, item)
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"page":     page,
+		"per_page": perPage,
+		"total":    total,
+		"items":    items,
 	})
 }
 
