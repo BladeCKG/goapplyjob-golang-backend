@@ -408,7 +408,7 @@ func buildJobCategoryParentsMap(rows [][2]string) map[string]any {
 		}
 		if title != "" {
 			allLabels[title] = struct{}{}
-			if function != "" {
+			if function != "" && title != function {
 				if _, ok := categoryFunctionCounts[title]; !ok {
 					categoryFunctionCounts[title] = map[string]int{}
 				}
@@ -419,12 +419,12 @@ func buildJobCategoryParentsMap(rows [][2]string) map[string]any {
 	resolved := map[string]any{}
 	sortedLabels := sortedKeysCaseInsensitive(allLabels)
 	for _, label := range sortedLabels {
+		if _, isRoot := rootFunctionLabels[label]; isRoot {
+			resolved[label] = nil
+			continue
+		}
 		counts := categoryFunctionCounts[label]
 		if len(counts) == 0 {
-			if _, isRoot := rootFunctionLabels[label]; isRoot {
-				resolved[label] = nil
-				continue
-			}
 			resolved[label] = nil
 			continue
 		}
@@ -676,9 +676,7 @@ func (h *Handler) WarmFilterCache(_ context.Context) error {
 }
 
 func (h *Handler) filterOptions(c *gin.Context) {
-	if err := h.ensureFilterCacheFresh(c.Request.Context(), false); err != nil {
-		h.scheduleFilterCacheRefresh(false)
-	}
+	h.scheduleFilterCacheRefresh(false)
 	minSalaryOptions := []int{}
 	for salary := minSalaryStart; salary <= minSalaryEnd; salary += minSalaryStep {
 		minSalaryOptions = append(minSalaryOptions, salary)
