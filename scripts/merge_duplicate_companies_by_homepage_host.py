@@ -37,6 +37,21 @@ def clean_slug_numeric_suffix(slug: str | None) -> str | None:
     return cleaned or None
 
 
+def normalized_name_key(name: str | None) -> str | None:
+    if not isinstance(name, str) or not name.strip():
+        return None
+    normalized = name.strip().lower().replace("&", " and ")
+    normalized = re.sub(r"[^a-z0-9]+", "-", normalized)
+    normalized = re.sub(r"-{2,}", "-", normalized).strip("-")
+    return normalized or None
+
+
+def normalized_slug_key(slug: str | None) -> str | None:
+    if not isinstance(slug, str) or not slug.strip():
+        return None
+    return slug.strip().lower()
+
+
 def run(db_path: Path, dry_run: bool, limit_hosts: int | None) -> None:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
@@ -45,7 +60,6 @@ def run(db_path: Path, dry_run: bool, limit_hosts: int | None) -> None:
         """
         SELECT id, name, slug, home_page_url, linkedin_url
         FROM parsed_companies
-        WHERE linkedin_url IS NOT NULL AND trim(linkedin_url) != ''
         ORDER BY id ASC
         """
     ).fetchall()
@@ -86,6 +100,37 @@ def run(db_path: Path, dry_run: bool, limit_hosts: int | None) -> None:
             cur.execute("DELETE FROM parsed_companies WHERE id = ?", (dup_id,))
             merged_companies += cur.rowcount if cur.rowcount is not None else 0
 
+    by_name_slug_host: dict[str, list[sqlite3.Row]] = {}
+    active_rows = cur.execute(
+        "SELECT id, name, slug, home_page_url, linkedin_url FROM parsed_companies ORDER BY id ASC"
+    ).fetchall()
+    for row in active_rows:
+        name_key = normalized_name_key(row["name"])
+        slug_key = normalized_slug_key(row["slug"])
+        host_key = normalized_host(row["home_page_url"])
+        if not (name_key and slug_key and host_key):
+            continue
+        dedupe_key = f"{name_key}|{slug_key}|{host_key}"
+        by_name_slug_host.setdefault(dedupe_key, []).append(row)
+    composite_keys = [key for key, items in by_name_slug_host.items() if len(items) > 1]
+    composite_keys.sort()
+    if limit_hosts and limit_hosts > 0:
+        composite_keys = composite_keys[:limit_hosts]
+    for key in composite_keys:
+        companies = sorted(by_name_slug_host[key], key=lambda row: int(row["id"]))
+        canonical = companies[0]
+        duplicates = companies[1:]
+        if not duplicates:
+            continue
+        merged_hosts += 1
+        for dup in duplicates:
+            dup_id = int(dup["id"])
+            canonical_id = int(canonical["id"])
+            cur.execute("UPDATE parsed_jobs SET company_id = ? WHERE company_id = ?", (canonical_id, dup_id))
+            reassigned_jobs += cur.rowcount if cur.rowcount is not None else 0
+            cur.execute("DELETE FROM parsed_companies WHERE id = ?", (dup_id,))
+            merged_companies += cur.rowcount if cur.rowcount is not None else 0
+
     if dry_run:
         conn.rollback()
         mode = "DRY-RUN"
@@ -100,7 +145,7 @@ def run(db_path: Path, dry_run: bool, limit_hosts: int | None) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="One-time dedupe: merge parsed_companies by linkedin identity")
+    parser = argparse.ArgumentParser(description="One-time dedupe: merge parsed_companies by linkedin identity and name+slug+homepage host")
     parser.add_argument("--db", default="goapplyjob.db")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit-hosts", type=int, default=None)
