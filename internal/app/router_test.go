@@ -964,7 +964,7 @@ func TestJobActionsFlow(t *testing.T) {
 	code := requestLoginCode(t, router, "actions@example.com")
 	cookie := verifyLoginCode(t, router, "actions@example.com", code)
 
-	updateBody, _ := json.Marshal(map[string]any{"is_saved": true, "is_hidden": false})
+	updateBody, _ := json.Marshal(map[string]any{"is_saved": true, "is_hidden": false, "is_applied": true})
 	updateReq := httptest.NewRequest(http.MethodPut, "/job-actions/1", bytes.NewReader(updateBody))
 	updateReq.Header.Set("Content-Type", "application/json")
 	updateReq.AddCookie(cookie)
@@ -987,6 +987,47 @@ func TestJobActionsFlow(t *testing.T) {
 	first := items[0].(map[string]any)
 	if first["job_id"].(float64) != 1 || first["is_saved"] != true || first["is_hidden"] != false {
 		t.Fatalf("unexpected action payload %#v", first)
+	}
+
+	summaryReq := httptest.NewRequest(http.MethodGet, "/job-actions/summary", nil)
+	summaryReq.AddCookie(cookie)
+	summaryRec := httptest.NewRecorder()
+	router.ServeHTTP(summaryRec, summaryReq)
+	assertStatus(t, summaryRec.Code, http.StatusOK)
+	var summaryPayload map[string]any
+	decodeBody(t, summaryRec.Body.Bytes(), &summaryPayload)
+	if summaryPayload["applied_count"].(float64) != 1 || summaryPayload["saved_count"].(float64) != 1 || summaryPayload["hidden_count"].(float64) != 0 {
+		t.Fatalf("unexpected summary payload %#v", summaryPayload)
+	}
+
+	hideBody, _ := json.Marshal(map[string]any{"is_hidden": true})
+	hideReq := httptest.NewRequest(http.MethodPut, "/job-actions/1", bytes.NewReader(hideBody))
+	hideReq.Header.Set("Content-Type", "application/json")
+	hideReq.AddCookie(cookie)
+	hideRec := httptest.NewRecorder()
+	router.ServeHTTP(hideRec, hideReq)
+	assertStatus(t, hideRec.Code, http.StatusOK)
+
+	jobsDefaultReq := httptest.NewRequest(http.MethodGet, "/jobs", nil)
+	jobsDefaultReq.AddCookie(cookie)
+	jobsDefaultRec := httptest.NewRecorder()
+	router.ServeHTTP(jobsDefaultRec, jobsDefaultReq)
+	assertStatus(t, jobsDefaultRec.Code, http.StatusOK)
+	var jobsDefault map[string]any
+	decodeBody(t, jobsDefaultRec.Body.Bytes(), &jobsDefault)
+	if jobsDefault["total"].(float64) != 0 {
+		t.Fatalf("expected hidden jobs excluded by default, got %#v", jobsDefault)
+	}
+
+	jobsHiddenReq := httptest.NewRequest(http.MethodGet, "/jobs?user_job_action=hidden", nil)
+	jobsHiddenReq.AddCookie(cookie)
+	jobsHiddenRec := httptest.NewRecorder()
+	router.ServeHTTP(jobsHiddenRec, jobsHiddenReq)
+	assertStatus(t, jobsHiddenRec.Code, http.StatusOK)
+	var jobsHidden map[string]any
+	decodeBody(t, jobsHiddenRec.Body.Bytes(), &jobsHidden)
+	if jobsHidden["total"].(float64) != 1 {
+		t.Fatalf("expected hidden-filtered listing to include hidden job, got %#v", jobsHidden)
 	}
 }
 

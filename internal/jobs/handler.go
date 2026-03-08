@@ -444,6 +444,26 @@ func (h *Handler) listJobs(c *gin.Context) {
 			filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 		}
 	}
+	if currentUser != nil {
+		actionFilter := strings.ToLower(strings.TrimSpace(c.DefaultQuery("user_job_action", "all")))
+		hiddenExists := `EXISTS (SELECT 1 FROM user_job_actions uja WHERE uja.user_id = ? AND uja.parsed_job_id = p.id AND uja.is_hidden = 1)`
+		appliedExists := `EXISTS (SELECT 1 FROM user_job_actions uja WHERE uja.user_id = ? AND uja.parsed_job_id = p.id AND uja.is_applied = 1)`
+		savedExists := `EXISTS (SELECT 1 FROM user_job_actions uja WHERE uja.user_id = ? AND uja.parsed_job_id = p.id AND uja.is_saved = 1)`
+		switch actionFilter {
+		case "hidden":
+			filters = append(filters, hiddenExists)
+			args = append(args, currentUser.ID)
+		case "applied":
+			filters = append(filters, appliedExists)
+			args = append(args, currentUser.ID)
+		case "saved":
+			filters = append(filters, savedExists)
+			args = append(args, currentUser.ID)
+		default:
+			filters = append(filters, "NOT ("+hiddenExists+")")
+			args = append(args, currentUser.ID)
+		}
+	}
 
 	where := ""
 	if len(filters) > 0 {

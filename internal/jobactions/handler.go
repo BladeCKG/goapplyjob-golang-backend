@@ -32,6 +32,7 @@ func NewHandler(db *database.DB, authHandler *auth.Handler) *Handler {
 
 func (h *Handler) Register(router gin.IRouter) {
 	router.GET("/job-actions", h.getJobActions)
+	router.GET("/job-actions/summary", h.getJobActionsSummary)
 	router.PUT("/job-actions/:jobID", h.updateJobAction)
 }
 
@@ -161,6 +162,29 @@ func (h *Handler) updateJobAction(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, current)
+}
+
+func (h *Handler) getJobActionsSummary(c *gin.Context) {
+	user, err := h.auth.CurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Not authenticated"})
+		return
+	}
+	var appliedCount, savedCount, hiddenCount int
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT
+		COALESCE(SUM(is_applied), 0),
+		COALESCE(SUM(is_saved), 0),
+		COALESCE(SUM(is_hidden), 0)
+		FROM user_job_actions
+		WHERE user_id = ?`, user.ID).Scan(&appliedCount, &savedCount, &hiddenCount); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load job action summary"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"applied_count": appliedCount,
+		"saved_count":   savedCount,
+		"hidden_count":  hiddenCount,
+	})
 }
 
 func parseJobIDsCSV(raw string) []int64 {
