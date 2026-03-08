@@ -21,6 +21,7 @@ const (
 var (
 	scriptLDPattern = regexp.MustCompile(`(?is)<script[^>]*type=['"]application/ld\+json['"][^>]*>(.*?)</script>`)
 	tagPattern      = regexp.MustCompile(`(?is)<[^>]+>`)
+	descItemPattern = regexp.MustCompile(`(?is)<(p|li)([^>]*)>(.*?)</(?:p|li)>`)
 )
 
 type sitemapURL struct {
@@ -51,20 +52,29 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 	if postedAt == "" {
 		postedAt = parseISO(stringValue(jobPosting["datePosted"]))
 	}
+	descriptionHTML := stringValue(jobPosting["description"])
+	descriptionSections := extractDescriptionSections(descriptionHTML)
+	roleDescription := firstNonEmpty(descriptionSections["role_description"], stringValue(toPlainText(descriptionHTML)))
+	roleRequirements := nilIfEmpty(descriptionSections["requirements"])
+	benefitsText := nilIfEmpty(descriptionSections["benefits"])
+	companyTagline := nilIfEmpty(descriptionSections["company_description"])
+	externalID := stringValue(extractExternalID(stringValue(jobPosting["url"]), sourceURL, jobPosting["identifier"]))
 	return map[string]any{
-		"id":                           extractExternalID(stringValue(jobPosting["url"]), sourceURL, jobPosting["identifier"]),
+		"id":                           nilIfEmpty(externalID),
 		"url":                          firstNonEmpty(stringValue(jobPosting["url"]), sourceURL),
 		"created_at":                   postedAt,
 		"roleTitle":                    normalizeTitle(stringValue(jobPosting["title"])),
-		"roleDescription":              toPlainText(stringValue(jobPosting["description"])),
-		"jobDescriptionSummary":        toPlainText(stringValue(jobPosting["description"])),
-		"twoLineJobDescriptionSummary": toPlainText(stringValue(jobPosting["description"])),
+		"roleDescription":              nilIfEmpty(roleDescription),
+		"roleRequirements":             roleRequirements,
+		"benefits":                     benefitsText,
+		"jobDescriptionSummary":        nilIfEmpty(trimDescriptionSummary(roleDescription)),
+		"twoLineJobDescriptionSummary": nilIfEmpty(trimDescriptionSummary(roleDescription)),
 		"descriptionLanguage":          "en",
 		"employmentType":               normalizeEmploymentType(stringValue(jobPosting["employmentType"])),
 		"locationType":                 "remote",
 		"locationCountries":            locationCountries,
 		"salaryRange":                  parseSalaryRange(jobPosting["baseSalary"]),
-		"company":                      parseCompany(jobPosting["hiringOrganization"]),
+		"company":                      parseCompany(jobPosting["hiringOrganization"], externalID, companyTagline),
 	}
 }
 
@@ -189,15 +199,32 @@ func extractLocationCountries(value any) []string {
 	return out
 }
 
-func parseCompany(value any) map[string]any {
+func parseCompany(value any, remotiveJobID string, tagline any) map[string]any {
 	item, _ := value.(map[string]any)
+	name := stringValue(item["name"])
+	slug := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(name), "-")
+	slug = strings.Trim(slug, "-")
+	if slug == "" {
+		slug = "unknown"
+	}
+	profilePicURL := ""
+	if strings.TrimSpace(remotiveJobID) != "" {
+		profilePicURL = "https://remotive.com/job_board/job/logo/" + strings.TrimSpace(remotiveJobID)
+	}
 	return map[string]any{
-		"name": stringOrNil(item["name"]),
-		"url":  stringOrNil(item["sameAs"]),
+		"id":            "remotive_company_" + slug,
+		"name":          stringOrNil(item["name"]),
+		"slug":          slug,
+		"tagline":       tagline,
+		"homePageURL":   nil,
+		"linkedInURL":   nil,
+		"employeeRange": nil,
+		"sponsorsH1B":   nil,
+		"profilePicURL": nilIfEmpty(profilePicURL),
 	}
 }
 
-func parseSalaryRange(value any) map[string]any {
+func parseSalaryRange(value any) any {
 	out := map[string]any{
 		"min":        nil,
 		"max":        nil,
@@ -213,8 +240,17 @@ func parseSalaryRange(value any) map[string]any {
 	if maxOK {
 		out["max"] = maxValue
 	}
+	if minValue == 0 {
+		out["min"] = nil
+	}
+	if maxValue == 0 {
+		out["max"] = nil
+	}
 	if strings.TrimSpace(stringValue(valMap["unitText"])) != "" {
 		out["salaryType"] = strings.TrimSpace(stringValue(valMap["unitText"]))
+	}
+	if out["min"] == nil && out["max"] == nil {
+		return nil
 	}
 	return out
 }
@@ -252,6 +288,89 @@ func normalizeTitle(value string) any {
 		return nil
 	}
 	return title
+}
+
+func extractDescriptionSections(value string) map[string]string {
+	sections := map[string][]string{
+		"role_description":    {},
+		"requirements":        {},
+		"benefits":            {},
+		"company_description": {},
+	}
+	active := "role_description"
+	for _, match := range descItemPattern.FindAllStringSubmatch(value, -1) {
+		tag := strings.ToLower(strings.TrimSpace(match[1]))
+		attrs := strings.ToLower(match[2])
+		text := normalizeDescText(match[3])
+		if text == "" {
+			continue
+		}
+		if strings.Contains(strings.ToLower(text), "this description is a summary of our understanding") {
+			continue
+		}
+		if tag == "p" && strings.Contains(attrs, "h2") && strings.Contains(attrs, "tw-mt-4") && strings.Contains(attrs, "remotive-text-bigger") {
+			if mapped := mapDescriptionHeading(text); mapped != "" {
+				active = mapped
+				continue
+			}
+		}
+		sections[active] = append(sections[active], text)
+	}
+	out := map[string]string{}
+	for key, lines := range sections {
+		out[key] = joinUniqueLines(lines)
+	}
+	return out
+}
+
+func normalizeDescText(value string) string {
+	plain := html.UnescapeString(tagPattern.ReplaceAllString(value, " "))
+	return strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(plain, " "))
+}
+
+func mapDescriptionHeading(value string) string {
+	normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(value), " ")
+	normalized = strings.TrimSpace(normalized)
+	switch normalized {
+	case "role description", "job description", "role responsibilities", "responsibilities":
+		return "role_description"
+	case "qualifications", "qualification", "requirements", "requirement":
+		return "requirements"
+	case "benefits", "benefit", "perks":
+		return "benefits"
+	case "company description", "about company", "about us", "about the company":
+		return "company_description"
+	default:
+		return ""
+	}
+}
+
+func joinUniqueLines(lines []string) string {
+	out := []string{}
+	seen := map[string]struct{}{}
+	for _, line := range lines {
+		key := strings.ToLower(strings.TrimSpace(line))
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, strings.TrimSpace(line))
+	}
+	return strings.Join(out, "\n")
+}
+
+func trimDescriptionSummary(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	if len(trimmed) <= 280 {
+		return trimmed
+	}
+	return trimmed[:280] + "..."
 }
 
 func extractExternalID(jobURL, sourceURL string, identifier any) any {
@@ -338,4 +457,11 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func nilIfEmpty(value string) any {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return strings.TrimSpace(value)
 }
