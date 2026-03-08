@@ -749,7 +749,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			categorizedTitle = stringFromPayload(inferredTitle)
 			categorizedFunction = stringFromPayload(inferredFunction)
 		}
-		normalizedLocation, normalizedLocationCity, normalizedUSStates := normalizeLocationFields(
+		_, normalizedLocationCity, normalizedUSStates := normalizeLocationFields(
 			payload["location"],
 			payload["locationCity"],
 			payload["locationUSStates"],
@@ -759,8 +759,8 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		err = database.RetryLocked(8, 50*time.Millisecond, func() error {
 			_, execErr := s.DB.SQL.ExecContext(
 				ctx,
-				`INSERT INTO parsed_jobs (raw_us_job_id, external_job_id, created_at_source, url, categorized_job_title, categorized_job_function, role_title, employment_type, location, location_city, location_us_states, location_countries, education_requirements_credential_category, tech_stack, updated_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				`INSERT INTO parsed_jobs (raw_us_job_id, external_job_id, created_at_source, url, categorized_job_title, categorized_job_function, role_title, employment_type, location_city, location_us_states, location_countries, education_requirements_credential_category, tech_stack, updated_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				 ON CONFLICT(raw_us_job_id) DO UPDATE SET
 				   external_job_id = excluded.external_job_id,
 				   created_at_source = excluded.created_at_source,
@@ -768,7 +768,6 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				   categorized_job_title = excluded.categorized_job_title,
 				   categorized_job_function = excluded.categorized_job_function,
 				   employment_type = excluded.employment_type,
-				   location = excluded.location,
 				   location_city = excluded.location_city,
 				   location_us_states = excluded.location_us_states,
 				   location_countries = excluded.location_countries,
@@ -784,7 +783,6 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				categorizedFunction,
 				stringFromPayload(payload["roleTitle"]),
 				normalizeEmploymentTypeValue(payload["employmentType"]),
-				normalizedLocation,
 				normalizedLocationCity,
 				normalizedUSStates,
 				normalizedLocationCountries,

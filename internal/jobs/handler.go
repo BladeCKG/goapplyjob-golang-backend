@@ -71,7 +71,6 @@ type jobItem struct {
 	CompanyFoundedYear    *string    `json:"company_founded_year"`
 	CompanySponsorsH1B    *bool      `json:"company_sponsors_h1b"`
 	CategorizedTitle      *string    `json:"categorized_job_title"`
-	Location              *string    `json:"location"`
 	LocationCity          *string    `json:"location_city"`
 	LocationType          *string    `json:"location_type"`
 	LocationUSStates      []string   `json:"location_us_states"`
@@ -107,7 +106,6 @@ type jobDetail struct {
 	CompanySponsorsH1B                      *bool    `json:"company_sponsors_h1b"`
 	CategorizedTitle                        *string  `json:"categorized_job_title"`
 	RoleTitle                               *string  `json:"role_title"`
-	Location                                *string  `json:"location"`
 	LocationCity                            *string  `json:"location_city"`
 	LocationType                            *string  `json:"location_type"`
 	LocationUSStates                        []string `json:"location_us_states"`
@@ -340,9 +338,9 @@ func (h *Handler) filterOptions(c *gin.Context) {
 	sortStrings(categories)
 
 	locationRows, err := h.db.SQL.QueryContext(c.Request.Context(),
-		`SELECT location, location_us_states
+		`SELECT location_us_states, location_countries
 		 FROM parsed_jobs
-		 WHERE location IS NOT NULL OR location_us_states IS NOT NULL`)
+		 WHERE location_us_states IS NOT NULL OR location_countries IS NOT NULL`)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
 		return
@@ -371,28 +369,31 @@ func (h *Handler) filterOptions(c *gin.Context) {
 		locationParents[label] = cleanParents
 	}
 	for locationRows.Next() {
-		var country, statesRaw sql.NullString
-		if err := locationRows.Scan(&country, &statesRaw); err != nil {
+		var statesRaw, countriesRaw sql.NullString
+		if err := locationRows.Scan(&statesRaw, &countriesRaw); err != nil {
 			continue
 		}
-		countryValue := strings.TrimSpace(country.String)
 		stateValues := []string{}
+		countryValues := []string{}
 		if statesRaw.Valid && strings.TrimSpace(statesRaw.String) != "" {
 			_ = json.Unmarshal([]byte(statesRaw.String), &stateValues)
 		}
-		if countryValue != "" {
-			addLocationOption(countryValue, countryValue, nil)
+		if countriesRaw.Valid && strings.TrimSpace(countriesRaw.String) != "" {
+			_ = json.Unmarshal([]byte(countriesRaw.String), &countryValues)
 		}
 		for idx := range stateValues {
 			stateValues[idx] = strings.TrimSpace(stateValues[idx])
 		}
 		stateValues = uniqueStrings(stateValues)
 		for _, state := range stateValues {
-			parents := []string{}
-			if countryValue != "" {
-				parents = append(parents, countryValue)
+			if isValidLocationOption(state) {
+				addLocationOption(state, state, nil)
 			}
-			addLocationOption(state, state, parents)
+		}
+		for _, country := range uniqueStrings(countryValues) {
+			if isValidLocationOption(country) {
+				addLocationOption(country, country, nil)
+			}
 		}
 	}
 	locations := make([]string, 0, len(locationQueryValues))
@@ -458,7 +459,7 @@ func (h *Handler) filterOptions(c *gin.Context) {
 }
 
 func (h *Handler) jobDetail(c *gin.Context) {
-	row := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT p.id, p.raw_us_job_id, c.name, c.slug, c.tagline, c.profile_pic_url, c.home_page_url, c.linkedin_url, c.employee_range, c.founded_year, c.sponsors_h1b, p.categorized_job_title, p.role_title, p.location, p.location_city, p.location_type, p.location_us_states, p.location_countries, p.employment_type, p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_type, p.updated_at, p.created_at_source, p.role_description, p.role_requirements, p.education_requirements_credential_category, p.experience_requirements_months, p.experience_in_place_of_education, p.required_languages, p.tech_stack, p.benefits, p.url FROM parsed_jobs p LEFT JOIN parsed_companies c ON c.id = p.company_id WHERE p.id = ? LIMIT 1`, c.Param("jobID"))
+	row := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT p.id, p.raw_us_job_id, c.name, c.slug, c.tagline, c.profile_pic_url, c.home_page_url, c.linkedin_url, c.employee_range, c.founded_year, c.sponsors_h1b, p.categorized_job_title, p.role_title, p.location_city, p.location_type, p.location_us_states, p.location_countries, p.employment_type, p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_type, p.updated_at, p.created_at_source, p.role_description, p.role_requirements, p.education_requirements_credential_category, p.experience_requirements_months, p.experience_in_place_of_education, p.required_languages, p.tech_stack, p.benefits, p.url FROM parsed_jobs p LEFT JOIN parsed_companies c ON c.id = p.company_id WHERE p.id = ? LIMIT 1`, c.Param("jobID"))
 	detail, err := scanJobDetail(row)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"detail": "Job not found"})
@@ -556,7 +557,7 @@ func (h *Handler) listJobs(c *gin.Context) {
 		}
 		rows, err := h.db.SQL.QueryContext(
 			c.Request.Context(),
-			`SELECT p.id, p.raw_us_job_id, p.role_title, p.job_description_summary, c.name, c.slug, c.tagline, c.profile_pic_url, c.home_page_url, c.linkedin_url, c.employee_range, c.founded_year, c.sponsors_h1b, p.categorized_job_title, p.location, p.location_city, p.location_type, p.location_us_states, p.location_countries, p.employment_type, p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_type, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.tech_stack, p.updated_at, p.created_at_source, p.url
+			`SELECT p.id, p.raw_us_job_id, p.role_title, p.job_description_summary, c.name, c.slug, c.tagline, c.profile_pic_url, c.home_page_url, c.linkedin_url, c.employee_range, c.founded_year, c.sponsors_h1b, p.categorized_job_title, p.location_city, p.location_type, p.location_us_states, p.location_countries, p.employment_type, p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_type, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.tech_stack, p.updated_at, p.created_at_source, p.url
 			 FROM parsed_jobs p
 			 LEFT JOIN parsed_companies c ON c.id = p.company_id
 			 WHERE p.id IN (`+strings.Join(placeholders, ",")+`)`,
@@ -749,8 +750,8 @@ func (h *Handler) topCategories(c *gin.Context) {
 		  AND created_at_source >= ?`
 	args := []any{cutoff}
 	if location != "" {
-		query += ` AND (location LIKE ? OR location_city LIKE ? OR location_us_states LIKE ?)`
-		args = append(args, "%"+location+"%", "%"+location+"%", "%"+location+"%")
+		query += ` AND (location_us_states LIKE ? OR location_countries LIKE ?)`
+		args = append(args, "%"+location+"%", "%"+location+"%")
 	}
 	query += ` GROUP BY categorized_job_title ORDER BY score DESC, categorized_job_title ASC LIMIT ?`
 	args = append(args, limit)
@@ -776,6 +777,22 @@ func appendWhere(where, predicate string) string {
 		return " WHERE " + predicate
 	}
 	return " AND " + predicate
+}
+
+func isValidLocationOption(value string) bool {
+	cleaned := strings.TrimSpace(value)
+	if cleaned == "" {
+		return false
+	}
+	if strings.EqualFold(cleaned, "anywhere") {
+		return false
+	}
+	for _, r := range cleaned {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includePostDate bool) ([]string, []any) {
@@ -809,8 +826,8 @@ func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includ
 		locations = uniqueStrings(expandLocationQueryTerms(locations))
 		parts := make([]string, 0, len(locations))
 		for _, location := range locations {
-			parts = append(parts, `(p.location LIKE ? OR p.location_city LIKE ? OR p.location_us_states LIKE ?)`)
-			args = append(args, "%"+location+"%", "%"+location+"%", "%"+location+"%")
+			parts = append(parts, `(p.location_us_states LIKE ? OR p.location_countries LIKE ?)`)
+			args = append(args, "%"+location+"%", "%"+location+"%")
 		}
 		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 	}
@@ -904,10 +921,10 @@ func selectStrings(c *gin.Context, db *database.DB, query string) ([]string, err
 
 func scanJob(scanner interface{ Scan(dest ...any) error }) (jobItem, error) {
 	var item jobItem
-	var roleTitle, summary, companyName, companySlug, companyTagline, companyProfilePicURL, companyHomePageURL, companyLinkedInURL, companyEmployeeRange, companyFoundedYear, categorizedTitle, location, locationCity, locationType, locationUSStates, locationCountries, employmentType, salaryType, techStack, updatedAt, createdAt, url sql.NullString
+	var roleTitle, summary, companyName, companySlug, companyTagline, companyProfilePicURL, companyHomePageURL, companyLinkedInURL, companyEmployeeRange, companyFoundedYear, categorizedTitle, locationCity, locationType, locationUSStates, locationCountries, employmentType, salaryType, techStack, updatedAt, createdAt, url sql.NullString
 	var companySponsorsH1B, isEntry, isJunior, isMid, isSenior, isLead sql.NullBool
 	var salaryMin, salaryMax, salaryMinUSD, salaryMaxUSD sql.NullFloat64
-	err := scanner.Scan(&item.ID, &item.RawUSJobID, &roleTitle, &summary, &companyName, &companySlug, &companyTagline, &companyProfilePicURL, &companyHomePageURL, &companyLinkedInURL, &companyEmployeeRange, &companyFoundedYear, &companySponsorsH1B, &categorizedTitle, &location, &locationCity, &locationType, &locationUSStates, &locationCountries, &employmentType, &salaryMin, &salaryMax, &salaryMinUSD, &salaryMaxUSD, &salaryType, &isEntry, &isJunior, &isMid, &isSenior, &isLead, &techStack, &updatedAt, &createdAt, &url)
+	err := scanner.Scan(&item.ID, &item.RawUSJobID, &roleTitle, &summary, &companyName, &companySlug, &companyTagline, &companyProfilePicURL, &companyHomePageURL, &companyLinkedInURL, &companyEmployeeRange, &companyFoundedYear, &companySponsorsH1B, &categorizedTitle, &locationCity, &locationType, &locationUSStates, &locationCountries, &employmentType, &salaryMin, &salaryMax, &salaryMinUSD, &salaryMaxUSD, &salaryType, &isEntry, &isJunior, &isMid, &isSenior, &isLead, &techStack, &updatedAt, &createdAt, &url)
 	if err != nil {
 		return item, err
 	}
@@ -923,7 +940,6 @@ func scanJob(scanner interface{ Scan(dest ...any) error }) (jobItem, error) {
 	item.CompanyFoundedYear = nullableString(companyFoundedYear)
 	item.CompanySponsorsH1B = nullableBool(companySponsorsH1B)
 	item.CategorizedTitle = nullableString(categorizedTitle)
-	item.Location = nullableString(location)
 	item.LocationCity = nullableString(locationCity)
 	item.LocationType = nullableString(locationType)
 	item.EmploymentType = nullableString(employmentType)
@@ -962,11 +978,11 @@ func scanJob(scanner interface{ Scan(dest ...any) error }) (jobItem, error) {
 
 func scanJobDetail(scanner interface{ Scan(dest ...any) error }) (jobDetail, error) {
 	var detail jobDetail
-	var companyName, companySlug, companyTagline, companyProfilePicURL, companyHomePageURL, companyLinkedInURL, companyEmployeeRange, companyFoundedYear, categorizedTitle, roleTitle, location, locationCity, locationType, locationUSStates, locationCountries, employmentType, salaryType, updatedAt, createdAt, roleDescription, roleRequirements, educationCategory, requiredLanguages, techStack, benefits, url sql.NullString
+	var companyName, companySlug, companyTagline, companyProfilePicURL, companyHomePageURL, companyLinkedInURL, companyEmployeeRange, companyFoundedYear, categorizedTitle, roleTitle, locationCity, locationType, locationUSStates, locationCountries, employmentType, salaryType, updatedAt, createdAt, roleDescription, roleRequirements, educationCategory, requiredLanguages, techStack, benefits, url sql.NullString
 	var companySponsorsH1B, experienceInPlaceOfEducation sql.NullBool
 	var salaryMin, salaryMax, salaryMinUSD, salaryMaxUSD sql.NullFloat64
 	var experienceRequirementsMonths sql.NullInt64
-	err := scanner.Scan(&detail.ID, &detail.RawUSJobID, &companyName, &companySlug, &companyTagline, &companyProfilePicURL, &companyHomePageURL, &companyLinkedInURL, &companyEmployeeRange, &companyFoundedYear, &companySponsorsH1B, &categorizedTitle, &roleTitle, &location, &locationCity, &locationType, &locationUSStates, &locationCountries, &employmentType, &salaryMin, &salaryMax, &salaryMinUSD, &salaryMaxUSD, &salaryType, &updatedAt, &createdAt, &roleDescription, &roleRequirements, &educationCategory, &experienceRequirementsMonths, &experienceInPlaceOfEducation, &requiredLanguages, &techStack, &benefits, &url)
+	err := scanner.Scan(&detail.ID, &detail.RawUSJobID, &companyName, &companySlug, &companyTagline, &companyProfilePicURL, &companyHomePageURL, &companyLinkedInURL, &companyEmployeeRange, &companyFoundedYear, &companySponsorsH1B, &categorizedTitle, &roleTitle, &locationCity, &locationType, &locationUSStates, &locationCountries, &employmentType, &salaryMin, &salaryMax, &salaryMinUSD, &salaryMaxUSD, &salaryType, &updatedAt, &createdAt, &roleDescription, &roleRequirements, &educationCategory, &experienceRequirementsMonths, &experienceInPlaceOfEducation, &requiredLanguages, &techStack, &benefits, &url)
 	if err != nil {
 		return detail, err
 	}
@@ -981,7 +997,6 @@ func scanJobDetail(scanner interface{ Scan(dest ...any) error }) (jobDetail, err
 	detail.CompanySponsorsH1B = nullableBool(companySponsorsH1B)
 	detail.CategorizedTitle = nullableString(categorizedTitle)
 	detail.RoleTitle = nullableString(roleTitle)
-	detail.Location = nullableString(location)
 	detail.LocationCity = nullableString(locationCity)
 	detail.LocationType = nullableString(locationType)
 	detail.EmploymentType = nullableString(employmentType)
