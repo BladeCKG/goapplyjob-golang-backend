@@ -548,7 +548,7 @@ func (h *Handler) refreshFilterCache(ctx context.Context) error {
 		`SELECT p.categorized_job_title, p.categorized_job_function, p.location_us_states, p.location_countries, p.tech_stack, p.employment_type
 		 FROM parsed_jobs p
 		 JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
-		 WHERE r.source = ?
+		 WHERE COALESCE(NULLIF(trim(r.source), ''), 'remoterocketship') = ?
 		   AND (
 		     p.categorized_job_title IS NOT NULL
 		     OR p.categorized_job_function IS NOT NULL
@@ -605,16 +605,15 @@ func (h *Handler) refreshFilterCache(ctx context.Context) error {
 func (h *Handler) ensureFilterCacheFresh(ctx context.Context, force bool) error {
 	h.filterCache.mu.Lock()
 	defer h.filterCache.mu.Unlock()
-	if !force && !h.filterCache.lastRefreshAt.IsZero() {
-		if time.Since(h.filterCache.lastRefreshAt) < time.Duration(h.filterCacheRefreshSeconds)*time.Second {
-			return nil
-		}
-	}
 	maxID, err := h.getMaxParsedJobID(ctx)
 	if err != nil {
 		return err
 	}
 	if !force && parsedJobFilterRowsEqual(h.filterCache.maxParsedJobID, maxID) {
+		if !h.filterCache.lastRefreshAt.IsZero() &&
+			time.Since(h.filterCache.lastRefreshAt) < time.Duration(h.filterCacheRefreshSeconds)*time.Second {
+			return nil
+		}
 		return nil
 	}
 	if err := h.refreshFilterCache(ctx); err != nil {
@@ -652,7 +651,9 @@ func (h *Handler) WarmFilterCache(_ context.Context) error {
 }
 
 func (h *Handler) filterOptions(c *gin.Context) {
-	h.scheduleFilterCacheRefresh(false)
+	if err := h.ensureFilterCacheFresh(c.Request.Context(), false); err != nil {
+		h.scheduleFilterCacheRefresh(false)
+	}
 	minSalaryOptions := []int{}
 	for salary := minSalaryStart; salary <= minSalaryEnd; salary += minSalaryStep {
 		minSalaryOptions = append(minSalaryOptions, salary)
@@ -1259,8 +1260,8 @@ func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includ
 			locations = uniqueStrings(expandLocationQueryTerms(locations))
 			parts := make([]string, 0, len(locations))
 			for _, location := range locations {
-				parts = append(parts, `(p.location_us_states LIKE ? OR p.location_countries LIKE ?)`)
-				args = append(args, "%"+location+"%", "%"+location+"%")
+				parts = append(parts, `(p.location_city LIKE ? OR p.location_us_states LIKE ? OR p.location_countries LIKE ?)`)
+				args = append(args, "%"+location+"%", "%"+location+"%", "%"+location+"%")
 			}
 			filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 		}
