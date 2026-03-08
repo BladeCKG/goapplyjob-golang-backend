@@ -52,6 +52,11 @@ func (h *Handler) listUsers(c *gin.Context) {
 		return
 	}
 	limit, offset := queryLimitOffset(c, 200, 1000)
+	total := 0
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT COUNT(id) FROM auth_users`).Scan(&total); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list users"})
+		return
+	}
 
 	rows, err := h.db.SQL.QueryContext(c.Request.Context(),
 		`SELECT id, email, created_at
@@ -106,7 +111,7 @@ func (h *Handler) listUsers(c *gin.Context) {
 		}
 		items = append(items, item)
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items})
+	c.JSON(http.StatusOK, gin.H{"total": total, "items": items})
 }
 
 func (h *Handler) upsertUserSubscription(c *gin.Context) {
@@ -233,13 +238,21 @@ func (h *Handler) listWatcherPayloads(c *gin.Context) {
 
 	query := `SELECT id, source, source_url, payload_type, body_text, created_at, consumed_at
 		FROM watcher_payloads`
+	totalQuery := `SELECT COUNT(id) FROM watcher_payloads`
 	if len(filters) > 0 {
-		query += " WHERE " + strings.Join(filters, " AND ")
+		where := " WHERE " + strings.Join(filters, " AND ")
+		query += where
+		totalQuery += where
 	}
 	query += " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
-	args = append(args, limit, offset)
+	total := 0
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), totalQuery, args...).Scan(&total); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list watcher payloads"})
+		return
+	}
+	queryArgs := append(append([]any{}, args...), limit, offset)
 
-	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, args...)
+	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, queryArgs...)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list watcher payloads"})
 		return
@@ -274,7 +287,7 @@ func (h *Handler) listWatcherPayloads(c *gin.Context) {
 		}
 		items = append(items, item)
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items})
+	c.JSON(http.StatusOK, gin.H{"total": total, "items": items})
 }
 
 func (h *Handler) updateWatcherPayload(c *gin.Context) {
@@ -333,13 +346,21 @@ func (h *Handler) listRawUSJobs(c *gin.Context) {
 	}
 	query := `SELECT id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json
 		FROM raw_us_jobs`
+	totalQuery := `SELECT COUNT(id) FROM raw_us_jobs`
 	if len(filters) > 0 {
-		query += " WHERE " + strings.Join(filters, " AND ")
+		where := " WHERE " + strings.Join(filters, " AND ")
+		query += where
+		totalQuery += where
 	}
 	query += " ORDER BY post_date DESC, id DESC LIMIT ? OFFSET ?"
-	args = append(args, limit, offset)
+	total := 0
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), totalQuery, args...).Scan(&total); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list raw jobs"})
+		return
+	}
+	queryArgs := append(append([]any{}, args...), limit, offset)
 
-	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, args...)
+	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, queryArgs...)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list raw jobs"})
 		return
@@ -377,7 +398,7 @@ func (h *Handler) listRawUSJobs(c *gin.Context) {
 		}
 		items = append(items, item)
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items})
+	c.JSON(http.StatusOK, gin.H{"total": total, "items": items})
 }
 
 func (h *Handler) updateRawUSJob(c *gin.Context) {
@@ -429,15 +450,22 @@ func (h *Handler) listWatcherStates(c *gin.Context) {
 
 	query := `SELECT id, source, state_json, updated_at
 		FROM watcher_states`
+	totalQuery := `SELECT COUNT(id) FROM watcher_states`
 	args := []any{}
 	if source != "" {
 		query += " WHERE source = ?"
+		totalQuery += " WHERE source = ?"
 		args = append(args, source)
 	}
 	query += " ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?"
-	args = append(args, limit, offset)
+	total := 0
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), totalQuery, args...).Scan(&total); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list watcher states"})
+		return
+	}
+	queryArgs := append(append([]any{}, args...), limit, offset)
 
-	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, args...)
+	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, queryArgs...)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list watcher states"})
 		return
@@ -470,7 +498,7 @@ func (h *Handler) listWatcherStates(c *gin.Context) {
 		}
 		items = append(items, item)
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items})
+	c.JSON(http.StatusOK, gin.H{"total": total, "items": items})
 }
 
 func (h *Handler) updateWatcherState(c *gin.Context) {
