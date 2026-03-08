@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"goapplyjob-golang-backend/internal/locationnorm"
 	"goapplyjob-golang-backend/internal/sources/remoterocketship"
 )
 
@@ -102,6 +103,10 @@ func NormalizeJobs(results []map[string]any) []NormalizedJob {
 			continue
 		}
 		rawURL := "https://hiring.cafe/viewjob/" + requisitionID
+		locationCountry := locationnorm.NormalizeCountryName("United States", true)
+		if locationCountry == "" {
+			locationCountry = "United States"
+		}
 		normalized = append(normalized, NormalizedJob{
 			URL:      rawURL,
 			PostDate: *postDate,
@@ -111,11 +116,11 @@ func NormalizeJobs(results []map[string]any) []NormalizedJob {
 				"url":              valueString(item["apply_url"]),
 				"roleTitle":        firstNonEmpty(valueString(v5Data["job_title_raw"]), valueString(v5Data["core_job_title"])),
 				"employmentType":   normalizeEmploymentType(valueStringSlice(v5Data["commitment"])),
-				"location":         "United States",
+				"location":         locationCountry,
 				"locationCity":     nil,
 				"locationUSStates": []string{},
 				"locationCountries": []string{
-					"United States",
+					locationCountry,
 				},
 				"educationRequirementsCredentialCategory": nil,
 			},

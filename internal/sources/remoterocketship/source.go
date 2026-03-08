@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"goapplyjob-golang-backend/internal/locationnorm"
 )
 
 const (
@@ -85,14 +87,7 @@ func stringValue(value any) string {
 }
 
 func normalizeCountryToken(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "us", "usa", "u.s.", "u.s.a.", "united states":
-		return "United States"
-	case "uk", "gbr", "united kingdom":
-		return "United Kingdom"
-	default:
-		return ""
-	}
+	return locationnorm.NormalizeCountryName(value, true)
 }
 
 func ParseImportRows(bodyText string) ([]map[string]any, int) {

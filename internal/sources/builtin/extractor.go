@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"goapplyjob-golang-backend/internal/locationnorm"
 )
 
 var (
@@ -739,7 +741,7 @@ func extractLocationParts(jobPosting map[string]any) ([]string, any, string) {
 		address, _ := entry["address"].(map[string]any)
 		locality := stringValue(address["addressLocality"])
 		region := stringValue(address["addressRegion"])
-		country := stringValue(address["addressCountry"])
+		country := locationnorm.NormalizeCountryName(stringValue(address["addressCountry"]), true)
 		if idx == 0 {
 			firstLocality = locality
 		}
@@ -807,10 +809,10 @@ func extractLocationCountries(jobPosting map[string]any) []string {
 	for _, location := range locations {
 		entry, _ := location.(map[string]any)
 		address, _ := entry["address"].(map[string]any)
-		add(stringValue(address["addressCountry"]))
+		add(locationnorm.NormalizeCountryName(stringValue(address["addressCountry"]), true))
 	}
 	if applicantCountry := stringValueFromMap(jobPosting, "applicantLocationRequirements", "name"); applicantCountry != "" {
-		add(applicantCountry)
+		add(locationnorm.NormalizeCountryName(applicantCountry, true))
 	}
 	return countries
 }
