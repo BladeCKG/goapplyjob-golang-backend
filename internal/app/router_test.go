@@ -77,6 +77,9 @@ func TestAuthAndJobsFlow(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("expected one job, got %d", len(items))
 	}
+	if body["company_count"] != float64(0) {
+		t.Fatalf("expected company_count=0, got %#v", body["company_count"])
+	}
 }
 
 func TestMagicLinkAuthFlow(t *testing.T) {

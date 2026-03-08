@@ -522,6 +522,11 @@ func (h *Handler) listJobs(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs"})
 		return
 	}
+	var companyCount int
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT COUNT(DISTINCT p.company_id) FROM parsed_jobs p`+where+appendWhere(where, `p.company_id IS NOT NULL`), args...).Scan(&companyCount); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs"})
+		return
+	}
 
 	previewPerPage := max(h.cfg.PublicJobsMaxPerPage, 1)
 	idOrderBy := `created_at_source DESC, id DESC`
@@ -604,6 +609,7 @@ func (h *Handler) listJobs(c *gin.Context) {
 		"page":             pageOut,
 		"per_page":         perPageOut,
 		"total":            rawTotal,
+		"company_count":    companyCount,
 		"is_preview":       isPreview,
 		"requires_login":   currentUser == nil && isPreview && rawTotal > len(items),
 		"requires_upgrade": currentUser != nil && isPreview && rawTotal > len(items),
