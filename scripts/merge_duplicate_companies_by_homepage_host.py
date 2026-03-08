@@ -66,7 +66,7 @@ def run(db_path: Path, dry_run: bool, limit_hosts: int | None) -> None:
 
     by_host: dict[str, list[sqlite3.Row]] = {}
     for row in rows:
-        host = normalized_linkedin_identity(row["linkedin_url"])
+        host = normalized_host(row["home_page_url"])
         if not host:
             continue
         by_host.setdefault(host, []).append(row)
@@ -76,60 +76,52 @@ def run(db_path: Path, dry_run: bool, limit_hosts: int | None) -> None:
     if limit_hosts and limit_hosts > 0:
         hosts = hosts[:limit_hosts]
 
-    merged_hosts = 0
+    merged_groups = 0
     merged_companies = 0
     reassigned_jobs = 0
     slug_cleaned = 0
 
     for host in hosts:
-        companies = sorted(by_host[host], key=lambda row: int(row["id"]))
-        canonical = companies[0]
-        cleaned_slug = clean_slug_numeric_suffix(canonical["slug"])
-        if cleaned_slug and cleaned_slug != canonical["slug"]:
-            cur.execute("UPDATE parsed_companies SET slug = ? WHERE id = ?", (cleaned_slug, int(canonical["id"])))
-            slug_cleaned += cur.rowcount if cur.rowcount is not None else 0
-        duplicates = companies[1:]
-        if not duplicates:
-            continue
-        merged_hosts += 1
-        for dup in duplicates:
-            dup_id = int(dup["id"])
-            canonical_id = int(canonical["id"])
-            cur.execute("UPDATE parsed_jobs SET company_id = ? WHERE company_id = ?", (canonical_id, dup_id))
-            reassigned_jobs += cur.rowcount if cur.rowcount is not None else 0
-            cur.execute("DELETE FROM parsed_companies WHERE id = ?", (dup_id,))
-            merged_companies += cur.rowcount if cur.rowcount is not None else 0
+        group = by_host[host]
+        by_linkedin: dict[str, list[sqlite3.Row]] = {}
+        null_linkedin: list[sqlite3.Row] = []
+        for row in group:
+            linkedin_id = normalized_linkedin_identity(row["linkedin_url"])
+            if linkedin_id:
+                by_linkedin.setdefault(linkedin_id, []).append(row)
+            else:
+                null_linkedin.append(row)
 
-    by_name_slug_host: dict[str, list[sqlite3.Row]] = {}
-    active_rows = cur.execute(
-        "SELECT id, name, slug, home_page_url, linkedin_url FROM parsed_companies ORDER BY id ASC"
-    ).fetchall()
-    for row in active_rows:
-        name_key = normalized_name_key(row["name"])
-        slug_key = normalized_slug_key(row["slug"])
-        host_key = normalized_host(row["home_page_url"])
-        if not (name_key and slug_key and host_key):
-            continue
-        dedupe_key = f"{name_key}|{slug_key}|{host_key}"
-        by_name_slug_host.setdefault(dedupe_key, []).append(row)
-    composite_keys = [key for key, items in by_name_slug_host.items() if len(items) > 1]
-    composite_keys.sort()
-    if limit_hosts and limit_hosts > 0:
-        composite_keys = composite_keys[:limit_hosts]
-    for key in composite_keys:
-        companies = sorted(by_name_slug_host[key], key=lambda row: int(row["id"]))
-        canonical = companies[0]
-        duplicates = companies[1:]
-        if not duplicates:
-            continue
-        merged_hosts += 1
-        for dup in duplicates:
-            dup_id = int(dup["id"])
-            canonical_id = int(canonical["id"])
-            cur.execute("UPDATE parsed_jobs SET company_id = ? WHERE company_id = ?", (canonical_id, dup_id))
-            reassigned_jobs += cur.rowcount if cur.rowcount is not None else 0
-            cur.execute("DELETE FROM parsed_companies WHERE id = ?", (dup_id,))
-            merged_companies += cur.rowcount if cur.rowcount is not None else 0
+        merge_buckets: list[list[sqlite3.Row]] = []
+        if len(by_linkedin) > 1:
+            merge_buckets.extend(by_linkedin.values())
+            if null_linkedin:
+                merge_buckets.append(null_linkedin)
+        elif len(by_linkedin) == 1:
+            only_bucket = list(next(iter(by_linkedin.values())))
+            only_bucket.extend(null_linkedin)
+            merge_buckets.append(only_bucket)
+        elif null_linkedin:
+            merge_buckets.append(null_linkedin)
+
+        for bucket in merge_buckets:
+            companies = sorted(bucket, key=lambda row: int(row["id"]))
+            canonical = companies[0]
+            cleaned_slug = clean_slug_numeric_suffix(canonical["slug"])
+            if cleaned_slug and cleaned_slug != canonical["slug"]:
+                cur.execute("UPDATE parsed_companies SET slug = ? WHERE id = ?", (cleaned_slug, int(canonical["id"])))
+                slug_cleaned += cur.rowcount if cur.rowcount is not None else 0
+            duplicates = companies[1:]
+            if not duplicates:
+                continue
+            merged_groups += 1
+            for dup in duplicates:
+                dup_id = int(dup["id"])
+                canonical_id = int(canonical["id"])
+                cur.execute("UPDATE parsed_jobs SET company_id = ? WHERE company_id = ?", (canonical_id, dup_id))
+                reassigned_jobs += cur.rowcount if cur.rowcount is not None else 0
+                cur.execute("DELETE FROM parsed_companies WHERE id = ?", (dup_id,))
+                merged_companies += cur.rowcount if cur.rowcount is not None else 0
 
     if dry_run:
         conn.rollback()
@@ -139,13 +131,15 @@ def run(db_path: Path, dry_run: bool, limit_hosts: int | None) -> None:
         mode = "APPLIED"
     conn.close()
     print(
-        f"[{mode}] merged_hosts={merged_hosts} merged_companies={merged_companies} "
+        f"[{mode}] merged_groups={merged_groups} merged_companies={merged_companies} "
         f"reassigned_jobs={reassigned_jobs} slug_cleaned={slug_cleaned}"
     )
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="One-time dedupe: merge parsed_companies by linkedin identity and name+slug+homepage host")
+    parser = argparse.ArgumentParser(
+        description="One-time dedupe: merge parsed_companies by homepage host and isolate conflicting linkedin identities"
+    )
     parser.add_argument("--db", default="goapplyjob.db")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit-hosts", type=int, default=None)
