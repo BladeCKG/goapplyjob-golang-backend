@@ -648,7 +648,7 @@ func TestJobsPostDateFilterAndOptions(t *testing.T) {
 
 	var optionsBody map[string]any
 	decodeBody(t, optionsRec.Body.Bytes(), &optionsBody)
-	if len(optionsBody["post_date_options"].([]any)) != 6 {
+	if len(optionsBody["post_date_options"].([]any)) != 12 {
 		t.Fatalf("unexpected post date options %#v", optionsBody)
 	}
 

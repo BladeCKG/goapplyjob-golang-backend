@@ -37,10 +37,24 @@ const (
 )
 
 var (
-	postDateOptions = []string{"24_hours", "48_hours", "3_days", "week", "month", "3_months"}
+	postDateOptions = []string{
+		"today",
+		"24_hours",
+		"yesterday",
+		"48_hours",
+		"72_hours",
+		"this_week",
+		"week",
+		"previous_week",
+		"this_month",
+		"month",
+		"previous_month",
+		"3_months",
+	}
 	postDateWindows = map[string]time.Duration{
 		"24_hours": 24 * time.Hour,
 		"48_hours": 48 * time.Hour,
+		"72_hours": 72 * time.Hour,
 		"3_days":   72 * time.Hour,
 		"week":     7 * 24 * time.Hour,
 		"month":    30 * 24 * time.Hour,
@@ -906,8 +920,47 @@ func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includ
 	}
 	if includePostDate {
 		if postDate := strings.ToLower(strings.TrimSpace(c.Query("post_date"))); postDate != "" {
-			if window, ok := postDateWindows[postDate]; ok {
-				cutoff := time.Now().UTC().Add(-window)
+			now := time.Now().UTC()
+			todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+			thisWeekStart := todayStart.AddDate(0, 0, -int(todayStart.Weekday()-time.Monday))
+			if todayStart.Weekday() == time.Sunday {
+				thisWeekStart = todayStart.AddDate(0, 0, -6)
+			}
+			thisMonthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+			lastMonthStart := thisMonthStart.AddDate(0, -1, 0)
+			lastWeekStart := thisWeekStart.AddDate(0, 0, -7)
+
+			switch postDate {
+			case "today":
+				filters = append(filters, `p.created_at_source >= ?`)
+				args = append(args, todayStart.Format(time.RFC3339Nano))
+			case "yesterday":
+				filters = append(filters, `p.created_at_source >= ?`)
+				args = append(args, todayStart.AddDate(0, 0, -1).Format(time.RFC3339Nano))
+				filters = append(filters, `p.created_at_source < ?`)
+				args = append(args, todayStart.Format(time.RFC3339Nano))
+			case "this_week":
+				filters = append(filters, `p.created_at_source >= ?`)
+				args = append(args, thisWeekStart.Format(time.RFC3339Nano))
+			case "previous_week":
+				filters = append(filters, `p.created_at_source >= ?`)
+				args = append(args, lastWeekStart.Format(time.RFC3339Nano))
+				filters = append(filters, `p.created_at_source < ?`)
+				args = append(args, thisWeekStart.Format(time.RFC3339Nano))
+			case "this_month":
+				filters = append(filters, `p.created_at_source >= ?`)
+				args = append(args, thisMonthStart.Format(time.RFC3339Nano))
+			case "previous_month":
+				filters = append(filters, `p.created_at_source >= ?`)
+				args = append(args, lastMonthStart.Format(time.RFC3339Nano))
+				filters = append(filters, `p.created_at_source < ?`)
+				args = append(args, thisMonthStart.Format(time.RFC3339Nano))
+			default:
+				window, ok := postDateWindows[postDate]
+				if !ok {
+					break
+				}
+				cutoff := now.Add(-window)
 				filters = append(filters, `p.created_at_source >= ?`)
 				args = append(args, cutoff.Format(time.RFC3339Nano))
 			}
