@@ -847,6 +847,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		}
 		log.Printf("parsed-job-worker upsert_start raw_job_id=%d source=%s", row.id, row.source)
 		sourceCreatedAt := parseDT(payload["created_at"])
+		normalizedTechStack := normalizeTechStack(payload["techStack"])
 		categorizedTitle := stringFromPayload(payload["categorizedJobTitle"])
 		categorizedFunction := stringFromPayload(payload["categorizedJobFunction"])
 		if title, ok := categorizedTitle.(string); ok && strings.TrimSpace(title) != "" && categorizedFunction == nil {
@@ -859,14 +860,20 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			}
 		}
 		if row.source == sourceBuiltin && categorizedTitle == nil {
-			// Groq-based category classification is intentionally disabled for now.
-			_ = classifyJobTitleWithGroqSync(stringValue(payload["roleTitle"]), stringValue(payload["roleDescription"]))
-			inferredTitle, inferredFunction, err := s.findSimilarRemoteCategories(ctx, stringValue(payload["roleTitle"]))
-			if err != nil {
-				return processed, err
+			if len(normalizedTechStack) == 0 {
+				groqCategory := classifyJobTitleWithGroqSync(stringValue(payload["roleTitle"]), stringValue(payload["roleDescription"]))
+				if strings.TrimSpace(groqCategory) != "" {
+					categorizedTitle = stringFromPayload(groqCategory)
+				}
 			}
-			categorizedTitle = stringFromPayload(inferredTitle)
-			categorizedFunction = stringFromPayload(inferredFunction)
+			if categorizedTitle == nil {
+				inferredTitle, inferredFunction, err := s.findSimilarRemoteCategories(ctx, stringValue(payload["roleTitle"]))
+				if err != nil {
+					return processed, err
+				}
+				categorizedTitle = stringFromPayload(inferredTitle)
+				categorizedFunction = stringFromPayload(inferredFunction)
+			}
 		}
 		if title, ok := categorizedTitle.(string); ok && strings.TrimSpace(title) != "" && categorizedFunction == nil {
 			resolvedFunction, err := s.resolveJobFunctionForCategory(ctx, title)
@@ -883,7 +890,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			payload["locationUSStates"],
 		)
 		normalizedLocationCountries := normalizeLocationCountries(payload["locationCountries"])
-		normalizedTechStack := jsonStringOrNil(normalizeTechStack(payload["techStack"]))
+		normalizedTechStackJSON := jsonStringOrNil(normalizedTechStack)
 		err = database.RetryLocked(8, 50*time.Millisecond, func() error {
 			_, execErr := s.DB.SQL.ExecContext(
 				ctx,
@@ -915,7 +922,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				normalizedUSStates,
 				normalizedLocationCountries,
 				normalizeEducationCredentialCategory(payload["educationRequirementsCredentialCategory"]),
-				normalizedTechStack,
+				normalizedTechStackJSON,
 				time.Now().UTC().Format(time.RFC3339Nano),
 			)
 			return execErr
