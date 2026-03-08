@@ -50,6 +50,7 @@ func (h *Handler) Register(router gin.IRouter) {
 	router.GET("/pricing/providers", h.listProviders)
 	router.GET("/pricing/crypto/currencies", h.listCryptoCurrencies)
 	router.GET("/pricing/subscription", h.subscriptionStatus)
+	router.POST("/pricing/subscription/cancel", h.cancelSubscription)
 	router.POST("/pricing/subscribe", h.subscribe)
 	router.GET("/pricing/payments/:paymentID", h.paymentStatus)
 	router.POST("/pricing/payments/:paymentID/confirm", h.confirmPayment)
@@ -68,7 +69,7 @@ func (h *Handler) listProviders(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": []gin.H{
 		{
 			"provider":        "stripe",
-			"payment_methods": []string{"card", "paypal"},
+			"payment_methods": []string{"card"},
 			"enabled":         stripeEnabled,
 			"reason":          map[bool]any{true: nil, false: "Stripe is not configured"}[stripeEnabled],
 		},
@@ -591,21 +592,34 @@ func (h *Handler) subscriptionStatus(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Not authenticated"})
 		return
 	}
-	var subscriptionID int64
+	var subscriptionID, planID int64
 	var planCode, planName string
 	var startsAt, endsAt sql.NullString
 	err = h.db.SQL.QueryRowContext(
 		c.Request.Context(),
-		`SELECT s.id, p.code, p.name, s.starts_at, s.ends_at
+		`SELECT s.id, p.id, p.code, p.name, s.starts_at, s.ends_at
 		 FROM user_subscriptions s
 		 JOIN pricing_plans p ON p.id = s.pricing_plan_id
 		 WHERE s.user_id = ? AND p.is_active = 1
 		 ORDER BY s.ends_at DESC
 		 LIMIT 1`,
 		user.ID,
-	).Scan(&subscriptionID, &planCode, &planName, &startsAt, &endsAt)
+	).Scan(&subscriptionID, &planID, &planCode, &planName, &startsAt, &endsAt)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"is_active": false, "status": "none", "days_left": nil, "plan_code": nil, "plan_name": nil, "starts_at": nil, "ends_at": nil})
+		c.JSON(http.StatusOK, gin.H{
+			"is_active":              false,
+			"status":                 "none",
+			"days_left":              nil,
+			"plan_code":              nil,
+			"plan_name":              nil,
+			"starts_at":              nil,
+			"ends_at":                nil,
+			"provider":               nil,
+			"payment_method":         nil,
+			"can_cancel":             false,
+			"cancel_at_period_end":   false,
+			"stripe_subscription_id": nil,
+		})
 		return
 	}
 	now := time.Now().UTC()
@@ -625,20 +639,96 @@ func (h *Handler) subscriptionStatus(c *gin.Context) {
 	if !isActive {
 		_, _ = h.db.SQL.ExecContext(c.Request.Context(), `UPDATE user_subscriptions SET is_active = 0 WHERE id = ? AND is_active = 1`, subscriptionID)
 	}
+	var provider, paymentMethod sql.NullString
+	var providerPayload sql.NullString
+	_ = h.db.SQL.QueryRowContext(
+		c.Request.Context(),
+		`SELECT provider, payment_method, provider_payload
+		 FROM pricing_payments
+		 WHERE user_id = ? AND pricing_plan_id = ? AND status = 'paid'
+		 ORDER BY paid_at DESC, created_at DESC
+		 LIMIT 1`,
+		user.ID,
+		planID,
+	).Scan(&provider, &paymentMethod, &providerPayload)
+	cancelAtPeriodEnd := false
+	canCancel := false
+	var stripeSubscriptionID any
+	if provider.Valid && provider.String == "stripe" && providerPayload.Valid && strings.TrimSpace(providerPayload.String) != "" {
+		payload := map[string]any{}
+		if json.Unmarshal([]byte(providerPayload.String), &payload) == nil {
+			if rawID, ok := payload["stripe_subscription_id"].(string); ok && strings.TrimSpace(rawID) != "" {
+				stripeSubscriptionID = strings.TrimSpace(rawID)
+			}
+			cancelAtPeriodEnd = payload["stripe_cancel_at_period_end"] == true
+			canCancel = !cancelAtPeriodEnd && stripeSubscriptionID != nil
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"is_active": isActive,
-		"status":    status,
-		"days_left": daysLeft,
-		"plan_code": planCode,
-		"plan_name": planName,
-		"starts_at": nullStringValue(startsAt),
-		"ends_at":   nullStringValue(endsAt),
+		"is_active":              isActive,
+		"status":                 status,
+		"days_left":              daysLeft,
+		"plan_code":              planCode,
+		"plan_name":              planName,
+		"starts_at":              nullStringValue(startsAt),
+		"ends_at":                nullStringValue(endsAt),
+		"provider":               nullStringValue(provider),
+		"payment_method":         nullStringValue(paymentMethod),
+		"can_cancel":             canCancel,
+		"cancel_at_period_end":   cancelAtPeriodEnd,
+		"stripe_subscription_id": stripeSubscriptionID,
+	})
+}
+
+func (h *Handler) cancelSubscription(c *gin.Context) {
+	user, err := h.auth.CurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Not authenticated"})
+		return
+	}
+	var paymentID int64
+	var providerPayloadRaw sql.NullString
+	err = h.db.SQL.QueryRowContext(
+		c.Request.Context(),
+		`SELECT p.id, p.provider_payload
+		 FROM pricing_payments p
+		 JOIN user_subscriptions s ON s.pricing_plan_id = p.pricing_plan_id
+		 WHERE s.user_id = ? AND s.is_active = 1 AND p.user_id = ? AND p.provider = 'stripe' AND p.status = 'paid'
+		 ORDER BY p.paid_at DESC, p.created_at DESC
+		 LIMIT 1`,
+		user.ID,
+		user.ID,
+	).Scan(&paymentID, &providerPayloadRaw)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "No active Stripe subscription to cancel"})
+		return
+	}
+	payload := map[string]any{}
+	if providerPayloadRaw.Valid && strings.TrimSpace(providerPayloadRaw.String) != "" {
+		_ = json.Unmarshal([]byte(providerPayloadRaw.String), &payload)
+	}
+	stripeSubscriptionID, _ := payload["stripe_subscription_id"].(string)
+	if strings.TrimSpace(stripeSubscriptionID) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "No Stripe subscription id found"})
+		return
+	}
+	payload["stripe_cancel_at_period_end"] = true
+	payloadBytes, _ := json.Marshal(payload)
+	if _, err := h.db.SQL.ExecContext(c.Request.Context(), `UPDATE pricing_payments SET provider_payload = ? WHERE id = ?`, string(payloadBytes), paymentID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to cancel Stripe subscription"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"ok":                     true,
+		"stripe_subscription_id": stripeSubscriptionID,
+		"cancel_at_period_end":   true,
+		"current_period_end":     nil,
 	})
 }
 
 func validateProviderMethod(provider, paymentMethod string) error {
-	if provider == "stripe" && paymentMethod != "card" && paymentMethod != "paypal" {
-		return errors.New("Stripe supports card or paypal")
+	if provider == "stripe" && paymentMethod != "card" {
+		return errors.New("Stripe supports card only")
 	}
 	if provider == "crypto" && paymentMethod != "crypto" {
 		return errors.New("Crypto provider requires payment_method=crypto")

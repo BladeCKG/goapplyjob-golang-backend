@@ -1,7 +1,6 @@
 package crypto
 
 import (
-	"bytes"
 	"crypto/hmac"
 	"crypto/sha512"
 	"encoding/json"
@@ -92,26 +91,13 @@ func (g *OxaPayGateway) VerifyPayment(providerPaymentID string, orderID string) 
 	if strings.TrimSpace(g.cfg.OxaPayMerchantAPIKey) == "" || strings.TrimSpace(providerPaymentID) == "" {
 		return nil, nil
 	}
-	requestPayload := map[string]any{
-		"track_id": providerPaymentID,
-	}
-	if strings.TrimSpace(orderID) != "" {
-		requestPayload["order_id"] = orderID
-	}
-	switch strings.TrimSpace(strings.ToLower(g.cfg.OxaPayEnv)) {
-	case "sandbox":
-		requestPayload["sandbox"] = true
-	case "prod":
-		requestPayload["sandbox"] = false
-	}
-	rawBody, _ := json.Marshal(requestPayload)
-	endpoint := strings.TrimRight(strings.TrimSpace(g.cfg.OxaPayAPIBaseURL), "/") + "/payment/inquiry"
-	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(rawBody))
+	_ = orderID
+	endpoint := strings.TrimRight(strings.TrimSpace(g.cfg.OxaPayAPIBaseURL), "/") + "/payment/" + strings.TrimSpace(providerPaymentID)
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("merchant_api_key", g.cfg.OxaPayMerchantAPIKey)
-	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{Timeout: 20 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
