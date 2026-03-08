@@ -1,0 +1,66 @@
+version: 2.1
+
+jobs:
+  run-workers:
+    docker:
+      - image: cimg/go:1.24
+    working_directory: ~/project
+    steps:
+      - checkout
+      - run:
+          name: Validate required env vars
+          command: |
+            set -e
+            missing=0
+            for key in DATABASE_URL WATCH_URL GROQ_API_KEY RAW_JOB_RETENTION_DAYS; do
+              if [ -z "${!key}" ]; then
+                echo "Missing required env var: $key"
+                missing=1
+              fi
+            done
+            if [ "$missing" -ne 0 ]; then
+              exit 1
+            fi
+      - run:
+          name: Install dependencies
+          command: go mod download
+      - run:
+          name: Run database migrations
+          command: go run ./cmd/migrate
+      - run:
+          name: Run hourly watcher
+          environment:
+            WATCH_RUN_ONCE: "true"
+          command: go run ./cmd/watcher
+      - run:
+          name: Run hourly import worker
+          environment:
+            RAW_IMPORT_RUN_ONCE: "true"
+            RAW_IMPORT_BATCH_SIZE: "100"
+            RAW_IMPORT_PAYLOADS_PER_CYCLE: "40"
+          command: go run ./cmd/importer
+      - run:
+          name: Run hourly raw worker
+          environment:
+            RAW_JOB_WORKER_BATCH_SIZE: "100"
+          command: go run ./cmd/skippablerecheck
+      - run:
+          name: Run hourly parsed worker
+          environment:
+            PARSED_JOB_RUN_ONCE: "true"
+            PARSED_JOB_WORKER_BATCH_SIZE: "100"
+          command: go run ./cmd/parsedfreshness
+
+workflows:
+  backend-workers-hourly:
+    triggers:
+      - schedule:
+          cron: "0 * * * *"
+          filters:
+            branches:
+              only:
+                - main
+    jobs:
+      - run-workers:
+          context:
+            - goapplyjob-backend
