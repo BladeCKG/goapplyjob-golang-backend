@@ -12,7 +12,7 @@ jobs:
           command: |
             set -e
             missing=0
-            for key in DATABASE_URL WATCH_URL GROQ_API_KEY RAW_JOB_RETENTION_DAYS; do
+            for key in DATABASE_URL GROQ_API_KEY RAW_JOB_RETENTION_DAYS; do
               if [ -z "${!key}" ]; then
                 echo "Missing required env var: $key"
                 missing=1

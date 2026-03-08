@@ -11,7 +11,6 @@ jobs:
     timeout-minutes: 20
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      WATCH_URL: ${{ secrets.WATCH_URL }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       ENABLED_SOURCES: ${{ vars.ENABLED_SOURCES || 'remoterocketship' }}
     steps:

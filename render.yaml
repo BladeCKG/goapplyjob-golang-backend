@@ -27,8 +27,6 @@ services:
         value: "true"
       - key: CRYPTO_PAYMENT_PROVIDER
         value: oxapay
-      - key: WATCH_URL
-        sync: false
       - key: ENABLED_SOURCES
         sync: false
       - key: SMTP_HOST
@@ -71,8 +69,6 @@ services:
           property: connectionString
       - key: WATCH_ENABLED
         value: "true"
-      - key: WATCH_URL
-        sync: false
       - key: ENABLED_SOURCES
         sync: false
       - key: WATCH_INTERVAL_MINUTES
