@@ -3,6 +3,7 @@ package admin
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -36,6 +37,10 @@ func (h *Handler) Register(router gin.IRouter) {
 	router.PATCH("/admin/raw-us-jobs/:jobID", h.updateRawUSJob)
 	router.GET("/admin/watcher-states", h.listWatcherStates)
 	router.PATCH("/admin/watcher-states/:stateID", h.updateWatcherState)
+	router.GET("/admin/parsed-jobs", h.listParsedJobs)
+	router.PATCH("/admin/parsed-jobs/:jobID", h.updateParsedJob)
+	router.GET("/admin/parsed-companies", h.listParsedCompanies)
+	router.PATCH("/admin/parsed-companies/:companyID", h.updateParsedCompany)
 }
 
 func (h *Handler) status(c *gin.Context) {
@@ -333,7 +338,12 @@ func (h *Handler) listRawUSJobs(c *gin.Context) {
 	}
 	limit, offset := queryLimitOffset(c, 200, 1000)
 	source := strings.TrimSpace(c.Query("source"))
-	onlyNotReady := queryBoolDefault(c, "only_not_ready", true)
+	onlyNotReady := queryBoolDefault(c, "only_not_ready", false)
+	parsedFilters, err := parseAdminFilters(c.Query("filters"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
 
 	filters := []string{}
 	args := []any{}
@@ -343,6 +353,31 @@ func (h *Handler) listRawUSJobs(c *gin.Context) {
 	}
 	if onlyNotReady {
 		filters = append(filters, "is_ready = 0")
+	}
+	filterDefinitions := map[string]filterDef{
+		"id":           {columnExpr: "id", valueType: "int"},
+		"source":       {columnExpr: "source", valueType: "text"},
+		"url":          {columnExpr: "url", valueType: "text"},
+		"post_date":    {columnExpr: "post_date", valueType: "datetime"},
+		"is_ready":     {columnExpr: "is_ready", valueType: "bool"},
+		"is_skippable": {columnExpr: "is_skippable", valueType: "bool"},
+		"is_parsed":    {columnExpr: "is_parsed", valueType: "bool"},
+		"retry_count":  {columnExpr: "retry_count", valueType: "int"},
+		"raw_json":     {columnExpr: "raw_json", valueType: "text"},
+	}
+	for _, item := range parsedFilters {
+		def, ok := filterDefinitions[item.Column]
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": "Unsupported raw job filter column: " + item.Column})
+			return
+		}
+		predicate, predicateArgs, err := buildColumnFilterSQL(def, item)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+			return
+		}
+		filters = append(filters, predicate)
+		args = append(args, predicateArgs...)
 	}
 	query := `SELECT id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json
 		FROM raw_us_jobs`
@@ -535,6 +570,361 @@ func (h *Handler) updateWatcherState(c *gin.Context) {
 	h.respondWatcherState(c, stateID)
 }
 
+func (h *Handler) listParsedJobs(c *gin.Context) {
+	if _, ok := h.requireAdmin(c); !ok {
+		return
+	}
+	limit, offset := queryLimitOffset(c, 200, 1000)
+	q := strings.TrimSpace(c.Query("q"))
+	source := strings.TrimSpace(c.Query("source"))
+	parsedFilters, err := parseAdminFilters(c.Query("filters"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+
+	filters := []string{}
+	args := []any{}
+	if source != "" {
+		filters = append(filters, "r.source = ?")
+		args = append(args, source)
+	}
+	if q != "" {
+		needle := "%" + q + "%"
+		filters = append(filters, `(p.role_title LIKE ? OR p.external_job_id LIKE ? OR p.url LIKE ? OR p.categorized_job_title LIKE ? OR p.categorized_job_function LIKE ? OR p.location_us_states LIKE ? OR p.location_countries LIKE ? OR p.tech_stack LIKE ?)`)
+		for i := 0; i < 8; i++ {
+			args = append(args, needle)
+		}
+	}
+	filterDefinitions := map[string]filterDef{
+		"id":                       {columnExpr: "p.id", valueType: "int"},
+		"raw_us_job_id":            {columnExpr: "p.raw_us_job_id", valueType: "int"},
+		"source":                   {columnExpr: "r.source", valueType: "text"},
+		"company_id":               {columnExpr: "p.company_id", valueType: "int"},
+		"external_job_id":          {columnExpr: "p.external_job_id", valueType: "text"},
+		"role_title":               {columnExpr: "p.role_title", valueType: "text"},
+		"role_description":         {columnExpr: "p.role_description", valueType: "text"},
+		"url":                      {columnExpr: "p.url", valueType: "text"},
+		"employment_type":          {columnExpr: "p.employment_type", valueType: "text"},
+		"location_type":            {columnExpr: "p.location_type", valueType: "text"},
+		"location_city":            {columnExpr: "p.location_city", valueType: "text"},
+		"location_us_states":       {columnExpr: "p.location_us_states", valueType: "text"},
+		"location_countries":       {columnExpr: "p.location_countries", valueType: "text"},
+		"categorized_job_title":    {columnExpr: "p.categorized_job_title", valueType: "text"},
+		"categorized_job_function": {columnExpr: "p.categorized_job_function", valueType: "text"},
+		"tech_stack":               {columnExpr: "p.tech_stack", valueType: "text"},
+		"salary_type":              {columnExpr: "p.salary_type", valueType: "text"},
+		"salary_min_usd":           {columnExpr: "p.salary_min_usd", valueType: "float"},
+		"salary_max_usd":           {columnExpr: "p.salary_max_usd", valueType: "float"},
+		"is_entry_level":           {columnExpr: "p.is_entry_level", valueType: "bool"},
+		"is_junior":                {columnExpr: "p.is_junior", valueType: "bool"},
+		"is_mid_level":             {columnExpr: "p.is_mid_level", valueType: "bool"},
+		"is_senior":                {columnExpr: "p.is_senior", valueType: "bool"},
+		"is_lead":                  {columnExpr: "p.is_lead", valueType: "bool"},
+		"created_at_source":        {columnExpr: "p.created_at_source", valueType: "datetime"},
+		"updated_at":               {columnExpr: "p.updated_at", valueType: "datetime"},
+	}
+	for _, item := range parsedFilters {
+		def, ok := filterDefinitions[item.Column]
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": "Unsupported parsed job filter column: " + item.Column})
+			return
+		}
+		predicate, predicateArgs, err := buildColumnFilterSQL(def, item)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+			return
+		}
+		filters = append(filters, predicate)
+		args = append(args, predicateArgs...)
+	}
+
+	baseFrom := ` FROM parsed_jobs p JOIN raw_us_jobs r ON r.id = p.raw_us_job_id`
+	where := ""
+	if len(filters) > 0 {
+		where = " WHERE " + strings.Join(filters, " AND ")
+	}
+	total := 0
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT COUNT(p.id)`+baseFrom+where, args...).Scan(&total); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list parsed jobs"})
+		return
+	}
+	query := `SELECT p.id, p.raw_us_job_id, r.source, p.company_id, p.external_job_id, p.role_title, p.role_description, p.url, p.employment_type, p.location_type, p.location_city, p.location_us_states, p.location_countries, p.categorized_job_title, p.categorized_job_function, p.tech_stack, p.salary_type, p.salary_min_usd, p.salary_max_usd, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.created_at_source, p.updated_at` +
+		baseFrom + where + ` ORDER BY p.updated_at DESC, p.id DESC LIMIT ? OFFSET ?`
+	queryArgs := append(append([]any{}, args...), limit, offset)
+	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, queryArgs...)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list parsed jobs"})
+		return
+	}
+	defer rows.Close()
+	items := []gin.H{}
+	for rows.Next() {
+		var (
+			id, rawUSJobID    int64
+			sourceVal         string
+			companyID         sql.NullInt64
+			externalJobID     sql.NullString
+			roleTitle         sql.NullString
+			roleDesc          sql.NullString
+			url               sql.NullString
+			employmentType    sql.NullString
+			locationType      sql.NullString
+			locationCity      sql.NullString
+			locationStates    sql.NullString
+			locationCountries sql.NullString
+			categoryTitle     sql.NullString
+			categoryFunc      sql.NullString
+			techStack         sql.NullString
+			salaryType        sql.NullString
+			salaryMinUSD      sql.NullFloat64
+			salaryMaxUSD      sql.NullFloat64
+			isEntry           sql.NullBool
+			isJunior          sql.NullBool
+			isMid             sql.NullBool
+			isSenior          sql.NullBool
+			isLead            sql.NullBool
+			createdAt         sql.NullString
+			updatedAt         sql.NullString
+		)
+		if err := rows.Scan(&id, &rawUSJobID, &sourceVal, &companyID, &externalJobID, &roleTitle, &roleDesc, &url, &employmentType, &locationType, &locationCity, &locationStates, &locationCountries, &categoryTitle, &categoryFunc, &techStack, &salaryType, &salaryMinUSD, &salaryMaxUSD, &isEntry, &isJunior, &isMid, &isSenior, &isLead, &createdAt, &updatedAt); err != nil {
+			continue
+		}
+		items = append(items, gin.H{
+			"id":                       id,
+			"raw_us_job_id":            rawUSJobID,
+			"source":                   sourceVal,
+			"company_id":               nullableInt(companyID),
+			"external_job_id":          nullableString(externalJobID),
+			"role_title":               nullableString(roleTitle),
+			"role_description":         nullableString(roleDesc),
+			"url":                      nullableString(url),
+			"employment_type":          nullableString(employmentType),
+			"location_type":            nullableString(locationType),
+			"location_city":            nullableString(locationCity),
+			"location_us_states":       parseJSONStringArray(locationStates),
+			"location_countries":       parseJSONStringArray(locationCountries),
+			"categorized_job_title":    nullableString(categoryTitle),
+			"categorized_job_function": nullableString(categoryFunc),
+			"tech_stack":               parseJSONStringArray(techStack),
+			"salary_type":              nullableString(salaryType),
+			"salary_min_usd":           nullableFloatPtr(salaryMinUSD),
+			"salary_max_usd":           nullableFloatPtr(salaryMaxUSD),
+			"is_entry_level":           nullableBool(isEntry),
+			"is_junior":                nullableBool(isJunior),
+			"is_mid_level":             nullableBool(isMid),
+			"is_senior":                nullableBool(isSenior),
+			"is_lead":                  nullableBool(isLead),
+			"created_at_source":        nullableString(createdAt),
+			"updated_at":               nullableString(updatedAt),
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"total": total, "items": items})
+}
+
+func (h *Handler) updateParsedJob(c *gin.Context) {
+	if _, ok := h.requireAdmin(c); !ok {
+		return
+	}
+	jobID, err := strconv.ParseInt(c.Param("jobID"), 10, 64)
+	if err != nil || jobID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid parsed job id"})
+		return
+	}
+	var exists int64
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT id FROM parsed_jobs WHERE id = ? LIMIT 1`, jobID).Scan(&exists); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "Parsed job not found"})
+		return
+	}
+	updates, args, ok := parsePatchUpdates(c, map[string]func(*json.RawMessage) (any, bool){
+		"company_id":               jsonPatchIntOrNull,
+		"external_job_id":          jsonPatchStringOrNull,
+		"role_title":               jsonPatchStringOrNull,
+		"role_description":         jsonPatchStringOrNull,
+		"url":                      jsonPatchStringOrNull,
+		"employment_type":          jsonPatchStringOrNull,
+		"location_type":            jsonPatchStringOrNull,
+		"location_city":            jsonPatchStringOrNull,
+		"location_us_states":       jsonPatchStringArrayOrNull,
+		"location_countries":       jsonPatchStringArrayOrNull,
+		"categorized_job_title":    jsonPatchStringOrNull,
+		"categorized_job_function": jsonPatchStringOrNull,
+		"tech_stack":               jsonPatchStringArrayOrNull,
+		"salary_type":              jsonPatchStringOrNull,
+		"salary_min_usd":           jsonPatchFloatOrNull,
+		"salary_max_usd":           jsonPatchFloatOrNull,
+		"is_entry_level":           jsonPatchBoolAsIntOrNull,
+		"is_junior":                jsonPatchBoolAsIntOrNull,
+		"is_mid_level":             jsonPatchBoolAsIntOrNull,
+		"is_senior":                jsonPatchBoolAsIntOrNull,
+		"is_lead":                  jsonPatchBoolAsIntOrNull,
+		"created_at_source":        jsonPatchStringOrNull,
+	})
+	if !ok {
+		return
+	}
+	if len(updates) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "No fields to update"})
+		return
+	}
+	updates = append(updates, "updated_at = ?")
+	args = append(args, time.Now().UTC().Format(time.RFC3339Nano), jobID)
+	query := `UPDATE parsed_jobs SET ` + strings.Join(updates, ", ") + ` WHERE id = ?`
+	if _, err := h.db.SQL.ExecContext(c.Request.Context(), query, args...); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to update parsed job"})
+		return
+	}
+	// Reuse list endpoint shape.
+	req := c.Request.Clone(c.Request.Context())
+	q := req.URL.Query()
+	q.Set("filters", fmt.Sprintf(`[{"column":"id","operator":"=","value":%d}]`, jobID))
+	q.Set("limit", "1")
+	q.Set("offset", "0")
+	req.URL.RawQuery = q.Encode()
+	c.Request = req
+	h.listParsedJobs(c)
+}
+
+func (h *Handler) listParsedCompanies(c *gin.Context) {
+	if _, ok := h.requireAdmin(c); !ok {
+		return
+	}
+	limit, offset := queryLimitOffset(c, 200, 1000)
+	q := strings.TrimSpace(c.Query("q"))
+	parsedFilters, err := parseAdminFilters(c.Query("filters"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+	filters := []string{}
+	args := []any{}
+	if q != "" {
+		needle := "%" + q + "%"
+		filters = append(filters, `(name LIKE ? OR slug LIKE ? OR external_company_id LIKE ? OR home_page_url LIKE ? OR linkedin_url LIKE ?)`)
+		for i := 0; i < 5; i++ {
+			args = append(args, needle)
+		}
+	}
+	filterDefinitions := map[string]filterDef{
+		"id":                  {columnExpr: "id", valueType: "int"},
+		"external_company_id": {columnExpr: "external_company_id", valueType: "text"},
+		"name":                {columnExpr: "name", valueType: "text"},
+		"slug":                {columnExpr: "slug", valueType: "text"},
+		"tagline":             {columnExpr: "tagline", valueType: "text"},
+		"founded_year":        {columnExpr: "founded_year", valueType: "text"},
+		"home_page_url":       {columnExpr: "home_page_url", valueType: "text"},
+		"linkedin_url":        {columnExpr: "linkedin_url", valueType: "text"},
+		"sponsors_h1b":        {columnExpr: "sponsors_h1b", valueType: "bool"},
+		"employee_range":      {columnExpr: "employee_range", valueType: "text"},
+	}
+	for _, item := range parsedFilters {
+		def, ok := filterDefinitions[item.Column]
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": "Unsupported parsed company filter column: " + item.Column})
+			return
+		}
+		predicate, predicateArgs, err := buildColumnFilterSQL(def, item)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+			return
+		}
+		filters = append(filters, predicate)
+		args = append(args, predicateArgs...)
+	}
+	where := ""
+	if len(filters) > 0 {
+		where = " WHERE " + strings.Join(filters, " AND ")
+	}
+	total := 0
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT COUNT(id) FROM parsed_companies`+where, args...).Scan(&total); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list parsed companies"})
+		return
+	}
+	query := `SELECT id, external_company_id, name, slug, tagline, founded_year, home_page_url, linkedin_url, sponsors_h1b, employee_range FROM parsed_companies` + where + ` ORDER BY id DESC LIMIT ? OFFSET ?`
+	queryArgs := append(append([]any{}, args...), limit, offset)
+	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, queryArgs...)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list parsed companies"})
+		return
+	}
+	defer rows.Close()
+	items := []gin.H{}
+	for rows.Next() {
+		var (
+			id                              int64
+			externalID, name, slug, tagline sql.NullString
+			foundedYear, homePage, linkedin sql.NullString
+			sponsors                        sql.NullBool
+			employeeRange                   sql.NullString
+		)
+		if err := rows.Scan(&id, &externalID, &name, &slug, &tagline, &foundedYear, &homePage, &linkedin, &sponsors, &employeeRange); err != nil {
+			continue
+		}
+		items = append(items, gin.H{
+			"id":                  id,
+			"external_company_id": nullableString(externalID),
+			"name":                nullableString(name),
+			"slug":                nullableString(slug),
+			"tagline":             nullableString(tagline),
+			"founded_year":        nullableString(foundedYear),
+			"home_page_url":       nullableString(homePage),
+			"linkedin_url":        nullableString(linkedin),
+			"sponsors_h1b":        nullableBool(sponsors),
+			"employee_range":      nullableString(employeeRange),
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"total": total, "items": items})
+}
+
+func (h *Handler) updateParsedCompany(c *gin.Context) {
+	if _, ok := h.requireAdmin(c); !ok {
+		return
+	}
+	companyID, err := strconv.ParseInt(c.Param("companyID"), 10, 64)
+	if err != nil || companyID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid parsed company id"})
+		return
+	}
+	var exists int64
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT id FROM parsed_companies WHERE id = ? LIMIT 1`, companyID).Scan(&exists); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "Parsed company not found"})
+		return
+	}
+	updates, args, ok := parsePatchUpdates(c, map[string]func(*json.RawMessage) (any, bool){
+		"external_company_id": jsonPatchStringOrNull,
+		"name":                jsonPatchStringOrNull,
+		"slug":                jsonPatchStringOrNull,
+		"tagline":             jsonPatchStringOrNull,
+		"founded_year":        jsonPatchStringOrNull,
+		"home_page_url":       jsonPatchStringOrNull,
+		"linkedin_url":        jsonPatchStringOrNull,
+		"sponsors_h1b":        jsonPatchBoolAsIntOrNull,
+		"employee_range":      jsonPatchStringOrNull,
+	})
+	if !ok {
+		return
+	}
+	if len(updates) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "No fields to update"})
+		return
+	}
+	query := `UPDATE parsed_companies SET ` + strings.Join(updates, ", ") + ` WHERE id = ?`
+	args = append(args, companyID)
+	if _, err := h.db.SQL.ExecContext(c.Request.Context(), query, args...); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to update parsed company"})
+		return
+	}
+	// Reuse list endpoint shape.
+	req := c.Request.Clone(c.Request.Context())
+	q := req.URL.Query()
+	q.Set("filters", fmt.Sprintf(`[{"column":"id","operator":"=","value":%d}]`, companyID))
+	q.Set("limit", "1")
+	q.Set("offset", "0")
+	req.URL.RawQuery = q.Encode()
+	c.Request = req
+	h.listParsedCompanies(c)
+}
+
 func (h *Handler) respondWatcherPayload(c *gin.Context, id int64) {
 	var (
 		sourceVal  string
@@ -706,6 +1096,207 @@ func isFutureTimestamp(value string) bool {
 	return timestamp.UTC().After(time.Now().UTC())
 }
 
+type filterDef struct {
+	columnExpr string
+	valueType  string
+}
+
+type adminColumnFilter struct {
+	Column   string      `json:"column"`
+	Operator string      `json:"operator"`
+	Value    interface{} `json:"value"`
+	ValueTo  interface{} `json:"value_to"`
+}
+
+var supportedFilterOperators = map[string]struct{}{
+	"=": {}, "!=": {}, "<": {}, "<=": {}, ">": {}, ">=": {},
+	"contains": {}, "does not contain": {}, "begins with": {}, "does not begin with": {}, "ends with": {}, "does not end with": {},
+	"is null": {}, "is not null": {}, "is empty": {}, "is not empty": {}, "is between": {}, "is not between": {}, "is in list": {}, "is not in list": {},
+}
+
+func parseAdminFilters(raw string) ([]adminColumnFilter, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var filters []adminColumnFilter
+	if err := json.Unmarshal([]byte(raw), &filters); err != nil {
+		return nil, fmt.Errorf("Invalid filters JSON: %v", err)
+	}
+	for idx := range filters {
+		filters[idx].Column = strings.TrimSpace(filters[idx].Column)
+		filters[idx].Operator = strings.ToLower(strings.TrimSpace(filters[idx].Operator))
+		if filters[idx].Column == "" || filters[idx].Operator == "" {
+			return nil, fmt.Errorf("Invalid filter: column and operator are required")
+		}
+		if _, ok := supportedFilterOperators[filters[idx].Operator]; !ok {
+			return nil, fmt.Errorf("Unsupported operator: %s", filters[idx].Operator)
+		}
+	}
+	return filters, nil
+}
+
+func buildColumnFilterSQL(def filterDef, filter adminColumnFilter) (string, []any, error) {
+	column := def.columnExpr
+	op := filter.Operator
+	if op == "is null" {
+		return column + " IS NULL", nil, nil
+	}
+	if op == "is not null" {
+		return column + " IS NOT NULL", nil, nil
+	}
+	if op == "is empty" {
+		if def.valueType == "text" {
+			return "(" + column + " = '' OR " + column + " IS NULL)", nil, nil
+		}
+		return column + " IS NULL", nil, nil
+	}
+	if op == "is not empty" {
+		if def.valueType == "text" {
+			return "(" + column + " IS NOT NULL AND " + column + " != '')", nil, nil
+		}
+		return column + " IS NOT NULL", nil, nil
+	}
+
+	parseOne := func(value interface{}) (interface{}, error) {
+		switch def.valueType {
+		case "text", "datetime":
+			return fmt.Sprintf("%v", value), nil
+		case "int":
+			switch item := value.(type) {
+			case float64:
+				return int(item), nil
+			case int:
+				return item, nil
+			case string:
+				parsed, err := strconv.Atoi(strings.TrimSpace(item))
+				if err != nil {
+					return nil, fmt.Errorf("Invalid integer value: %v", value)
+				}
+				return parsed, nil
+			default:
+				return nil, fmt.Errorf("Invalid integer value: %v", value)
+			}
+		case "float":
+			switch item := value.(type) {
+			case float64:
+				return item, nil
+			case int:
+				return float64(item), nil
+			case string:
+				parsed, err := strconv.ParseFloat(strings.TrimSpace(item), 64)
+				if err != nil {
+					return nil, fmt.Errorf("Invalid float value: %v", value)
+				}
+				return parsed, nil
+			default:
+				return nil, fmt.Errorf("Invalid float value: %v", value)
+			}
+		case "bool":
+			switch item := value.(type) {
+			case bool:
+				if item {
+					return 1, nil
+				}
+				return 0, nil
+			case float64:
+				if item != 0 {
+					return 1, nil
+				}
+				return 0, nil
+			case string:
+				switch strings.ToLower(strings.TrimSpace(item)) {
+				case "1", "true", "yes", "on":
+					return 1, nil
+				case "0", "false", "no", "off":
+					return 0, nil
+				default:
+					return nil, fmt.Errorf("Invalid boolean value: %v", value)
+				}
+			default:
+				return nil, fmt.Errorf("Invalid boolean value: %v", value)
+			}
+		default:
+			return value, nil
+		}
+	}
+
+	if op == "contains" || op == "does not contain" || op == "begins with" || op == "does not begin with" || op == "ends with" || op == "does not end with" {
+		value, err := parseOne(filter.Value)
+		if err != nil {
+			return "", nil, err
+		}
+		textValue := fmt.Sprintf("%v", value)
+		pattern := "%" + textValue + "%"
+		if op == "begins with" || op == "does not begin with" {
+			pattern = textValue + "%"
+		}
+		if op == "ends with" || op == "does not end with" {
+			pattern = "%" + textValue
+		}
+		expr := "LOWER(CAST(" + column + " AS TEXT)) LIKE LOWER(?)"
+		if strings.HasPrefix(op, "does not") {
+			expr = "NOT (" + expr + ")"
+		}
+		return expr, []any{pattern}, nil
+	}
+	if op == "is between" || op == "is not between" {
+		left, err := parseOne(filter.Value)
+		if err != nil {
+			return "", nil, err
+		}
+		right, err := parseOne(filter.ValueTo)
+		if err != nil {
+			return "", nil, err
+		}
+		expr := column + " BETWEEN ? AND ?"
+		if op == "is not between" {
+			expr = "NOT (" + expr + ")"
+		}
+		return expr, []any{left, right}, nil
+	}
+	if op == "is in list" || op == "is not in list" {
+		values := []any{}
+		switch item := filter.Value.(type) {
+		case []interface{}:
+			for _, raw := range item {
+				parsed, err := parseOne(raw)
+				if err != nil {
+					return "", nil, err
+				}
+				values = append(values, parsed)
+			}
+		default:
+			for _, part := range strings.Split(fmt.Sprintf("%v", filter.Value), ",") {
+				parsed, err := parseOne(strings.TrimSpace(part))
+				if err != nil {
+					return "", nil, err
+				}
+				values = append(values, parsed)
+			}
+		}
+		if len(values) == 0 {
+			return "", nil, fmt.Errorf("List filter requires values")
+		}
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(values)), ",")
+		expr := column + " IN (" + placeholders + ")"
+		if op == "is not in list" {
+			expr = "NOT (" + expr + ")"
+		}
+		return expr, values, nil
+	}
+
+	value, err := parseOne(filter.Value)
+	if err != nil {
+		return "", nil, err
+	}
+	switch op {
+	case "=", "!=", "<", "<=", ">", ">=":
+		return column + " " + op + " ?", []any{value}, nil
+	default:
+		return "", nil, fmt.Errorf("Unsupported operator: %s", op)
+	}
+}
+
 func parsePatchUpdates(c *gin.Context, parsers map[string]func(*json.RawMessage) (any, bool)) ([]string, []any, bool) {
 	var payload map[string]json.RawMessage
 	if err := c.ShouldBindJSON(&payload); err != nil {
@@ -765,6 +1356,66 @@ func jsonPatchInt(raw *json.RawMessage) (any, bool) {
 	return value, true
 }
 
+func jsonPatchIntOrNull(raw *json.RawMessage) (any, bool) {
+	trimmed := strings.TrimSpace(string(*raw))
+	if trimmed == "null" {
+		return nil, true
+	}
+	return jsonPatchInt(raw)
+}
+
+func jsonPatchFloatOrNull(raw *json.RawMessage) (any, bool) {
+	trimmed := strings.TrimSpace(string(*raw))
+	if trimmed == "null" {
+		return nil, true
+	}
+	var value float64
+	if err := json.Unmarshal(*raw, &value); err != nil {
+		return nil, false
+	}
+	return value, true
+}
+
+func jsonPatchBoolAsIntOrNull(raw *json.RawMessage) (any, bool) {
+	trimmed := strings.TrimSpace(string(*raw))
+	if trimmed == "null" {
+		return nil, true
+	}
+	return jsonPatchBoolAsInt(raw)
+}
+
+func jsonPatchStringArrayOrNull(raw *json.RawMessage) (any, bool) {
+	trimmed := strings.TrimSpace(string(*raw))
+	if trimmed == "null" {
+		return nil, true
+	}
+	var values []string
+	if err := json.Unmarshal(*raw, &values); err == nil {
+		encoded, marshalErr := json.Marshal(values)
+		if marshalErr != nil {
+			return nil, false
+		}
+		return string(encoded), true
+	}
+	var generic []any
+	if err := json.Unmarshal(*raw, &generic); err != nil {
+		return nil, false
+	}
+	normalized := []string{}
+	for _, item := range generic {
+		text, _ := item.(string)
+		text = strings.TrimSpace(text)
+		if text != "" {
+			normalized = append(normalized, text)
+		}
+	}
+	encoded, marshalErr := json.Marshal(normalized)
+	if marshalErr != nil {
+		return nil, false
+	}
+	return string(encoded), true
+}
+
 func jsonPatchJSONOrNull(raw *json.RawMessage) (any, bool) {
 	trimmed := strings.TrimSpace(string(*raw))
 	if trimmed == "null" {
@@ -779,4 +1430,55 @@ func jsonPatchJSONOrNull(raw *json.RawMessage) (any, bool) {
 		return nil, false
 	}
 	return string(encoded), true
+}
+
+func parseJSONStringArray(value sql.NullString) any {
+	if !value.Valid || strings.TrimSpace(value.String) == "" {
+		return nil
+	}
+	var parsed []string
+	if err := json.Unmarshal([]byte(value.String), &parsed); err == nil {
+		return parsed
+	}
+	var generic []any
+	if err := json.Unmarshal([]byte(value.String), &generic); err == nil {
+		out := []string{}
+		for _, item := range generic {
+			text, _ := item.(string)
+			text = strings.TrimSpace(text)
+			if text != "" {
+				out = append(out, text)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+func nullableInt(value sql.NullInt64) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.Int64
+}
+
+func nullableString(value sql.NullString) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.String
+}
+
+func nullableBool(value sql.NullBool) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.Bool
+}
+
+func nullableFloatPtr(value sql.NullFloat64) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.Float64
 }
