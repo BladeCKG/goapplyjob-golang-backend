@@ -51,6 +51,77 @@ var countryAliases = map[string]string{
 	"netherlands":    "Netherlands",
 }
 
+var techStackAliases = map[string]string{
+	"nodejs":                   "Node.js",
+	"node.js":                  "Node.js",
+	"node js":                  "Node.js",
+	"reactjs":                  "React",
+	"react.js":                 "React",
+	"nextjs":                   "Next.js",
+	"next.js":                  "Next.js",
+	"vuejs":                    "Vue.js",
+	"vue.js":                   "Vue.js",
+	"angularjs":                "AngularJS",
+	"javascript":               "JavaScript",
+	"typescript":               "TypeScript",
+	"c#":                       "C#",
+	"csharp":                   "C#",
+	"c++":                      "C++",
+	"cplusplus":                "C++",
+	"golang":                   "Go",
+	"postgres":                 "PostgreSQL",
+	"postgresql":               "PostgreSQL",
+	"mongodb":                  "MongoDB",
+	"graphql":                  "GraphQL",
+	"graph ql":                 "GraphQL",
+	"rest api":                 "REST API",
+	"restful api":              "REST API",
+	"rest apis":                "REST API",
+	"restful apis":             "REST API",
+	"apis":                     "API",
+	"aws":                      "AWS",
+	"gcp":                      "GCP",
+	"azure":                    "Azure",
+	".net":                     ".NET",
+	"dotnet":                   ".NET",
+	"asp.net":                  "ASP.NET",
+	"asp.net core":             "ASP.NET Core",
+	"grpc":                     "gRPC",
+	"json":                     "JSON",
+	"xml":                      "XML",
+	"html":                     "HTML",
+	"html5":                    "HTML5",
+	"css":                      "CSS",
+	"css3":                     "CSS3",
+	"scss":                     "SCSS",
+	"sass":                     "Sass",
+	"sql":                      "SQL",
+	"nosql":                    "NoSQL",
+	"no-sql":                   "NoSQL",
+	"etl":                      "ETL",
+	"elt":                      "ELT",
+	"etl/elt":                  "ETL/ELT",
+	"ci/cd":                    "CI/CD",
+	"cicd":                     "CI/CD",
+	"iac":                      "IaC",
+	"infrastructure as code":   "Infrastructure as Code",
+	"k8s":                      "Kubernetes",
+	"kubernetes (k8s)":         "Kubernetes",
+	"tailwindcss":              "Tailwind CSS",
+	"tailwind css":             "Tailwind CSS",
+	"google tag manager (gtm)": "Google Tag Manager",
+	"google tag manager":       "Google Tag Manager",
+	"gtm":                      "Google Tag Manager",
+	"sfdc":                     "Salesforce",
+	"sfdc crm":                 "Salesforce",
+	"salesforce.com":           "Salesforce",
+	"salesforce crm":           "Salesforce",
+}
+
+var techStackDropValues = map[string]struct{}{
+	"n/a": {}, "na": {}, "none": {}, "null": {}, "unknown": {}, "tbd": {},
+}
+
 var normalizationReplacements = []struct {
 	pattern     *regexp.Regexp
 	replacement string
@@ -385,6 +456,69 @@ func normalizeEducationCredentialCategory(value any) any {
 	return normalized
 }
 
+func normalizeTechStackValue(value string) string {
+	normalized := strings.TrimSpace(value)
+	normalized = strings.Trim(normalized, "\"'")
+	normalized = regexp.MustCompile(`\([^)]*\)`).ReplaceAllString(normalized, "")
+	if strings.Contains(normalized, "(") && !strings.Contains(normalized, ")") {
+		normalized = strings.SplitN(normalized, "(", 2)[0]
+	}
+	normalized = strings.ReplaceAll(normalized, ")", "")
+	normalized = strings.ReplaceAll(normalized, "]", "")
+	normalized = strings.ReplaceAll(normalized, "}", "")
+	normalized = regexp.MustCompile(`\s*/\s*`).ReplaceAllString(normalized, "/")
+	normalized = regexp.MustCompile(`\s*-\s*`).ReplaceAllString(normalized, "-")
+	normalized = regexp.MustCompile(`[;,:]+$`).ReplaceAllString(normalized, "")
+	normalized = regexp.MustCompile(`\s+`).ReplaceAllString(normalized, " ")
+	normalized = strings.Trim(normalized, " .-_/")
+	if normalized == "" {
+		return ""
+	}
+	lowered := strings.ToLower(normalized)
+	if _, ok := techStackDropValues[lowered]; ok {
+		return ""
+	}
+	if alias, ok := techStackAliases[lowered]; ok {
+		return alias
+	}
+	return normalized
+}
+
+func normalizeTechStack(values any) []string {
+	var source []string
+	switch items := values.(type) {
+	case []string:
+		source = items
+	case []any:
+		for _, item := range items {
+			text, _ := item.(string)
+			if strings.TrimSpace(text) != "" {
+				source = append(source, text)
+			}
+		}
+	default:
+		return nil
+	}
+	out := make([]string, 0, len(source))
+	seen := map[string]struct{}{}
+	for _, value := range source {
+		next := normalizeTechStackValue(value)
+		if next == "" {
+			continue
+		}
+		key := strings.ToLower(next)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, next)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func normalizeCountryName(value string) string {
 	normalized := regexp.MustCompile(`[^a-zA-Z.\s]`).ReplaceAllString(value, "")
 	normalized = strings.TrimSpace(strings.ToLower(regexp.MustCompile(`\s+`).ReplaceAllString(normalized, " ")))
@@ -593,11 +727,12 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			payload["locationCity"],
 			payload["locationUSStates"],
 		)
+		normalizedTechStack := jsonStringOrNil(normalizeTechStack(payload["techStack"]))
 		err = database.RetryLocked(8, 50*time.Millisecond, func() error {
 			_, execErr := s.DB.SQL.ExecContext(
 				ctx,
-				`INSERT INTO parsed_jobs (raw_us_job_id, external_job_id, created_at_source, url, categorized_job_title, categorized_job_function, role_title, employment_type, location, location_city, location_us_states, education_requirements_credential_category, updated_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				`INSERT INTO parsed_jobs (raw_us_job_id, external_job_id, created_at_source, url, categorized_job_title, categorized_job_function, role_title, employment_type, location, location_city, location_us_states, education_requirements_credential_category, tech_stack, updated_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				 ON CONFLICT(raw_us_job_id) DO UPDATE SET
 				   external_job_id = excluded.external_job_id,
 				   created_at_source = excluded.created_at_source,
@@ -609,6 +744,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				   location_city = excluded.location_city,
 				   location_us_states = excluded.location_us_states,
 				   education_requirements_credential_category = excluded.education_requirements_credential_category,
+				   tech_stack = excluded.tech_stack,
 				   role_title = excluded.role_title,
 				   updated_at = excluded.updated_at`,
 				row.id,
@@ -623,6 +759,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				normalizedLocationCity,
 				normalizedUSStates,
 				normalizeEducationCredentialCategory(payload["educationRequirementsCredentialCategory"]),
+				normalizedTechStack,
 				time.Now().UTC().Format(time.RFC3339Nano),
 			)
 			return execErr

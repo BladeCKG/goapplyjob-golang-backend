@@ -292,3 +292,24 @@ func TestNormalizeEducationCredentialCategoryLowercases(t *testing.T) {
 		t.Fatalf("expected normalized lowercase spacing, got %#v", got)
 	}
 }
+
+func TestNormalizeTechStackAliasesAndDedupes(t *testing.T) {
+	got := normalizeTechStack([]any{"react.js", "React", "  node js  ", "NODE.JS", "GoLang", ""})
+	if len(got) != 3 || got[0] != "React" || got[1] != "Node.js" || got[2] != "Go" {
+		t.Fatalf("unexpected normalized tech stack %#v", got)
+	}
+}
+
+func TestNormalizeTechStackKeepsUnknownValuesTrimmed(t *testing.T) {
+	got := normalizeTechStack([]any{"  Elixir  ", "Phoenix LiveView"})
+	if len(got) != 2 || got[0] != "Elixir" || got[1] != "Phoenix LiveView" {
+		t.Fatalf("unexpected normalized tech stack %#v", got)
+	}
+}
+
+func TestNormalizeTechStackCleansNoisyValuesAndAliases(t *testing.T) {
+	got := normalizeTechStack([]any{"Css)", "Ci/Cd (Azure Devops", "Google Tag Manager (Gtm)", "SFDC", "APIs", "n/a"})
+	if len(got) != 5 || got[0] != "CSS" || got[1] != "CI/CD" || got[2] != "Google Tag Manager" || got[3] != "Salesforce" || got[4] != "API" {
+		t.Fatalf("unexpected normalized tech stack %#v", got)
+	}
+}
