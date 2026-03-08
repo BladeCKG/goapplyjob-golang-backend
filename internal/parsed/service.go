@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"goapplyjob-golang-backend/internal/database"
@@ -18,6 +21,9 @@ import (
 const (
 	sourceRemoteRocketship = "remoterocketship"
 	sourceBuiltin          = "builtin"
+	envGroqAPIKey          = "GROQ_API_KEY"
+	envGroqModel           = "GROQ_MODEL"
+	defaultGroqModel       = "meta-llama/llama-guard-4-12b"
 )
 
 var seniorityTokens = map[string]struct{}{
@@ -137,6 +143,13 @@ var normalizationReplacements = []struct {
 	{pattern: regexp.MustCompile(`\btalent acquisition\b`), replacement: "recruitment human resources"},
 	{pattern: regexp.MustCompile(`\bcpg\b`), replacement: "consumer packaged goods"},
 }
+
+var (
+	jobTitlePromptOnce    sync.Once
+	jobTitlePromptText    string
+	jobTitlePromptLoaded  bool
+	jobTitlePromptLoadErr error
+)
 
 type Service struct {
 	DB *database.DB
@@ -374,6 +387,101 @@ func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle str
 		return "", "", nil
 	}
 	return bestTitle, bestFunction, nil
+}
+
+func loadJobTitleClassificationPrompt() (string, error) {
+	jobTitlePromptOnce.Do(func() {
+		path := filepath.Join("internal", "sources", "prompts", "job_title_classification.txt")
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			jobTitlePromptLoadErr = err
+			jobTitlePromptLoaded = true
+			return
+		}
+		jobTitlePromptText = string(raw)
+		jobTitlePromptLoaded = true
+	})
+	if !jobTitlePromptLoaded {
+		return "", errors.New("classification prompt not loaded")
+	}
+	if jobTitlePromptLoadErr != nil {
+		return "", jobTitlePromptLoadErr
+	}
+	return jobTitlePromptText, nil
+}
+
+func buildJobTitleClassificationPrompt(jobTitle, jobDescription string) string {
+	template, err := loadJobTitleClassificationPrompt()
+	if err != nil || strings.TrimSpace(template) == "" {
+		return ""
+	}
+	prompt := strings.ReplaceAll(template, "{{JOB_TITLE}}", strings.TrimSpace(jobTitle))
+	return strings.ReplaceAll(prompt, "{{JOB_DESCRIPTION}}", strings.TrimSpace(jobDescription))
+}
+
+func extractJSONPayload(rawContent string) map[string]any {
+	content := strings.TrimSpace(rawContent)
+	if content == "" {
+		return nil
+	}
+	if strings.Contains(content, "```") {
+		re := regexp.MustCompile("(?is)```(?:json)?\\s*(\\{.*\\})\\s*```")
+		if match := re.FindStringSubmatch(content); len(match) == 2 {
+			content = strings.TrimSpace(match[1])
+		}
+	}
+	if !(strings.HasPrefix(content, "{") && strings.HasSuffix(content, "}")) {
+		start := strings.Index(content, "{")
+		end := strings.LastIndex(content, "}")
+		if start < 0 || end <= start {
+			return nil
+		}
+		content = content[start : end+1]
+	}
+	payload := map[string]any{}
+	if err := json.Unmarshal([]byte(content), &payload); err != nil {
+		return nil
+	}
+	return payload
+}
+
+func classifyJobTitleWithGroqSync(jobTitle, jobDescription string) string {
+	normalizedTitle := strings.TrimSpace(jobTitle)
+	if normalizedTitle == "" {
+		return ""
+	}
+	// Prompt and env are loaded for scaffolding; invocation intentionally disabled for now.
+	if strings.TrimSpace(os.Getenv(envGroqAPIKey)) == "" {
+		return ""
+	}
+	model := strings.TrimSpace(os.Getenv(envGroqModel))
+	if model == "" {
+		model = defaultGroqModel
+	}
+	_ = model
+	_ = buildJobTitleClassificationPrompt(normalizedTitle, jobDescription)
+	return ""
+}
+
+func (s *Service) resolveJobFunctionForCategory(ctx context.Context, category string) (string, error) {
+	normalized := strings.TrimSpace(category)
+	if normalized == "" {
+		return "", nil
+	}
+	var jobFunction sql.NullString
+	err := s.DB.SQL.QueryRowContext(ctx,
+		`SELECT categorized_job_function
+		 FROM parsed_jobs
+		 WHERE categorized_job_title = ?
+		   AND categorized_job_function IS NOT NULL
+		   AND categorized_job_function != ''
+		 GROUP BY categorized_job_function
+		 ORDER BY COUNT(id) DESC, categorized_job_function ASC
+		 LIMIT 1`, normalized).Scan(&jobFunction)
+	if err != nil {
+		return "", nil
+	}
+	return strings.TrimSpace(jobFunction.String), nil
 }
 
 func (s *Service) findExactNormalizedCategoryMatch(ctx context.Context, normalizedRoleTitle string) (string, string, error) {
@@ -741,13 +849,33 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		sourceCreatedAt := parseDT(payload["created_at"])
 		categorizedTitle := stringFromPayload(payload["categorizedJobTitle"])
 		categorizedFunction := stringFromPayload(payload["categorizedJobFunction"])
+		if title, ok := categorizedTitle.(string); ok && strings.TrimSpace(title) != "" && categorizedFunction == nil {
+			resolvedFunction, err := s.resolveJobFunctionForCategory(ctx, title)
+			if err != nil {
+				return processed, err
+			}
+			if strings.TrimSpace(resolvedFunction) != "" {
+				categorizedFunction = resolvedFunction
+			}
+		}
 		if row.source == sourceBuiltin && categorizedTitle == nil {
+			// Groq-based category classification is intentionally disabled for now.
+			_ = classifyJobTitleWithGroqSync(stringValue(payload["roleTitle"]), stringValue(payload["roleDescription"]))
 			inferredTitle, inferredFunction, err := s.findSimilarRemoteCategories(ctx, stringValue(payload["roleTitle"]))
 			if err != nil {
 				return processed, err
 			}
 			categorizedTitle = stringFromPayload(inferredTitle)
 			categorizedFunction = stringFromPayload(inferredFunction)
+		}
+		if title, ok := categorizedTitle.(string); ok && strings.TrimSpace(title) != "" && categorizedFunction == nil {
+			resolvedFunction, err := s.resolveJobFunctionForCategory(ctx, title)
+			if err != nil {
+				return processed, err
+			}
+			if strings.TrimSpace(resolvedFunction) != "" {
+				categorizedFunction = resolvedFunction
+			}
 		}
 		_, normalizedLocationCity, normalizedUSStates := normalizeLocationFields(
 			payload["location"],
