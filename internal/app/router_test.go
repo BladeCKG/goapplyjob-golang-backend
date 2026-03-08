@@ -535,8 +535,11 @@ func TestJobsTitleFilterMatchesRoleTitleVariants(t *testing.T) {
 	var body map[string]any
 	decodeBody(t, rec.Body.Bytes(), &body)
 	items := body["items"].([]any)
-	if len(items) != 2 {
-		t.Fatalf("expected exact and partial role title matches, got %#v", body)
+	if len(items) != 1 {
+		t.Fatalf("expected exact role-title match when exact value exists, got %#v", body)
+	}
+	if items[0].(map[string]any)["role_title"].(string) != "backend" {
+		t.Fatalf("unexpected exact role-title match %#v", body)
 	}
 }
 
@@ -559,6 +562,36 @@ func TestJobsTitleFilterIgnoresSpecialCharactersInRoleTitle(t *testing.T) {
 	}
 	if items[0].(map[string]any)["role_title"].(string) != "Frontend (React) Engineer" {
 		t.Fatalf("unexpected special character role title match %#v", items[0])
+	}
+}
+
+func TestJobsTitleFilterCombinesExactAndFreeTextMatches(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJobWithFunction(t, db, 74, "Blockchain Engineer", "Web3", "Smart Contract Engineer")
+	insertJobWithFunction(t, db, 75, "Software Engineer", "Engineering", "Senior Golang Developer")
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?job_title=web3,golang+developer", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	items := body["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("expected exact + free-text role matches, got %#v", body)
+	}
+	roles := map[string]struct{}{}
+	for _, item := range items {
+		roles[item.(map[string]any)["role_title"].(string)] = struct{}{}
+	}
+	if _, ok := roles["Smart Contract Engineer"]; !ok {
+		t.Fatalf("missing exact function match %#v", body)
+	}
+	if _, ok := roles["Senior Golang Developer"]; !ok {
+		t.Fatalf("missing free-text token match %#v", body)
 	}
 }
 

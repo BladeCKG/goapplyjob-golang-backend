@@ -493,7 +493,9 @@ func (h *Handler) listJobs(c *gin.Context) {
 		perPage = 100
 	}
 
-	filters, args := h.buildJobFilters(c, currentUser, true)
+	titleValues := parseCSVQuery(c.Query("job_title"))
+	exactTitleValues, _ := h.resolveExactJobTitleValues(c, titleValues)
+	filters, args := h.buildJobFilters(c, currentUser, true, exactTitleValues)
 
 	where := ""
 	if len(filters) > 0 {
@@ -596,7 +598,9 @@ func (h *Handler) listJobs(c *gin.Context) {
 
 func (h *Handler) metrics(c *gin.Context) {
 	currentUser := h.auth.OptionalCurrentUser(c)
-	filters, args := h.buildJobFilters(c, currentUser, false)
+	titleValues := parseCSVQuery(c.Query("job_title"))
+	exactTitleValues, _ := h.resolveExactJobTitleValues(c, titleValues)
+	filters, args := h.buildJobFilters(c, currentUser, false, exactTitleValues)
 	where := ""
 	if len(filters) > 0 {
 		where = " WHERE " + strings.Join(filters, " AND ")
@@ -795,7 +799,7 @@ func isValidLocationOption(value string) bool {
 	return false
 }
 
-func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includePostDate bool) ([]string, []any) {
+func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includePostDate bool, exactJobTitleValues map[string]struct{}) ([]string, []any) {
 	filters := []string{}
 	args := []any{}
 	if titles := parseCSVQuery(c.Query("job_title")); len(titles) > 0 {
@@ -803,13 +807,19 @@ func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includ
 		parts := make([]string, 0, len(titles))
 		for _, title := range titles {
 			normalizedTitle := strings.ToLower(strings.TrimSpace(title))
+			if normalizedTitle == "" {
+				continue
+			}
+			if _, ok := exactJobTitleValues[normalizedTitle]; ok {
+				parts = append(parts, `(lower(trim(COALESCE(p.role_title, ''))) = ? OR lower(trim(COALESCE(p.categorized_job_title, ''))) = ? OR lower(trim(COALESCE(p.categorized_job_function, ''))) = ?)`)
+				args = append(args, normalizedTitle, normalizedTitle, normalizedTitle)
+				continue
+			}
 			titleParts := []string{
-				`lower(trim(COALESCE(p.role_title, ''))) = ?`,
-				`lower(trim(COALESCE(p.categorized_job_function, ''))) = ?`,
 				`p.categorized_job_title LIKE ?`,
 				`p.role_title LIKE ?`,
 			}
-			args = append(args, normalizedTitle, normalizedTitle, "%"+title+"%", "%"+title+"%")
+			args = append(args, "%"+title+"%", "%"+title+"%")
 			if tokens := tokenizeTitleSearchText(title); len(tokens) > 0 {
 				tokenParts := make([]string, 0, len(tokens))
 				for _, token := range tokens {
@@ -820,7 +830,9 @@ func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includ
 			}
 			parts = append(parts, "("+strings.Join(titleParts, " OR ")+")")
 		}
-		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
+		if len(parts) > 0 {
+			filters = append(filters, "("+strings.Join(parts, " OR ")+")")
+		}
 	}
 	if locations := parseCSVQuery(c.Query("location")); len(locations) > 0 {
 		locations = uniqueStrings(expandLocationQueryTerms(locations))
@@ -901,6 +913,59 @@ func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includ
 		}
 	}
 	return filters, args
+}
+
+func (h *Handler) resolveExactJobTitleValues(c *gin.Context, titleValues []string) (map[string]struct{}, error) {
+	normalized := []string{}
+	seen := map[string]struct{}{}
+	for _, value := range titleValues {
+		next := strings.ToLower(strings.TrimSpace(value))
+		if next == "" {
+			continue
+		}
+		if _, ok := seen[next]; ok {
+			continue
+		}
+		seen[next] = struct{}{}
+		normalized = append(normalized, next)
+	}
+	matches := map[string]struct{}{}
+	if len(normalized) == 0 {
+		return matches, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(normalized)), ",")
+	args := make([]any, 0, len(normalized)*3)
+	for _, value := range normalized {
+		args = append(args, value)
+	}
+	for _, value := range normalized {
+		args = append(args, value)
+	}
+	for _, value := range normalized {
+		args = append(args, value)
+	}
+	query := `SELECT p.role_title, p.categorized_job_title, p.categorized_job_function
+		FROM parsed_jobs p
+		WHERE lower(trim(COALESCE(p.role_title, ''))) IN (` + placeholders + `)
+		   OR lower(trim(COALESCE(p.categorized_job_title, ''))) IN (` + placeholders + `)
+		   OR lower(trim(COALESCE(p.categorized_job_function, ''))) IN (` + placeholders + `)`
+	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, args...)
+	if err != nil {
+		return matches, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var roleTitle, jobTitle, jobFunction sql.NullString
+		if err := rows.Scan(&roleTitle, &jobTitle, &jobFunction); err != nil {
+			continue
+		}
+		for _, value := range []sql.NullString{roleTitle, jobTitle, jobFunction} {
+			if value.Valid && strings.TrimSpace(value.String) != "" {
+				matches[strings.ToLower(strings.TrimSpace(value.String))] = struct{}{}
+			}
+		}
+	}
+	return matches, nil
 }
 
 func selectStrings(c *gin.Context, db *database.DB, query string) ([]string, error) {
