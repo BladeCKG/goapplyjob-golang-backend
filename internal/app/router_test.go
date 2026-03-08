@@ -893,6 +893,69 @@ func TestPasswordSignupValidatesPasswordLength(t *testing.T) {
 	assertStatus(t, rec.Code, http.StatusBadRequest)
 }
 
+func TestEmployerPostingFlow(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	code := requestLoginCode(t, router, "employer-owner@example.com")
+	cookie := verifyLoginCode(t, router, "employer-owner@example.com", code)
+
+	orgBody, _ := json.Marshal(map[string]any{"name": "Acme Hiring"})
+	orgReq := httptest.NewRequest(http.MethodPost, "/employer/organizations", bytes.NewReader(orgBody))
+	orgReq.Header.Set("Content-Type", "application/json")
+	orgReq.AddCookie(cookie)
+	orgRec := httptest.NewRecorder()
+	router.ServeHTTP(orgRec, orgReq)
+	assertStatus(t, orgRec.Code, http.StatusOK)
+	var orgPayload map[string]any
+	decodeBody(t, orgRec.Body.Bytes(), &orgPayload)
+	orgID := int(orgPayload["id"].(float64))
+
+	jobBody, _ := json.Marshal(map[string]any{
+		"organization_id": orgID,
+		"title":           "Senior Backend Engineer",
+		"description":     "Build internal platform systems",
+		"employment_type": "full-time",
+		"location_type":   "remote",
+		"apply_url":       "https://example.com/jobs/backend",
+	})
+	jobReq := httptest.NewRequest(http.MethodPost, "/employer/jobs", bytes.NewReader(jobBody))
+	jobReq.Header.Set("Content-Type", "application/json")
+	jobReq.AddCookie(cookie)
+	jobRec := httptest.NewRecorder()
+	router.ServeHTTP(jobRec, jobReq)
+	assertStatus(t, jobRec.Code, http.StatusOK)
+	var jobPayload map[string]any
+	decodeBody(t, jobRec.Body.Bytes(), &jobPayload)
+	jobID := int(jobPayload["id"].(float64))
+	if jobPayload["posting_fee_status"].(string) != "unpaid" {
+		t.Fatalf("expected unpaid posting fee status, got %#v", jobPayload["posting_fee_status"])
+	}
+
+	payReq := httptest.NewRequest(http.MethodPost, "/employer/jobs/"+strconv.Itoa(jobID)+"/pay", nil)
+	payReq.AddCookie(cookie)
+	payRec := httptest.NewRecorder()
+	router.ServeHTTP(payRec, payReq)
+	assertStatus(t, payRec.Code, http.StatusOK)
+
+	publishReq := httptest.NewRequest(http.MethodPost, "/employer/jobs/"+strconv.Itoa(jobID)+"/publish", nil)
+	publishReq.AddCookie(cookie)
+	publishRec := httptest.NewRecorder()
+	router.ServeHTTP(publishRec, publishReq)
+	assertStatus(t, publishRec.Code, http.StatusOK)
+
+	getReq := httptest.NewRequest(http.MethodGet, "/employer/jobs/"+strconv.Itoa(jobID), nil)
+	getReq.AddCookie(cookie)
+	getRec := httptest.NewRecorder()
+	router.ServeHTTP(getRec, getReq)
+	assertStatus(t, getRec.Code, http.StatusOK)
+	var getPayload map[string]any
+	decodeBody(t, getRec.Body.Bytes(), &getPayload)
+	if getPayload["status"].(string) != "published" || getPayload["posting_fee_status"].(string) != "paid" {
+		t.Fatalf("unexpected employer job state %#v", getPayload)
+	}
+}
+
 func testRouter(t *testing.T) (*gin.Engine, *database.DB) {
 	t.Helper()
 	cfg := config.Load()

@@ -21,6 +21,7 @@ type Config struct {
 	AuthDebugReturnCode           bool
 	AuthEnableCodeLogin           bool
 	AuthEnableGoogleLogin         bool
+	EmployerPostingFeeUSD         int
 	EmailProvider                 string
 	BrevoAPIKey                   string
 	BrevoFromEmail                string
@@ -76,8 +77,9 @@ func Load() Config {
 		AuthCookieSameSite:            getenv("AUTH_COOKIE_SAMESITE", "lax"),
 		AuthCookieDomain:              os.Getenv("AUTH_COOKIE_DOMAIN"),
 		AuthDebugReturnCode:           getenvBool("AUTH_DEBUG_RETURN_CODE", false),
-		AuthEnableCodeLogin:           getenvBool("AUTH_ENABLE_CODE_LOGIN", false),
+		AuthEnableCodeLogin:           getenvBool("AUTH_ENABLE_CODE_LOGIN", true),
 		AuthEnableGoogleLogin:         getenvBool("AUTH_ENABLE_GOOGLE_LOGIN", false),
+		EmployerPostingFeeUSD:         getenvInt("EMPLOYER_POSTING_FEE_USD", 10),
 		EmailProvider:                 getenv("EMAIL_PROVIDER", "brevo"),
 		BrevoAPIKey:                   getenv("BREVO_API_KEY", ""),
 		BrevoFromEmail:                getenv("BREVO_FROM_EMAIL", ""),
