@@ -37,6 +37,8 @@ var (
 	urlOpenPattern     = regexp.MustCompile(`(?is)<url(?:\s|>)`)
 	urlBlockPattern    = regexp.MustCompile(`(?is)<url(?:\s[^>]*)?>.*?</url>`)
 	urlSetClosePattern = regexp.MustCompile(`(?is)</urlset\s*>`)
+	remotiveJobIDRE    = regexp.MustCompile(`(?i)job-(\d+)`)
+	remotiveIndexRE    = regexp.MustCompile(`(?i)sitemap-job-postings-(\d+)\.xml`)
 )
 
 type Config struct {
@@ -442,23 +444,174 @@ func (s *Service) runOnceRemotive() error {
 	if strings.TrimSpace(s.Config.RemotiveSitemapURL) == "" {
 		return nil
 	}
-	xmlText, err := s.FetchText(s.Config.RemotiveSitemapURL)
+	statePayload, err := s.loadStatePayload(sourceRemotive)
 	if err != nil {
 		return err
 	}
-	rows, skipped := remotive.ParseSitemapRows(xmlText)
-	if len(rows) > 0 {
-		if _, err := s.saveDeltaPayloadForSource(sourceRemotive, s.Config.RemotiveSitemapURL, payloadTypeDelta, remotive.SerializeImportRows(rows)); err != nil {
-			return err
+	previousLatestJobID := intFromAny(statePayload["latest_job_id"], 0)
+	if previousLatestJobID <= 0 {
+		previousLatestJobID = 0
+	}
+
+	latestURL := strings.TrimSpace(s.Config.RemotiveSitemapURL)
+	xmlText, err := s.FetchText(latestURL)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	deltaRows := make([]map[string]any, 0)
+	seenURLs := map[string]struct{}{}
+	scannedRowsCount := 0
+	newLatestJobID := 0
+	scannedIndexes := make([]int, 0)
+
+	latestIndex, hasLatestIndex := extractRemotiveSitemapIndex(latestURL)
+	partitionsToScan := []int{}
+	if hasLatestIndex && previousLatestJobID > 0 {
+		for partition := latestIndex; partition >= 1; partition-- {
+			partitionsToScan = append(partitionsToScan, partition)
+		}
+	} else if hasLatestIndex {
+		partitionsToScan = append(partitionsToScan, latestIndex)
+	}
+
+	processRows := func(rows []map[string]any) (crossedPrevious bool) {
+		if len(rows) == 0 {
+			return false
+		}
+		if newLatestJobID == 0 {
+			lastURL, _ := rows[len(rows)-1]["url"].(string)
+			newLatestJobID = extractRemotiveJobIDFromURL(lastURL)
+		}
+		for idx := len(rows) - 1; idx >= 0; idx-- {
+			row := rows[idx]
+			rowURL, _ := row["url"].(string)
+			rowURL = strings.TrimSpace(rowURL)
+			if rowURL == "" {
+				continue
+			}
+			jobID := extractRemotiveJobIDFromURL(rowURL)
+			if previousLatestJobID > 0 && jobID > 0 && jobID <= previousLatestJobID {
+				return true
+			}
+			scannedRowsCount++
+			if _, exists := seenURLs[rowURL]; exists {
+				continue
+			}
+			seenURLs[rowURL] = struct{}{}
+			postDate, _ := row["post_date"].(time.Time)
+			if postDate.IsZero() {
+				postDate = now
+			}
+			deltaRows = append(deltaRows, map[string]any{
+				"url":       rowURL,
+				"post_date": postDate,
+			})
+		}
+		return false
+	}
+
+	if len(partitionsToScan) == 0 {
+		rows, _ := remotive.ParseSitemapRows(xmlText)
+		_ = processRows(rows)
+	} else {
+		for _, partition := range partitionsToScan {
+			var partitionURL string
+			var partitionXML string
+			if partition == latestIndex {
+				partitionURL = latestURL
+				partitionXML = xmlText
+			} else {
+				partitionURL = buildRemotiveSitemapURL(latestURL, partition)
+				if strings.TrimSpace(partitionURL) == "" {
+					continue
+				}
+				fetchedXML, fetchErr := s.FetchText(partitionURL)
+				if fetchErr != nil || !strings.Contains(strings.ToLower(fetchedXML), "<urlset") {
+					continue
+				}
+				partitionXML = fetchedXML
+			}
+			rows, _ := remotive.ParseSitemapRows(partitionXML)
+			if len(rows) == 0 {
+				continue
+			}
+			scannedIndexes = append(scannedIndexes, partition)
+			if processRows(rows) {
+				break
+			}
 		}
 	}
+
+	var payloadID any
+	if len(deltaRows) > 0 {
+		if savedID, err := s.saveDeltaPayloadForSource(sourceRemotive, latestURL, payloadTypeDelta, remotive.SerializeImportRows(deltaRows)); err != nil {
+			return err
+		} else {
+			payloadID = savedID
+		}
+	}
+
+	latestJobIDValue := any(nil)
+	switch {
+	case newLatestJobID > 0:
+		latestJobIDValue = newLatestJobID
+	case previousLatestJobID > 0:
+		latestJobIDValue = previousLatestJobID
+	}
+
+	sitemapURLCount := scannedRowsCount
+	if sitemapURLCount == 0 {
+		sitemapURLCount = len(deltaRows)
+	}
+
 	return s.saveStatePayload(sourceRemotive, map[string]any{
-		"sitemap_url":                s.Config.RemotiveSitemapURL,
-		"last_scan_at":               utcNowISO(),
-		"rows_seen_last_cycle":       len(rows),
-		"rows_skipped_last_cycle":    skipped,
-		"payloads_created_last_cycle": map[bool]int{true: 1, false: 0}[len(rows) > 0],
+		"sitemap_url":                    latestURL,
+		"last_scan_at":                   utcNowISO(),
+		"rows_seen_last_cycle":           len(deltaRows),
+		"rows_skipped_last_cycle":        0,
+		"payloads_created_last_cycle":    map[bool]int{true: 1, false: 0}[len(deltaRows) > 0],
+		"latest_job_id":                  latestJobIDValue,
+		"latest_sitemap_url_count":       sitemapURLCount,
+		"latest_delta_count":             len(deltaRows),
+		"latest_delta_payload_id":        payloadID,
+		"latest_scanned_sitemap_indexes": scannedIndexes,
 	})
+}
+
+func extractRemotiveJobIDFromURL(rawURL string) int {
+	match := remotiveJobIDRE.FindStringSubmatch(strings.TrimSpace(rawURL))
+	if len(match) < 2 {
+		return 0
+	}
+	id, _ := strconv.Atoi(strings.TrimSpace(match[1]))
+	return id
+}
+
+func extractRemotiveSitemapIndex(rawURL string) (int, bool) {
+	match := remotiveIndexRE.FindStringSubmatch(strings.TrimSpace(rawURL))
+	if len(match) < 2 {
+		return 0, false
+	}
+	index, err := strconv.Atoi(strings.TrimSpace(match[1]))
+	if err != nil || index <= 0 {
+		return 0, false
+	}
+	return index, true
+}
+
+func buildRemotiveSitemapURL(currentURL string, partition int) string {
+	if partition <= 0 {
+		return ""
+	}
+	match := remotiveIndexRE.FindStringSubmatchIndex(currentURL)
+	if len(match) != 4 {
+		return ""
+	}
+	start := match[2]
+	end := match[3]
+	return currentURL[:start] + strconv.Itoa(partition) + currentURL[end:]
 }
 
 func (s *Service) runOnceHiringCafe() error {

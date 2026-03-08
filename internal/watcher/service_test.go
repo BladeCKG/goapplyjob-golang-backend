@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/sources/remotive"
 )
 
 func buildService(t *testing.T) *Service {
@@ -257,8 +258,129 @@ func TestBuiltinKeepsNextPageAtOneAfterFullScan(t *testing.T) {
 	}
 }
 
+func TestRemotiveWatcherUsesJobIDCutoffAndNewestFirst(t *testing.T) {
+	service := buildService(t)
+	service.Config.URL = ""
+	service.Config.RemotiveSitemapURL = "https://remotive.com/sitemap-job-postings-8.xml"
+	service.Config.EnabledSources = map[string]struct{}{sourceRemotive: {}}
+	sitemap := `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://remotive.com/remote-jobs/software-dev/job-3803900</loc><lastmod>2026-02-01T00:00:00+00:00</lastmod></url>
+  <url><loc>https://remotive.com/remote-jobs/software-dev/job-3803910</loc><lastmod>2026-02-01T00:00:00+00:00</lastmod></url>
+  <url><loc>https://remotive.com/remote-jobs/software-dev/job-3803920</loc><lastmod>2026-02-01T00:00:00+00:00</lastmod></url>
+</urlset>`
+	if err := service.saveStatePayload(sourceRemotive, map[string]any{"latest_job_id": 3803900}); err != nil {
+		t.Fatal(err)
+	}
+	service.FetchText = func(rawURL string) (string, error) {
+		if rawURL != service.Config.RemotiveSitemapURL {
+			return "", errors.New("unexpected URL: " + rawURL)
+		}
+		return sitemap, nil
+	}
+
+	if err := service.runOnceRemotive(); err != nil {
+		t.Fatal(err)
+	}
+	state, err := service.loadStatePayload(sourceRemotive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intFromAny(state["latest_job_id"], 0) != 3803920 {
+		t.Fatalf("expected latest_job_id=3803920 got %#v", state["latest_job_id"])
+	}
+	var body string
+	if err := service.DB.SQL.QueryRowContext(context.Background(), `SELECT body_text FROM watcher_payloads WHERE source = ? ORDER BY id DESC LIMIT 1`, sourceRemotive).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	rows, skipped := remotive.ParseImportRows(body)
+	if skipped != 0 {
+		t.Fatalf("unexpected skipped rows: %d", skipped)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows got %d", len(rows))
+	}
+	got := []int{
+		extractRemotiveJobIDFromURL(strings.TrimSpace(anyString(rows[0]["url"]))),
+		extractRemotiveJobIDFromURL(strings.TrimSpace(anyString(rows[1]["url"]))),
+	}
+	if got[0] != 3803920 || got[1] != 3803910 {
+		t.Fatalf("unexpected id order %#v", got)
+	}
+}
+
+func TestRemotiveWatcherScansBackwardPartitionsUntilCrossingWatermark(t *testing.T) {
+	service := buildService(t)
+	service.Config.URL = ""
+	service.Config.RemotiveSitemapURL = "https://remotive.com/sitemap-job-postings-9.xml"
+	service.Config.EnabledSources = map[string]struct{}{sourceRemotive: {}}
+	if err := service.saveStatePayload(sourceRemotive, map[string]any{"latest_job_id": 105}); err != nil {
+		t.Fatal(err)
+	}
+	sitemap9 := `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://remotive.com/remote-jobs/software-dev/job-109</loc><lastmod>2026-02-01T00:00:00+00:00</lastmod></url>
+  <url><loc>https://remotive.com/remote-jobs/software-dev/job-110</loc><lastmod>2026-02-01T00:00:00+00:00</lastmod></url>
+</urlset>`
+	sitemap8 := `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://remotive.com/remote-jobs/software-dev/job-104</loc><lastmod>2026-01-31T00:00:00+00:00</lastmod></url>
+  <url><loc>https://remotive.com/remote-jobs/software-dev/job-108</loc><lastmod>2026-01-31T00:00:00+00:00</lastmod></url>
+</urlset>`
+	fetchedPartitions := []int{}
+	service.FetchText = func(rawURL string) (string, error) {
+		if strings.HasSuffix(rawURL, "-9.xml") {
+			return sitemap9, nil
+		}
+		if strings.HasSuffix(rawURL, "-8.xml") {
+			fetchedPartitions = append(fetchedPartitions, 8)
+			return sitemap8, nil
+		}
+		return "", errors.New("unexpected URL: " + rawURL)
+	}
+
+	if err := service.runOnceRemotive(); err != nil {
+		t.Fatal(err)
+	}
+	var body string
+	if err := service.DB.SQL.QueryRowContext(context.Background(), `SELECT body_text FROM watcher_payloads WHERE source = ? ORDER BY id DESC LIMIT 1`, sourceRemotive).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	rows, skipped := remotive.ParseImportRows(body)
+	if skipped != 0 {
+		t.Fatalf("unexpected skipped rows: %d", skipped)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 rows got %d", len(rows))
+	}
+	gotIDs := []int{
+		extractRemotiveJobIDFromURL(strings.TrimSpace(anyString(rows[0]["url"]))),
+		extractRemotiveJobIDFromURL(strings.TrimSpace(anyString(rows[1]["url"]))),
+		extractRemotiveJobIDFromURL(strings.TrimSpace(anyString(rows[2]["url"]))),
+	}
+	if strings.Join([]string{strconv.Itoa(gotIDs[0]), strconv.Itoa(gotIDs[1]), strconv.Itoa(gotIDs[2])}, ",") != "110,109,108" {
+		t.Fatalf("unexpected ids %#v", gotIDs)
+	}
+	if len(fetchedPartitions) != 1 || fetchedPartitions[0] != 8 {
+		t.Fatalf("unexpected fetched partitions %#v", fetchedPartitions)
+	}
+	state, err := service.loadStatePayload(sourceRemotive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawIndexes, _ := state["latest_scanned_sitemap_indexes"].([]any)
+	if len(rawIndexes) != 2 || intFromAny(rawIndexes[0], 0) != 9 || intFromAny(rawIndexes[1], 0) != 8 {
+		t.Fatalf("unexpected latest_scanned_sitemap_indexes %#v", state["latest_scanned_sitemap_indexes"])
+	}
+}
+
 func builtinPageHTML(jobURL string, jobID int, publishedDate string) string {
 	return `<html><head><script type="application/ld+json">{"@graph":[{"@type":"ItemList","itemListElement":[{"@type":"ListItem","position":1,"url":"` + jobURL + `","name":"Role","description":"Desc"}]}]}</script></head><body><script>logBuiltinTrackEvent('job_board_view', {'jobs':[{'id':` + strconv.Itoa(jobID) + `,'published_date':'` + publishedDate + `'}],'filters':{}});</script></body></html>`
+}
+
+func anyString(value any) string {
+	text, _ := value.(string)
+	return text
 }
 
 func TestHiringCafeWatcherUpsertsJobsWithoutImporter(t *testing.T) {
