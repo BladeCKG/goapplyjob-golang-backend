@@ -6,3 +6,6 @@ coverage.out
 example-gin-cover
 merged_cov_data/
 target/
+app.db-journal
+app.db-wal
+app.db-shm
