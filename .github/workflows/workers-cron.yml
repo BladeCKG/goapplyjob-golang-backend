@@ -2,7 +2,7 @@ name: Backend Workers Cron
 
 on:
   schedule:
-    - cron: "0 */3 * * *"
+    - cron: "0 * * * *"
   workflow_dispatch:
 
 jobs:
@@ -27,27 +27,27 @@ jobs:
       - name: Run database migrations
         run: go run ./cmd/migrate
 
-      - name: Run 3-hour watcher
+      - name: Run hourly watcher
         env:
           WATCH_RUN_ONCE: "true"
         run: go run ./cmd/watcher
 
-      - name: Run 3-hour import worker
+      - name: Run hourly import worker
         env:
           RAW_IMPORT_RUN_ONCE: "true"
-          RAW_IMPORT_BATCH_SIZE: "800"
+          RAW_IMPORT_BATCH_SIZE: "1000"
           RAW_IMPORT_PAYLOADS_PER_CYCLE: "40"
         run: go run ./cmd/importer
 
-      - name: Run 3-hour raw worker
+      - name: Run hourly raw worker
         env:
           RAW_JOB_RETENTION_DAYS: ${{ secrets.RAW_JOB_RETENTION_DAYS }}
-          RAW_JOB_WORKER_BATCH_SIZE: "320"
+          RAW_JOB_WORKER_BATCH_SIZE: "100"
           RAW_JOB_HTTP_429_RETRY_DELAY_SECONDS: "10"
         run: go run ./cmd/skippablerecheck
 
-      - name: Run 3-hour parsed worker
+      - name: Run hourly parsed worker
         env:
           PARSED_JOB_RUN_ONCE: "true"
-          PARSED_JOB_WORKER_BATCH_SIZE: "260"
+          PARSED_JOB_WORKER_BATCH_SIZE: "100"
         run: go run ./cmd/parsedfreshness
