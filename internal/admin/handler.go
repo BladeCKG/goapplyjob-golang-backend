@@ -68,7 +68,7 @@ func (h *Handler) listUsers(c *gin.Context) {
 	rows, err := h.db.SQL.QueryContext(c.Request.Context(),
 		`SELECT id, email, created_at
 		 FROM auth_users
-		 ORDER BY created_at DESC, id DESC
+		 ORDER BY id DESC
 		 LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list users"})
@@ -251,7 +251,7 @@ func (h *Handler) listWatcherPayloads(c *gin.Context) {
 		query += where
 		totalQuery += where
 	}
-	query += " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
+	query += " ORDER BY id DESC LIMIT ? OFFSET ?"
 	total := 0
 	if err := h.db.SQL.QueryRowContext(c.Request.Context(), totalQuery, args...).Scan(&total); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list watcher payloads"})
@@ -389,7 +389,7 @@ func (h *Handler) listRawUSJobs(c *gin.Context) {
 		query += where
 		totalQuery += where
 	}
-	query += " ORDER BY post_date DESC, id DESC LIMIT ? OFFSET ?"
+	query += " ORDER BY id DESC LIMIT ? OFFSET ?"
 	total := 0
 	if err := h.db.SQL.QueryRowContext(c.Request.Context(), totalQuery, args...).Scan(&total); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list raw jobs"})
@@ -494,7 +494,7 @@ func (h *Handler) listWatcherStates(c *gin.Context) {
 		totalQuery += " WHERE source = ?"
 		args = append(args, source)
 	}
-	query += " ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?"
+	query += " ORDER BY id DESC LIMIT ? OFFSET ?"
 	total := 0
 	if err := h.db.SQL.QueryRowContext(c.Request.Context(), totalQuery, args...).Scan(&total); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list watcher states"})
@@ -652,7 +652,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 		return
 	}
 	query := `SELECT p.id, p.raw_us_job_id, r.source, p.company_id, p.external_job_id, p.role_title, p.role_description, p.url, p.employment_type, p.location_type, p.location_city, p.location_us_states, p.location_countries, p.categorized_job_title, p.categorized_job_function, p.tech_stack, p.salary_type, p.salary_min_usd, p.salary_max_usd, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.created_at_source, p.updated_at` +
-		baseFrom + where + ` ORDER BY p.updated_at DESC, p.id DESC LIMIT ? OFFSET ?`
+		baseFrom + where + ` ORDER BY p.id DESC LIMIT ? OFFSET ?`
 	queryArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, queryArgs...)
 	if err != nil {
