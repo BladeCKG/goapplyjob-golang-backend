@@ -1335,6 +1335,9 @@ func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includ
 		case "applied":
 			filters = append(filters, appliedExists)
 			args = append(args, currentUser.ID)
+		case "not_applied":
+			filters = append(filters, "NOT ("+appliedExists+")")
+			args = append(args, currentUser.ID)
 		case "saved":
 			filters = append(filters, savedExists)
 			args = append(args, currentUser.ID)
