@@ -279,6 +279,12 @@ func (db *DB) Migrate(ctx context.Context) error {
 	if _, err := db.SQL.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_user_job_actions_updated_at ON user_job_actions (updated_at)`); err != nil {
 		return fmt.Errorf("create user_job_actions updated_at index: %w", err)
 	}
+	if _, err := db.SQL.ExecContext(ctx, `DROP INDEX IF EXISTS uq_user_job_action`); err != nil {
+		return fmt.Errorf("drop legacy user_job_actions unique index: %w", err)
+	}
+	if _, err := db.SQL.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS uq_user_job_action_new ON user_job_actions (user_id, parsed_job_id)`); err != nil {
+		return fmt.Errorf("create user_job_actions unique index: %w", err)
+	}
 	if _, err := db.SQL.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_employer_organizations_name ON employer_organizations (name)`); err != nil {
 		return fmt.Errorf("create employer_organizations name index: %w", err)
 	}
