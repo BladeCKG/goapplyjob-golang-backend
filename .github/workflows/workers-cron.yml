@@ -35,7 +35,7 @@ jobs:
         env:
           RAW_IMPORT_RUN_ONCE: "true"
           RAW_IMPORT_BATCH_SIZE: "800"
-          RAW_IMPORT_PAYLOADS_PER_CYCLE: "4"
+          RAW_IMPORT_PAYLOADS_PER_CYCLE: "40"
         run: go run ./cmd/importer
 
       - name: Run hourly workers

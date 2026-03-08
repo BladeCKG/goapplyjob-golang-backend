@@ -35,7 +35,7 @@ func main() {
 	if batchSize < 1 {
 		batchSize = 1
 	}
-	payloadsPerCycle := config.GetenvInt("RAW_IMPORT_PAYLOADS_PER_CYCLE", 50)
+	payloadsPerCycle := config.GetenvInt("RAW_IMPORT_PAYLOADS_PER_CYCLE", 40)
 	if payloadsPerCycle < 1 {
 		payloadsPerCycle = 1
 	}

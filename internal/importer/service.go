@@ -56,7 +56,7 @@ const (
 	sourceWorkable          = "workable"
 	payloadTypeXML          = "delta_xml"
 	payloadTypeJSON         = "delta"
-	defaultPayloadsPerCycle = 50
+	defaultPayloadsPerCycle = 40
 )
 
 func New(db *database.DB) *Service { return &Service{DB: db} }
