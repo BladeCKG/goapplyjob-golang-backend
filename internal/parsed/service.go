@@ -454,9 +454,18 @@ func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle str
 			return "", "", err
 		}
 		if bestScore >= 0.5 {
+			log.Printf(
+				"parsed-job-worker category_match_candidate role_title=%q category=%q function=%q score=%.3f skill_filter=%t",
+				strings.TrimSpace(roleTitle),
+				strings.TrimSpace(bestTitle),
+				strings.TrimSpace(bestFunction),
+				bestScore,
+				applySkillFilter,
+			)
 			return bestTitle, bestFunction, nil
 		}
 	}
+	log.Printf("parsed-job-worker category_match_candidate role_title=%q category=%q function=%q score=0.000 skill_filter=false", strings.TrimSpace(roleTitle), "", "")
 	return "", "", nil
 }
 
