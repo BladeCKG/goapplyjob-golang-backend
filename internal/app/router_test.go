@@ -160,6 +160,10 @@ func TestJobsSitemapEndpointNotPreviewLimited(t *testing.T) {
 	for idx := 0; idx < 7; idx++ {
 		insertJob(t, db, idx+9000, "https://example.com/sitemap-"+strconv.Itoa(idx), "City", "State", 100, 130, true, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC))
 	}
+	companyID := insertCompany(t, db, "Sitemap Co")
+	if _, err := db.SQL.ExecContext(context.Background(), `UPDATE parsed_jobs SET company_id = ? WHERE raw_us_job_id = ?`, companyID, 9006); err != nil {
+		t.Fatal(err)
+	}
 
 	previewReq := httptest.NewRequest(http.MethodGet, "/jobs?page=1&per_page=100", nil)
 	previewRec := httptest.NewRecorder()
@@ -179,6 +183,17 @@ func TestJobsSitemapEndpointNotPreviewLimited(t *testing.T) {
 	decodeBody(t, sitemapRec.Body.Bytes(), &sitemapPayload)
 	if sitemapPayload["total"].(float64) != 7 || len(sitemapPayload["items"].([]any)) != 3 {
 		t.Fatalf("unexpected sitemap page1 payload %#v", sitemapPayload)
+	}
+	foundCompanyName := false
+	for _, rawItem := range sitemapPayload["items"].([]any) {
+		item := rawItem.(map[string]any)
+		if item["company_name"] == "Sitemap Co" {
+			foundCompanyName = true
+			break
+		}
+	}
+	if !foundCompanyName {
+		t.Fatalf("expected company_name in sitemap payload %#v", sitemapPayload)
 	}
 
 	sitemapReq3 := httptest.NewRequest(http.MethodGet, "/jobs/sitemap?page=3&per_page=3", nil)

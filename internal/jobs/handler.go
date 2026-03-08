@@ -133,6 +133,7 @@ type jobSitemapItem struct {
 	ID               int64   `json:"id"`
 	RoleTitle        *string `json:"role_title"`
 	CategorizedTitle *string `json:"categorized_job_title"`
+	CompanyName      *string `json:"company_name"`
 	CreatedAtSource  *string `json:"created_at_source"`
 }
 
@@ -516,9 +517,10 @@ func (h *Handler) sitemap(c *gin.Context) {
 		return
 	}
 	rows, err := h.db.SQL.QueryContext(c.Request.Context(),
-		`SELECT id, role_title, categorized_job_title, created_at_source
-		 FROM parsed_jobs
-		 ORDER BY created_at_source DESC, id DESC
+		`SELECT p.id, p.role_title, p.categorized_job_title, c.name, p.created_at_source
+		 FROM parsed_jobs p
+		 LEFT JOIN parsed_companies c ON c.id = p.company_id
+		 ORDER BY p.created_at_source DESC, p.id DESC
 		 LIMIT ? OFFSET ?`, perPage, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs sitemap"})
@@ -528,10 +530,11 @@ func (h *Handler) sitemap(c *gin.Context) {
 	items := []jobSitemapItem{}
 	for rows.Next() {
 		var item jobSitemapItem
-		var roleTitle, categorizedTitle, createdAt sql.NullString
-		if err := rows.Scan(&item.ID, &roleTitle, &categorizedTitle, &createdAt); err == nil {
+		var roleTitle, categorizedTitle, companyName, createdAt sql.NullString
+		if err := rows.Scan(&item.ID, &roleTitle, &categorizedTitle, &companyName, &createdAt); err == nil {
 			item.RoleTitle = nullableString(roleTitle)
 			item.CategorizedTitle = nullableString(categorizedTitle)
+			item.CompanyName = nullableString(companyName)
 			item.CreatedAtSource = nullableString(createdAt)
 			items = append(items, item)
 		}
