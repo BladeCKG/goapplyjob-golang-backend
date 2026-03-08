@@ -1,13 +1,16 @@
 package jobs
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"goapplyjob-golang-backend/internal/auth"
@@ -18,9 +21,19 @@ import (
 )
 
 type Handler struct {
-	cfg  config.Config
-	db   *database.DB
-	auth *auth.Handler
+	cfg         config.Config
+	db          *database.DB
+	auth        *auth.Handler
+	filterCache filterOptionsCache
+}
+
+type filterOptionsCache struct {
+	mu                  sync.Mutex
+	maxParsedJobID      sql.NullInt64
+	jobCategoryParents  map[string]any
+	locationParents     map[string][]string
+	techStacks          []string
+	employmentTypes     []string
 }
 
 const (
@@ -152,7 +165,17 @@ type jobSitemapItem struct {
 }
 
 func NewHandler(cfg config.Config, db *database.DB, authHandler *auth.Handler) *Handler {
-	return &Handler{cfg: cfg, db: db, auth: authHandler}
+	return &Handler{
+		cfg:  cfg,
+		db:   db,
+		auth: authHandler,
+		filterCache: filterOptionsCache{
+			jobCategoryParents: map[string]any{},
+			locationParents:    map[string][]string{},
+			techStacks:         []string{},
+			employmentTypes:    []string{},
+		},
+	}
 }
 
 func (h *Handler) Register(router gin.IRouter) {
@@ -295,200 +318,291 @@ func minSalaryFilterSQL() string {
 	return `(p.salary_min_usd >= ? OR (p.salary_min_usd IS NULL AND ` + annualizedSalarySQL(`p.salary_min`) + ` >= ?))`
 }
 
-func distinctNonEmptyStrings(c *gin.Context, db *database.DB, column string) ([]string, error) {
-	return selectStrings(c, db, `SELECT DISTINCT `+column+` FROM parsed_jobs WHERE `+column+` IS NOT NULL AND `+column+` != '' ORDER BY `+column+` ASC`)
+func cleanFilterLabel(value string) string {
+	return strings.TrimSpace(value)
+}
+
+func sortedKeysCaseInsensitive[T any](values map[string]T) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		left := strings.ToLower(keys[i])
+		right := strings.ToLower(keys[j])
+		if left == right {
+			return keys[i] < keys[j]
+		}
+		return left < right
+	})
+	return keys
+}
+
+func buildJobCategoryParentsMap(rows [][2]string) map[string]any {
+	categoryFunctionCounts := map[string]map[string]int{}
+	rootFunctionLabels := map[string]struct{}{}
+	allLabels := map[string]struct{}{}
+	for _, row := range rows {
+		title := cleanFilterLabel(row[0])
+		function := cleanFilterLabel(row[1])
+		if function != "" {
+			rootFunctionLabels[function] = struct{}{}
+			allLabels[function] = struct{}{}
+		}
+		if title != "" {
+			allLabels[title] = struct{}{}
+			if function != "" && !strings.EqualFold(title, function) {
+				if _, ok := categoryFunctionCounts[title]; !ok {
+					categoryFunctionCounts[title] = map[string]int{}
+				}
+				categoryFunctionCounts[title][function]++
+			}
+		}
+	}
+	resolved := map[string]any{}
+	sortedLabels := sortedKeysCaseInsensitive(allLabels)
+	for _, label := range sortedLabels {
+		if _, isRoot := rootFunctionLabels[label]; isRoot {
+			resolved[label] = nil
+			continue
+		}
+		counts := categoryFunctionCounts[label]
+		if len(counts) == 0 {
+			resolved[label] = nil
+			continue
+		}
+		type countItem struct {
+			parent string
+			count  int
+		}
+		items := make([]countItem, 0, len(counts))
+		for parent, count := range counts {
+			items = append(items, countItem{parent: parent, count: count})
+		}
+		sort.Slice(items, func(i, j int) bool {
+			if items[i].count == items[j].count {
+				return strings.ToLower(items[i].parent) < strings.ToLower(items[j].parent)
+			}
+			return items[i].count > items[j].count
+		})
+		resolved[label] = items[0].parent
+	}
+	return resolved
+}
+
+func buildLocationParentsMap(rows [][2][]string) map[string][]string {
+	locationParents := map[string][]string{}
+	seenLabels := map[string]struct{}{}
+	stateToCountries := map[string]map[string]struct{}{}
+	addLocationOption := func(label string, parents []string) {
+		cleanLabel := cleanFilterLabel(label)
+		if cleanLabel == "" {
+			return
+		}
+		if _, ok := seenLabels[cleanLabel]; ok {
+			return
+		}
+		seenLabels[cleanLabel] = struct{}{}
+		cleanParents := []string{}
+		seenParents := map[string]struct{}{}
+		for _, parent := range parents {
+			cleanParent := cleanFilterLabel(parent)
+			if cleanParent == "" {
+				continue
+			}
+			if _, exists := seenParents[cleanParent]; exists {
+				continue
+			}
+			seenParents[cleanParent] = struct{}{}
+			cleanParents = append(cleanParents, cleanParent)
+		}
+		sort.Slice(cleanParents, func(i, j int) bool { return strings.ToLower(cleanParents[i]) < strings.ToLower(cleanParents[j]) })
+		locationParents[cleanLabel] = cleanParents
+	}
+	for _, row := range rows {
+		states := uniqueStrings(row[0])
+		countries := uniqueStrings(row[1])
+		for _, state := range states {
+			state = cleanFilterLabel(state)
+			if !isValidLocationOption(state) {
+				continue
+			}
+			if _, ok := stateToCountries[state]; !ok {
+				stateToCountries[state] = map[string]struct{}{}
+			}
+			for _, country := range countries {
+				country = cleanFilterLabel(country)
+				if isValidLocationOption(country) {
+					stateToCountries[state][country] = struct{}{}
+				}
+			}
+			parents := make([]string, 0, len(stateToCountries[state]))
+			for country := range stateToCountries[state] {
+				parents = append(parents, country)
+			}
+			addLocationOption(state, parents)
+		}
+		for _, country := range countries {
+			country = cleanFilterLabel(country)
+			if isValidLocationOption(country) {
+				addLocationOption(country, nil)
+			}
+		}
+	}
+	sorted := map[string][]string{}
+	for _, key := range sortedKeysCaseInsensitive(locationParents) {
+		sorted[key] = locationParents[key]
+	}
+	return sorted
+}
+
+func buildTechStacks(rows [][]string) []string {
+	byKey := map[string]string{}
+	for _, stack := range rows {
+		for _, item := range stack {
+			cleaned := strings.TrimSpace(item)
+			if cleaned == "" {
+				continue
+			}
+			key := strings.ToLower(cleaned)
+			if _, ok := byKey[key]; !ok {
+				byKey[key] = cleaned
+			}
+		}
+	}
+	values := make([]string, 0, len(byKey))
+	for _, value := range byKey {
+		values = append(values, value)
+	}
+	sort.Slice(values, func(i, j int) bool { return strings.ToLower(values[i]) < strings.ToLower(values[j]) })
+	return values
+}
+
+func buildEmploymentTypes(rows []string) []string {
+	seen := map[string]struct{}{}
+	values := []string{}
+	for _, row := range rows {
+		cleaned := strings.TrimSpace(row)
+		if cleaned == "" {
+			continue
+		}
+		if _, ok := seen[cleaned]; ok {
+			continue
+		}
+		seen[cleaned] = struct{}{}
+		values = append(values, cleaned)
+	}
+	sort.Slice(values, func(i, j int) bool { return strings.ToLower(values[i]) < strings.ToLower(values[j]) })
+	return values
+}
+
+func (h *Handler) getMaxParsedJobID(ctx context.Context) (sql.NullInt64, error) {
+	var maxID sql.NullInt64
+	err := h.db.SQL.QueryRowContext(ctx, `SELECT MAX(id) FROM parsed_jobs`).Scan(&maxID)
+	return maxID, err
+}
+
+func parsedJobFilterRowsEqual(left, right sql.NullInt64) bool {
+	if !left.Valid && !right.Valid {
+		return true
+	}
+	return left.Valid == right.Valid && left.Int64 == right.Int64
+}
+
+func (h *Handler) refreshFilterCache(ctx context.Context) error {
+	rows, err := h.db.SQL.QueryContext(ctx,
+		`SELECT categorized_job_title, categorized_job_function, location_us_states, location_countries, tech_stack, employment_type
+		 FROM parsed_jobs
+		 WHERE categorized_job_title IS NOT NULL
+		    OR categorized_job_function IS NOT NULL
+		    OR location_us_states IS NOT NULL
+		    OR location_countries IS NOT NULL
+		    OR tech_stack IS NOT NULL
+		    OR employment_type IS NOT NULL`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	categoryRows := [][2]string{}
+	locationRows := [][2][]string{}
+	techRows := [][]string{}
+	employmentRows := []string{}
+	for rows.Next() {
+		var categorizedJobTitle, categorizedJobFunction, locationUSStates, locationCountries, techStack, employmentType sql.NullString
+		if err := rows.Scan(&categorizedJobTitle, &categorizedJobFunction, &locationUSStates, &locationCountries, &techStack, &employmentType); err != nil {
+			continue
+		}
+		if categorizedJobTitle.Valid || categorizedJobFunction.Valid {
+			categoryRows = append(categoryRows, [2]string{categorizedJobTitle.String, categorizedJobFunction.String})
+		}
+		if locationUSStates.Valid || locationCountries.Valid {
+			states := []string{}
+			countries := []string{}
+			if locationUSStates.Valid && strings.TrimSpace(locationUSStates.String) != "" {
+				_ = json.Unmarshal([]byte(locationUSStates.String), &states)
+			}
+			if locationCountries.Valid && strings.TrimSpace(locationCountries.String) != "" {
+				_ = json.Unmarshal([]byte(locationCountries.String), &countries)
+			}
+			locationRows = append(locationRows, [2][]string{states, countries})
+		}
+		if techStack.Valid && strings.TrimSpace(techStack.String) != "" {
+			values := []string{}
+			if err := json.Unmarshal([]byte(techStack.String), &values); err == nil {
+				techRows = append(techRows, values)
+			}
+		}
+		if employmentType.Valid {
+			employmentRows = append(employmentRows, employmentType.String)
+		}
+	}
+	h.filterCache.jobCategoryParents = buildJobCategoryParentsMap(categoryRows)
+	h.filterCache.locationParents = buildLocationParentsMap(locationRows)
+	h.filterCache.techStacks = buildTechStacks(techRows)
+	h.filterCache.employmentTypes = buildEmploymentTypes(employmentRows)
+	return nil
+}
+
+func (h *Handler) ensureFilterCacheFresh(ctx context.Context, force bool) error {
+	h.filterCache.mu.Lock()
+	defer h.filterCache.mu.Unlock()
+	maxID, err := h.getMaxParsedJobID(ctx)
+	if err != nil {
+		return err
+	}
+	if !force && parsedJobFilterRowsEqual(h.filterCache.maxParsedJobID, maxID) {
+		return nil
+	}
+	if err := h.refreshFilterCache(ctx); err != nil {
+		return err
+	}
+	h.filterCache.maxParsedJobID = maxID
+	return nil
+}
+
+func (h *Handler) WarmFilterCache(ctx context.Context) error {
+	return h.ensureFilterCacheFresh(ctx, true)
 }
 
 func (h *Handler) filterOptions(c *gin.Context) {
-	categoriesRows, err := h.db.SQL.QueryContext(c.Request.Context(),
-		`SELECT categorized_job_title, categorized_job_function
-		 FROM parsed_jobs
-		 WHERE categorized_job_title IS NOT NULL OR categorized_job_function IS NOT NULL`)
-	if err != nil {
+	if err := h.ensureFilterCacheFresh(c.Request.Context(), false); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
 		return
 	}
-	defer categoriesRows.Close()
-
-	jobCategoryQueryValues := map[string]string{}
-	jobCategoryParents := map[string][]string{}
-	addJobCategoryOption := func(label, queryValue string, parents []string) {
-		label = strings.TrimSpace(label)
-		queryValue = strings.TrimSpace(queryValue)
-		if label == "" || queryValue == "" {
-			return
-		}
-		if _, exists := jobCategoryQueryValues[label]; exists {
-			return
-		}
-		cleanParents := []string{}
-		for _, parent := range parents {
-			parent = strings.TrimSpace(parent)
-			if parent != "" {
-				cleanParents = append(cleanParents, parent)
-			}
-		}
-		jobCategoryQueryValues[label] = queryValue
-		jobCategoryParents[label] = cleanParents
-	}
-
-	for categoriesRows.Next() {
-		var title, function sql.NullString
-		if err := categoriesRows.Scan(&title, &function); err != nil {
-			continue
-		}
-		titleValue := strings.TrimSpace(title.String)
-		functionValue := strings.TrimSpace(function.String)
-		if functionValue != "" {
-			addJobCategoryOption(functionValue, functionValue, nil)
-		}
-		if titleValue != "" && !strings.EqualFold(titleValue, functionValue) {
-			parents := []string{}
-			if functionValue != "" {
-				parents = append(parents, functionValue)
-			}
-			addJobCategoryOption(titleValue, titleValue, parents)
-		}
-	}
-	categories := make([]string, 0, len(jobCategoryQueryValues))
-	for label := range jobCategoryQueryValues {
-		categories = append(categories, label)
-	}
-	sortStrings(categories)
-
-	locationRows, err := h.db.SQL.QueryContext(c.Request.Context(),
-		`SELECT location_us_states, location_countries
-		 FROM parsed_jobs
-		 WHERE location_us_states IS NOT NULL OR location_countries IS NOT NULL`)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
-		return
-	}
-	defer locationRows.Close()
-
-	locationQueryValues := map[string]string{}
-	locationParents := map[string][]string{}
-	stateToCountries := map[string]map[string]struct{}{}
-	addLocationOption := func(label, queryValue string, parents []string) {
-		label = strings.TrimSpace(label)
-		queryValue = strings.TrimSpace(queryValue)
-		if label == "" || queryValue == "" {
-			return
-		}
-		if _, exists := locationQueryValues[label]; exists {
-			return
-		}
-		cleanParents := []string{}
-		for _, parent := range parents {
-			parent = strings.TrimSpace(parent)
-			if parent != "" {
-				cleanParents = append(cleanParents, parent)
-			}
-		}
-		locationQueryValues[label] = queryValue
-		locationParents[label] = cleanParents
-	}
-	for locationRows.Next() {
-		var statesRaw, countriesRaw sql.NullString
-		if err := locationRows.Scan(&statesRaw, &countriesRaw); err != nil {
-			continue
-		}
-		stateValues := []string{}
-		countryValues := []string{}
-		if statesRaw.Valid && strings.TrimSpace(statesRaw.String) != "" {
-			_ = json.Unmarshal([]byte(statesRaw.String), &stateValues)
-		}
-		if countriesRaw.Valid && strings.TrimSpace(countriesRaw.String) != "" {
-			_ = json.Unmarshal([]byte(countriesRaw.String), &countryValues)
-		}
-		for idx := range stateValues {
-			stateValues[idx] = strings.TrimSpace(stateValues[idx])
-		}
-		stateValues = uniqueStrings(stateValues)
-		for _, state := range stateValues {
-			if isValidLocationOption(state) {
-				if _, ok := stateToCountries[state]; !ok {
-					stateToCountries[state] = map[string]struct{}{}
-				}
-				for _, country := range uniqueStrings(countryValues) {
-					country = strings.TrimSpace(country)
-					if isValidLocationOption(country) {
-						stateToCountries[state][country] = struct{}{}
-					}
-				}
-				parents := []string{}
-				for country := range stateToCountries[state] {
-					parents = append(parents, country)
-				}
-				sortStrings(parents)
-				addLocationOption(state, state, parents)
-			}
-		}
-		for _, country := range uniqueStrings(countryValues) {
-			if isValidLocationOption(country) {
-				addLocationOption(country, country, nil)
-			}
-		}
-	}
-	locations := make([]string, 0, len(locationQueryValues))
-	for label := range locationQueryValues {
-		locations = append(locations, label)
-	}
-	sortStrings(locations)
-
-	techStackSet := map[string]struct{}{}
-	rows, err := h.db.SQL.QueryContext(c.Request.Context(), `SELECT tech_stack FROM parsed_jobs WHERE tech_stack IS NOT NULL AND tech_stack != ''`)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
-		return
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var rawTechStack sql.NullString
-		if err := rows.Scan(&rawTechStack); err != nil || !rawTechStack.Valid || rawTechStack.String == "" {
-			continue
-		}
-		var values []string
-		if err := json.Unmarshal([]byte(rawTechStack.String), &values); err != nil {
-			continue
-		}
-		for _, value := range values {
-			trimmed := strings.TrimSpace(value)
-			if trimmed != "" {
-				techStackSet[trimmed] = struct{}{}
-			}
-		}
-	}
-	techStacks := make([]string, 0, len(techStackSet))
-	for value := range techStackSet {
-		techStacks = append(techStacks, value)
-	}
-	sortStrings(techStacks)
-	employmentTypes, err := distinctNonEmptyStrings(c, h.db, "employment_type")
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
-		return
-	}
-
 	minSalaryOptions := []int{}
 	for salary := minSalaryStart; salary <= minSalaryEnd; salary += minSalaryStep {
 		minSalaryOptions = append(minSalaryOptions, salary)
 	}
-
 	seniorities := []string{"entry", "junior", "mid", "senior", "lead"}
-
 	c.JSON(http.StatusOK, gin.H{
-		"job_categories":            categories,
-		"locations":                 locations,
-		"job_category_query_values": jobCategoryQueryValues,
-		"job_category_parents":      jobCategoryParents,
-		"location_query_values":     locationQueryValues,
-		"location_parents":          locationParents,
-		"employment_types":          employmentTypes,
-		"post_date_options":         postDateOptions,
-		"tech_stacks":               techStacks,
-		"min_salary_options":        minSalaryOptions,
-		"seniorities":               seniorities,
+		"job_category_parents": h.filterCache.jobCategoryParents,
+		"location_parents":     h.filterCache.locationParents,
+		"employment_types":     h.filterCache.employmentTypes,
+		"post_date_options":    postDateOptions,
+		"tech_stacks":          h.filterCache.techStacks,
+		"min_salary_options":   minSalaryOptions,
+		"seniorities":          seniorities,
 	})
 }
 

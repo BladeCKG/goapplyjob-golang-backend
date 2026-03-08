@@ -370,31 +370,20 @@ func TestJobsFilterOptionsIncludesHierarchyMetadata(t *testing.T) {
 
 	var body map[string]any
 	decodeBody(t, rec.Body.Bytes(), &body)
-	jobCategories := body["job_categories"].([]any)
-	if len(jobCategories) < 3 {
-		t.Fatalf("expected category hierarchy options, got %#v", body)
-	}
-	jobCategoryQueryValues := body["job_category_query_values"].(map[string]any)
 	jobCategoryParents := body["job_category_parents"].(map[string]any)
-	if jobCategoryQueryValues["Engineering"] != "Engineering" {
-		t.Fatalf("missing Engineering query value %#v", body)
+	if jobCategoryParents["Engineering"] != nil {
+		t.Fatalf("expected Engineering root parent to be nil %#v", body)
 	}
-	if len(jobCategoryParents["Data Engineer"].([]any)) == 0 || jobCategoryParents["Data Engineer"].([]any)[0] != "Engineering" {
+	if jobCategoryParents["Data Engineer"] != "Engineering" {
 		t.Fatalf("missing Data Engineer parent metadata %#v", body)
 	}
-
-	locations := body["locations"].([]any)
-	if len(locations) < 4 {
-		t.Fatalf("expected expanded location options %#v", body)
-	}
-	locationQueryValues := body["location_query_values"].(map[string]any)
 	locationParents := body["location_parents"].(map[string]any)
-	if locationQueryValues["Texas"] != "Texas" {
-		t.Fatalf("missing Texas query value %#v", body)
-	}
 	texasParents := locationParents["Texas"].([]any)
 	if len(texasParents) < 1 || texasParents[0] != "United States" {
 		t.Fatalf("unexpected Texas parent metadata %#v", body)
+	}
+	if len(locationParents["United States"].([]any)) != 0 {
+		t.Fatalf("expected country root to have no parents %#v", body)
 	}
 }
 

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"time"
@@ -25,6 +26,9 @@ func NewRouter(cfg config.Config, db *database.DB) *gin.Engine {
 	authHandler := auth.NewHandler(cfg, db)
 	adminHandler := admin.NewHandler(db, authHandler)
 	jobsHandler := jobs.NewHandler(cfg, db, authHandler)
+	if err := jobsHandler.WarmFilterCache(context.Background()); err != nil {
+		log.Printf("failed to warm jobs filter cache: %v", err)
+	}
 	jobActionsHandler := jobactions.NewHandler(db, authHandler)
 	pricingHandler := pricing.NewHandler(cfg, db, authHandler)
 	employerHandler := employer.NewHandler(cfg, db, authHandler)
