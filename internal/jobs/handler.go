@@ -21,10 +21,11 @@ import (
 )
 
 type Handler struct {
-	cfg         config.Config
-	db          *database.DB
-	auth        *auth.Handler
-	filterCache filterOptionsCache
+	cfg                       config.Config
+	db                        *database.DB
+	auth                      *auth.Handler
+	filterCache               filterOptionsCache
+	filterCacheRefreshSeconds int
 }
 
 type filterOptionsCache struct {
@@ -34,19 +35,22 @@ type filterOptionsCache struct {
 	locationParents    map[string][]string
 	techStacks         []string
 	employmentTypes    []string
+	lastRefreshAt      time.Time
+	refreshRunning     bool
 }
 
 const (
-	defaultSalaryType = "yearly"
-	minSalaryStart    = 30000
-	minSalaryEnd      = 300000
-	minSalaryStep     = 10000
-	hoursPerYear      = 2080.0
-	daysPerYear       = 260.0
-	weeksPerYear      = 52.0
-	biweeksPerYear    = 26.0
-	monthsPerYear     = 12.0
-	minutesPerYear    = hoursPerYear * 60.0
+	defaultSalaryType                = "yearly"
+	minSalaryStart                   = 30000
+	minSalaryEnd                     = 300000
+	minSalaryStep                    = 10000
+	hoursPerYear                     = 2080.0
+	daysPerYear                      = 260.0
+	weeksPerYear                     = 52.0
+	biweeksPerYear                   = 26.0
+	monthsPerYear                    = 12.0
+	minutesPerYear                   = hoursPerYear * 60.0
+	defaultFilterCacheRefreshSeconds = 300
 )
 
 var (
@@ -188,9 +192,10 @@ type companyProfileItem struct {
 
 func NewHandler(cfg config.Config, db *database.DB, authHandler *auth.Handler) *Handler {
 	return &Handler{
-		cfg:  cfg,
-		db:   db,
-		auth: authHandler,
+		cfg:                       cfg,
+		db:                        db,
+		auth:                      authHandler,
+		filterCacheRefreshSeconds: max(config.GetenvInt("FILTER_OPTIONS_CACHE_REFRESH_SECONDS", defaultFilterCacheRefreshSeconds), 1),
 		filterCache: filterOptionsCache{
 			jobCategoryParents: map[string]any{},
 			locationParents:    map[string][]string{},
@@ -591,6 +596,11 @@ func (h *Handler) refreshFilterCache(ctx context.Context) error {
 func (h *Handler) ensureFilterCacheFresh(ctx context.Context, force bool) error {
 	h.filterCache.mu.Lock()
 	defer h.filterCache.mu.Unlock()
+	if !force && !h.filterCache.lastRefreshAt.IsZero() {
+		if time.Since(h.filterCache.lastRefreshAt) < time.Duration(h.filterCacheRefreshSeconds)*time.Second {
+			return nil
+		}
+	}
 	maxID, err := h.getMaxParsedJobID(ctx)
 	if err != nil {
 		return err
@@ -602,7 +612,29 @@ func (h *Handler) ensureFilterCacheFresh(ctx context.Context, force bool) error 
 		return err
 	}
 	h.filterCache.maxParsedJobID = maxID
+	h.filterCache.lastRefreshAt = time.Now()
 	return nil
+}
+
+func (h *Handler) scheduleFilterCacheRefresh(force bool) {
+	h.filterCache.mu.Lock()
+	if h.filterCache.refreshRunning {
+		h.filterCache.mu.Unlock()
+		return
+	}
+	h.filterCache.refreshRunning = true
+	h.filterCache.mu.Unlock()
+
+	go func() {
+		defer func() {
+			h.filterCache.mu.Lock()
+			h.filterCache.refreshRunning = false
+			h.filterCache.mu.Unlock()
+		}()
+		if err := h.ensureFilterCacheFresh(context.Background(), force); err != nil {
+			fmt.Printf("failed refreshing jobs filter cache: %v\n", err)
+		}
+	}()
 }
 
 func (h *Handler) WarmFilterCache(ctx context.Context) error {
@@ -610,10 +642,7 @@ func (h *Handler) WarmFilterCache(ctx context.Context) error {
 }
 
 func (h *Handler) filterOptions(c *gin.Context) {
-	if err := h.ensureFilterCacheFresh(c.Request.Context(), false); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
-		return
-	}
+	h.scheduleFilterCacheRefresh(false)
 	minSalaryOptions := []int{}
 	for salary := minSalaryStart; salary <= minSalaryEnd; salary += minSalaryStep {
 		minSalaryOptions = append(minSalaryOptions, salary)
