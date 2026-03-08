@@ -1,0 +1,17 @@
+DROP TABLE IF EXISTS employer_job_audit_events;
+DROP TABLE IF EXISTS employer_jobs;
+DROP TABLE IF EXISTS employer_organization_members;
+DROP TABLE IF EXISTS employer_organizations;
+DROP TABLE IF EXISTS user_job_actions;
+DROP TABLE IF EXISTS pricing_payments;
+DROP TABLE IF EXISTS user_subscriptions;
+DROP TABLE IF EXISTS pricing_plans;
+DROP TABLE IF EXISTS auth_sessions;
+DROP TABLE IF EXISTS auth_password_credentials;
+DROP TABLE IF EXISTS auth_verification_codes;
+DROP TABLE IF EXISTS auth_users;
+DROP TABLE IF EXISTS parsed_jobs;
+DROP TABLE IF EXISTS parsed_companies;
+DROP TABLE IF EXISTS watcher_payloads;
+DROP TABLE IF EXISTS watcher_states;
+DROP TABLE IF EXISTS raw_us_jobs;

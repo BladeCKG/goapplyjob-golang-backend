@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -99,4 +100,27 @@ func NormalizeUSStateName(value string) string {
 		return byName
 	}
 	return title(normalized)
+}
+
+func USStateNames() []string {
+	load()
+	seen := map[string]string{}
+	for _, value := range data.USStates.ByName {
+		cleaned := strings.TrimSpace(value)
+		if cleaned == "" {
+			continue
+		}
+		normalized := strings.ToLower(cleaned)
+		if _, ok := seen[normalized]; !ok {
+			seen[normalized] = cleaned
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for _, name := range seen {
+		out = append(out, name)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return strings.ToLower(out[i]) < strings.ToLower(out[j])
+	})
+	return out
 }

@@ -15,6 +15,20 @@ if (-not (Test-Path ".env") -and (Test-Path ".env.example")) {
     Write-Host "Created .env from .env.example. Review values before production use."
 }
 
+$dbUrl = $env:DATABASE_URL
+if ([string]::IsNullOrWhiteSpace($dbUrl) -and (Test-Path ".env")) {
+    $line = Get-Content ".env" | Where-Object { $_ -match "^DATABASE_URL=" } | Select-Object -Last 1
+    if ($null -ne $line) {
+        $dbUrl = ($line -replace "^DATABASE_URL=", "").Trim()
+    }
+}
+if ([string]::IsNullOrWhiteSpace($dbUrl)) {
+    throw "DATABASE_URL is required and must point to PostgreSQL."
+}
+if (-not ($dbUrl -match "^postgres(ql)?://")) {
+    throw "DATABASE_URL must be a PostgreSQL URL (postgres:// or postgresql://). Current value: $dbUrl"
+}
+
 New-Item -ItemType Directory -Force -Path "logs" | Out-Null
 
 go run ./cmd/migrate

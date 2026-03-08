@@ -30,7 +30,7 @@ Example screenshot of OTEL tracing captured and shown in Jeager UI:
 * [Gin](https://gin-gonic.com/) as a web framework.
 * [Golangci-lint](https://golangci-lint.run/) for linting and static code analysis.
 * [govulncheck](https://go.dev/security/vuln/) for package vulnerability analysis.
-* [Goose](https://github.com/pressly/goose) for database migrations.
+* [golang-migrate](https://github.com/golang-migrate/migrate) for versioned database migrations.
 * [sqlc](https://sqlc.dev/) for database access.
 * [Zerolog](https://zerolog.io/) for structured and leveled logging.
 
@@ -110,6 +110,7 @@ cd <backend-directory>
 What these scripts do:
 
 * create `.env` from `.env.example` if missing
+* validate `DATABASE_URL` is PostgreSQL
 * ensure `logs/` exists
 * run `go run ./cmd/migrate`
 * start the Go API and watcher commands in background
@@ -122,11 +123,11 @@ ENABLED_SOURCES=remoterocketship
 ENABLED_SOURCES=remoterocketship,builtin
 ```
 
-For a fresh start:
+For a fresh start, recreate your Postgres DB/schema and then run:
 
 ```bash
-rm -f page_extract.db
 cp .env.example .env
+go run ./cmd/migrate
 ```
 
 Then set `ENABLED_SOURCES` in `.env` before starting workers so the first watcher/import cycle only creates the sources you want.
@@ -211,13 +212,22 @@ Required repository secrets:
 
 ### Adding new database migrations
 
-This expects `goose` to be installed and it can be found from the `$PATH`:
+PostgreSQL migrations are versioned SQL files under:
+
+* [internal/database/migrations](internal/database/migrations)
+
+Add a new pair:
+
+* `00000N_description.up.sql`
+* `00000N_description.down.sql`
+
+Then apply:
 
 ```bash
-make name=create-shop migrate-add
+go run ./cmd/migrate
 ```
 
-The newly added migration can be found under [sql/schemas/](sql/schemas/).
+`golang-migrate` tracks current version in the database and only runs newer scripts.
 
 ## TODO
 

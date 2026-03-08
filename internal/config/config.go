@@ -74,7 +74,7 @@ func Load() Config {
 	return Config{
 		HTTPHost:                      getenv("HTTP_HOSTNAME", "0.0.0.0"),
 		HTTPPort:                      getenv("HTTP_PORT", "8080"),
-		DatabaseURL:                   normalizeDatabaseURL(getenv("DATABASE_URL", "file:page_extract.db?_foreign_keys=on")),
+		DatabaseURL:                   normalizeDatabaseURL(getenv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable")),
 		AuthCodeTTLMinutes:            getenvInt("AUTH_CODE_TTL_MINUTES", 10),
 		AuthSessionTTLMin:             getenvInt("AUTH_SESSION_TTL_MINUTES", 60*24*7),
 		AuthMagicLinkBaseURL:          getenv("AUTH_MAGIC_LINK_BASE_URL", "http://localhost:3000/auth/verify"),

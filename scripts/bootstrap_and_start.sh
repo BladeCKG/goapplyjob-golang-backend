@@ -14,6 +14,20 @@ if [[ ! -f ".env" && -f ".env.example" ]]; then
   echo "Created .env from .env.example. Review values before production use."
 fi
 
+db_url="${DATABASE_URL:-}"
+if [[ -z "$db_url" && -f ".env" ]]; then
+  db_url="$(grep -E '^DATABASE_URL=' .env | tail -n1 | cut -d'=' -f2- || true)"
+fi
+if [[ -z "$db_url" ]]; then
+  echo "DATABASE_URL is required and must point to PostgreSQL."
+  exit 1
+fi
+if [[ ! "$db_url" =~ ^postgres(ql)?:// ]]; then
+  echo "DATABASE_URL must be a PostgreSQL URL (postgres:// or postgresql://)."
+  echo "Current value: $db_url"
+  exit 1
+fi
+
 mkdir -p logs
 
 go run ./cmd/migrate
