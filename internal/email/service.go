@@ -20,7 +20,7 @@ const (
 	defaultMailtrap = "https://send.api.mailtrap.io/api/send"
 )
 
-//go:embed templates/verification_email.html
+//go:embed templates/verification_email.html templates/verification_email_light.html
 var templates embed.FS
 
 type Service struct {
@@ -38,7 +38,7 @@ func NewService(cfg config.Config) *Service {
 }
 
 func (s *Service) BuildVerificationEmailHTML(siteName, siteURL, code string, ttlMinutes int, magicLink string) string {
-	templateBody, err := templates.ReadFile("templates/verification_email.html")
+	templateBody, err := templates.ReadFile("templates/verification_email_light.html")
 	if err != nil {
 		return "<html><body><h2>" + siteName + " verification code</h2><p>Your code is: <strong>" + code + "</strong></p><p>It expires in " + fmt.Sprintf("%d", ttlMinutes) + " minutes.</p><p><a href=\"" + magicLink + "\">Log In Instantly</a></p></body></html>"
 	}
