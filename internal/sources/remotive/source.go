@@ -54,7 +54,8 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 	}
 	descriptionHTML := stringValue(jobPosting["description"])
 	descriptionSections := extractDescriptionSections(descriptionHTML)
-	roleDescription := firstNonEmpty(descriptionSections["role_description"], stringValue(toPlainText(descriptionHTML)))
+	roleDescription := descriptionHTML
+	roleDescriptionText := firstNonEmpty(descriptionSections["role_description"], stringValue(toPlainText(descriptionHTML)))
 	roleRequirements := nilIfEmpty(descriptionSections["requirements"])
 	benefitsText := nilIfEmpty(descriptionSections["benefits"])
 	companyTagline := nilIfEmpty(descriptionSections["company_description"])
@@ -68,8 +69,8 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 		"roleDescription":              nilIfEmpty(roleDescription),
 		"roleRequirements":             roleRequirements,
 		"benefits":                     benefitsText,
-		"jobDescriptionSummary":        nilIfEmpty(trimDescriptionSummary(roleDescription)),
-		"twoLineJobDescriptionSummary": nilIfEmpty(trimDescriptionSummary(roleDescription)),
+		"jobDescriptionSummary":        nilIfEmpty(trimDescriptionSummary(roleDescriptionText)),
+		"twoLineJobDescriptionSummary": nilIfEmpty(trimDescriptionSummary(roleDescriptionText)),
 		"descriptionLanguage":          "en",
 		"employmentType":               normalizeEmploymentType(stringValue(jobPosting["employmentType"])),
 		"locationType":                 "remote",

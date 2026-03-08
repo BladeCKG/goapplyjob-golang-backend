@@ -1,6 +1,9 @@
 package remotive
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseImportRowsFromRemotivePayload(t *testing.T) {
 	rows, skipped := ParseImportRows(`[{"url":"https://remotive.com/remote-jobs/software-dev/backend-engineer-1234","scrapt_Date":"2026-02-18T03:21:08Z"}]`)
@@ -42,6 +45,10 @@ func TestParseRawHTMLExtractsSectionsAndSalaryHandling(t *testing.T) {
 	payload := ParseRawHTML(htmlText, "https://remotive.com/remote/jobs/software/senior-backend-engineer-9990001")
 	if payload["roleDescription"] == nil || payload["roleRequirements"] == nil || payload["benefits"] == nil {
 		t.Fatalf("expected extracted sections, got %#v", payload)
+	}
+	roleDescription, _ := payload["roleDescription"].(string)
+	if roleDescription == "" || !strings.Contains(roleDescription, "<p") {
+		t.Fatalf("expected raw html role description, got %#v", payload["roleDescription"])
 	}
 	if payload["salaryRange"] != nil {
 		t.Fatalf("expected nil salaryRange when base salary is zero, got %#v", payload["salaryRange"])
