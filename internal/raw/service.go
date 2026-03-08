@@ -16,6 +16,7 @@ import (
 )
 
 const statusNotFound = 404
+const statusTooManyRequests = 429
 const (
 	sourceRemoteRocketship = "remoterocketship"
 	sourceBuiltin          = "builtin"
@@ -139,7 +140,19 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	log.Printf("raw-us-job-worker picked_unready_jobs=%d", len(jobs))
 
 	processed := 0
+	throttledSources := map[string]struct{}{}
 	for _, job := range jobs {
+		if _, throttled := throttledSources[strings.TrimSpace(strings.ToLower(job.source))]; throttled {
+			log.Printf("raw-us-job-worker source_throttled_skip job_id=%d source=%s reason=prior_429_in_cycle", job.id, job.source)
+			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET retry_count = retry_count + 1 WHERE id = ?`, job.id)
+				return err
+			}); err != nil {
+				return processed, err
+			}
+			processed++
+			continue
+		}
 		targetURL := toTargetJobURLForSource(job.source, job.url)
 		log.Printf("raw-us-job-worker fetch_start job_id=%d source=%s target_url=%s", job.id, job.source, targetURL)
 		html, statusCode, err := s.ReadHTML(targetURL)
@@ -151,6 +164,15 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			log.Printf("raw-us-job-worker fetch_result job_id=%d status=404", job.id)
 			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
 				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_skippable = 1, retry_count = retry_count + 1 WHERE id = ?`, job.id)
+				return err
+			}); err != nil {
+				return processed, err
+			}
+		case statusCode == statusTooManyRequests:
+			log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s status=429 retry_later", job.id, job.source)
+			throttledSources[strings.TrimSpace(strings.ToLower(job.source))] = struct{}{}
+			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET retry_count = retry_count + 1 WHERE id = ?`, job.id)
 				return err
 			}); err != nil {
 				return processed, err

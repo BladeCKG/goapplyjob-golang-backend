@@ -156,3 +156,51 @@ func TestProcessPendingSkipsReadyWhenParserRequestsRetry(t *testing.T) {
 		t.Fatalf("expected raw_json to stay NULL, got %#v", rawJSON.String)
 	}
 }
+
+func TestProcessPendingSkipsRemainingSourceJobsAfter429(t *testing.T) {
+	db, err := database.Open("file:test_raw_429_throttle?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES
+		('remoterocketship', 'https://remote.example/job/1', '2026-02-12T10:00:00Z', 0, 0, 0, 0, NULL),
+		('remoterocketship', 'https://remote.example/job/2', '2026-02-12T09:00:00Z', 0, 0, 0, 0, NULL)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(db)
+	fetchCount := 0
+	svc.ReadHTML = func(targetURL string) (string, int, error) {
+		fetchCount++
+		return "", 429, nil
+	}
+
+	processed, err := svc.ProcessPending(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 2 {
+		t.Fatalf("expected two processed jobs, got %d", processed)
+	}
+	if fetchCount != 1 {
+		t.Fatalf("expected one fetch call due source throttling, got %d", fetchCount)
+	}
+
+	rows, err := db.SQL.QueryContext(context.Background(), `SELECT retry_count, is_ready FROM raw_us_jobs WHERE source='remoterocketship' ORDER BY id ASC`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var retryCount, isReady int
+		if err := rows.Scan(&retryCount, &isReady); err != nil {
+			t.Fatal(err)
+		}
+		if retryCount != 1 || isReady != 0 {
+			t.Fatalf("unexpected row state retry_count=%d is_ready=%d", retryCount, isReady)
+		}
+	}
+}
