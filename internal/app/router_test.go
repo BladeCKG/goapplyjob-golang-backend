@@ -40,6 +40,28 @@ func TestJobsPublicAccess(t *testing.T) {
 	}
 }
 
+func TestDebugHiringCafeTotalCountEndpoint(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"total":321}`))
+	}))
+	defer server.Close()
+	t.Setenv("WATCH_HIRINGCAFE_TOTAL_COUNT_URL", server.URL)
+
+	req := httptest.NewRequest(http.MethodGet, "/debug/hiringcafe/total-count", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	if body["status_code"].(float64) != 200 {
+		t.Fatalf("unexpected debug status payload %#v", body)
+	}
+}
+
 func TestAuthAndJobsFlow(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
