@@ -540,14 +540,18 @@ func parsedJobFilterRowsEqual(left, right sql.NullInt64) bool {
 
 func (h *Handler) refreshFilterCache(ctx context.Context) error {
 	rows, err := h.db.SQL.QueryContext(ctx,
-		`SELECT categorized_job_title, categorized_job_function, location_us_states, location_countries, tech_stack, employment_type
-		 FROM parsed_jobs
-		 WHERE categorized_job_title IS NOT NULL
-		    OR categorized_job_function IS NOT NULL
-		    OR location_us_states IS NOT NULL
-		    OR location_countries IS NOT NULL
-		    OR tech_stack IS NOT NULL
-		    OR employment_type IS NOT NULL`)
+		`SELECT p.categorized_job_title, p.categorized_job_function, p.location_us_states, p.location_countries, p.tech_stack, p.employment_type
+		 FROM parsed_jobs p
+		 JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
+		 WHERE r.source = ?
+		   AND (
+		     p.categorized_job_title IS NOT NULL
+		     OR p.categorized_job_function IS NOT NULL
+		     OR p.location_us_states IS NOT NULL
+		     OR p.location_countries IS NOT NULL
+		     OR p.tech_stack IS NOT NULL
+		     OR p.employment_type IS NOT NULL
+		   )`, "remoterocketship")
 	if err != nil {
 		return err
 	}
