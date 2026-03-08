@@ -956,6 +956,40 @@ func TestEmployerPostingFlow(t *testing.T) {
 	}
 }
 
+func TestJobActionsFlow(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJob(t, db, 7001, "https://example.com/action-1", "Austin", "Texas", 100, 130, true, time.Now().UTC())
+	code := requestLoginCode(t, router, "actions@example.com")
+	cookie := verifyLoginCode(t, router, "actions@example.com", code)
+
+	updateBody, _ := json.Marshal(map[string]any{"is_saved": true, "is_hidden": false})
+	updateReq := httptest.NewRequest(http.MethodPut, "/job-actions/1", bytes.NewReader(updateBody))
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateReq.AddCookie(cookie)
+	updateRec := httptest.NewRecorder()
+	router.ServeHTTP(updateRec, updateReq)
+	assertStatus(t, updateRec.Code, http.StatusOK)
+
+	getReq := httptest.NewRequest(http.MethodGet, "/job-actions?job_ids=1,2", nil)
+	getReq.AddCookie(cookie)
+	getRec := httptest.NewRecorder()
+	router.ServeHTTP(getRec, getReq)
+	assertStatus(t, getRec.Code, http.StatusOK)
+
+	var payload map[string]any
+	decodeBody(t, getRec.Body.Bytes(), &payload)
+	items := payload["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("expected one action item, got %#v", payload)
+	}
+	first := items[0].(map[string]any)
+	if first["job_id"].(float64) != 1 || first["is_saved"] != true || first["is_hidden"] != false {
+		t.Fatalf("unexpected action payload %#v", first)
+	}
+}
+
 func testRouter(t *testing.T) (*gin.Engine, *database.DB) {
 	t.Helper()
 	cfg := config.Load()

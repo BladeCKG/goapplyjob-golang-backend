@@ -169,6 +169,19 @@ func (db *DB) Migrate(ctx context.Context) error {
             FOREIGN KEY(user_id) REFERENCES auth_users(id),
             FOREIGN KEY(pricing_plan_id) REFERENCES pricing_plans(id)
         );`,
+		`CREATE TABLE IF NOT EXISTS user_job_actions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            parsed_job_id INTEGER NOT NULL,
+            is_applied INTEGER NOT NULL DEFAULT 0,
+            is_saved INTEGER NOT NULL DEFAULT 0,
+            is_hidden INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(user_id, parsed_job_id),
+            FOREIGN KEY(user_id) REFERENCES auth_users(id) ON DELETE CASCADE,
+            FOREIGN KEY(parsed_job_id) REFERENCES parsed_jobs(id) ON DELETE CASCADE
+        );`,
 		`CREATE TABLE IF NOT EXISTS employer_organizations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -256,6 +269,15 @@ func (db *DB) Migrate(ctx context.Context) error {
 	}
 	if _, err := db.SQL.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_parsed_jobs_salary_max_usd ON parsed_jobs (salary_max_usd)`); err != nil {
 		return fmt.Errorf("create parsed_jobs salary_max_usd index: %w", err)
+	}
+	if _, err := db.SQL.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_user_job_actions_user_id ON user_job_actions (user_id)`); err != nil {
+		return fmt.Errorf("create user_job_actions user_id index: %w", err)
+	}
+	if _, err := db.SQL.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_user_job_actions_parsed_job_id ON user_job_actions (parsed_job_id)`); err != nil {
+		return fmt.Errorf("create user_job_actions parsed_job_id index: %w", err)
+	}
+	if _, err := db.SQL.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_user_job_actions_updated_at ON user_job_actions (updated_at)`); err != nil {
+		return fmt.Errorf("create user_job_actions updated_at index: %w", err)
 	}
 	if _, err := db.SQL.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_employer_organizations_name ON employer_organizations (name)`); err != nil {
 		return fmt.Errorf("create employer_organizations name index: %w", err)

@@ -9,6 +9,7 @@ import (
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/employer"
+	"goapplyjob-golang-backend/internal/jobactions"
 	"goapplyjob-golang-backend/internal/jobs"
 	"goapplyjob-golang-backend/internal/pricing"
 
@@ -22,6 +23,7 @@ func NewRouter(cfg config.Config, db *database.DB) *gin.Engine {
 
 	authHandler := auth.NewHandler(cfg, db)
 	jobsHandler := jobs.NewHandler(cfg, db, authHandler)
+	jobActionsHandler := jobactions.NewHandler(db, authHandler)
 	pricingHandler := pricing.NewHandler(cfg, db, authHandler)
 	employerHandler := employer.NewHandler(cfg, db, authHandler)
 
@@ -38,6 +40,7 @@ func NewRouter(cfg config.Config, db *database.DB) *gin.Engine {
 
 	authHandler.Register(router)
 	employerHandler.Register(router)
+	jobActionsHandler.Register(router)
 	jobsHandler.Register(router)
 	pricingHandler.Register(router)
 
