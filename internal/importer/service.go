@@ -253,6 +253,15 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 		}
 		defer tx.Rollback()
 
+		type pendingUpdate struct {
+			url         string
+			row         SitemapRow
+			existingID  int64
+			isReady     int
+			rawJSONText any
+		}
+		pendingUpdates := make([]pendingUpdate, 0, len(buffer))
+
 		for url, row := range buffer {
 			postDate := row.PostDate
 			var existingID int64
@@ -284,19 +293,59 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 			if err == nil && !postDate.After(existingDT) {
 				continue
 			}
-			if _, err := tx.Exec(`DELETE FROM parsed_jobs WHERE raw_us_job_id = ?`, existingID); err != nil {
+			pendingUpdates = append(pendingUpdates, pendingUpdate{
+				url:         url,
+				row:         row,
+				existingID:  existingID,
+				isReady:     isReady,
+				rawJSONText: rawJSONText,
+			})
+		}
+
+		parsedByRawID := map[int64]struct{}{}
+		if len(pendingUpdates) > 0 {
+			placeholders := make([]string, 0, len(pendingUpdates))
+			args := make([]any, 0, len(pendingUpdates))
+			for _, candidate := range pendingUpdates {
+				placeholders = append(placeholders, "?")
+				args = append(args, candidate.existingID)
+			}
+			parsedRows, err := tx.Query(`SELECT raw_us_job_id FROM parsed_jobs WHERE raw_us_job_id IN (`+strings.Join(placeholders, ", ")+`)`, args...)
+			if err != nil {
+				return err
+			}
+			for parsedRows.Next() {
+				var rawID int64
+				if err := parsedRows.Scan(&rawID); err == nil {
+					parsedByRawID[rawID] = struct{}{}
+				}
+			}
+			parsedRows.Close()
+		}
+
+		for _, candidate := range pendingUpdates {
+			if _, hasParsed := parsedByRawID[candidate.existingID]; hasParsed {
+				if _, err := tx.Exec(`DELETE FROM parsed_jobs WHERE raw_us_job_id = ?`, candidate.existingID); err != nil {
+					failedDB++
+					failedRows[candidate.url] = candidate.row
+					continue
+				}
+			}
+			if _, err := tx.Exec(`DELETE FROM raw_us_jobs WHERE id = ?`, candidate.existingID); err != nil {
 				failedDB++
-				failedRows[url] = row
+				failedRows[candidate.url] = candidate.row
 				continue
 			}
-			if _, err := tx.Exec(`DELETE FROM raw_us_jobs WHERE id = ?`, existingID); err != nil {
+			if _, err := tx.Exec(
+				`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, retry_count, raw_json) VALUES (?, ?, ?, ?, 0, 0, ?)`,
+				source,
+				candidate.url,
+				candidate.row.PostDate.Format(time.RFC3339),
+				candidate.isReady,
+				candidate.rawJSONText,
+			); err != nil {
 				failedDB++
-				failedRows[url] = row
-				continue
-			}
-			if _, err := tx.Exec(`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, retry_count, raw_json) VALUES (?, ?, ?, ?, 0, 0, ?)`, source, url, postDate.Format(time.RFC3339), isReady, rawJSONText); err != nil {
-				failedDB++
-				failedRows[url] = row
+				failedRows[candidate.url] = candidate.row
 				continue
 			}
 			updated++
