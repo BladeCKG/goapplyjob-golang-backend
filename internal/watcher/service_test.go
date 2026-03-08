@@ -268,14 +268,26 @@ func TestHiringCafeWatcherUpsertsJobsWithoutImporter(t *testing.T) {
 	service.Config.HiringCafeTotalCountURL = "https://hiring.cafe/api/search-jobs/get-total-count?s=abc"
 	service.Config.HiringCafePageSize = 1
 	service.Config.EnabledSources = map[string]struct{}{sourceHiringCafe: {}}
-	service.FetchText = func(rawURL string) (string, error) {
+	service.FetchJSONHTTP = func(rawURL string) (map[string]any, error) {
 		switch rawURL {
 		case "https://hiring.cafe/api/search-jobs/get-total-count?s=abc":
-			return `{"total":1}`, nil
+			return map[string]any{"total": float64(1)}, nil
 		case "https://hiring.cafe/api/search-jobs?page=0&s=abc&size=1":
-			return `{"results":[{"requisition_id":"abc123","v5_processed_job_data":{"estimated_publish_date":"2026-02-20T20:14:34Z","job_title_raw":"Software Engineer","commitment":["Full Time"]},"apply_url":"https://hiring.cafe/viewjob/abc123"}]}`, nil
+			return map[string]any{
+				"results": []any{
+					map[string]any{
+						"requisition_id": "abc123",
+						"v5_processed_job_data": map[string]any{
+							"estimated_publish_date": "2026-02-20T20:14:34Z",
+							"job_title_raw":          "Software Engineer",
+							"commitment":             []any{"Full Time"},
+						},
+						"apply_url": "https://hiring.cafe/viewjob/abc123",
+					},
+				},
+			}, nil
 		default:
-			return "", errors.New("unexpected URL: " + rawURL)
+			return nil, errors.New("unexpected URL: " + rawURL)
 		}
 	}
 

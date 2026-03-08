@@ -8,7 +8,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
+	"net/http"
 	"net/url"
 	"regexp"
 	"sort"
@@ -59,12 +61,13 @@ type FetchSampleFunc func() ([]byte, error)
 type FetchFullFunc func() ([]byte, error)
 
 type Service struct {
-	Config      Config
-	DB          *database.DB
-	FetchSample FetchSampleFunc
-	FetchFull   FetchFullFunc
-	FetchText   func(string) (string, error)
-	status      map[string]any
+	Config        Config
+	DB            *database.DB
+	FetchSample   FetchSampleFunc
+	FetchFull     FetchFullFunc
+	FetchText     func(string) (string, error)
+	FetchJSONHTTP func(string) (map[string]any, error)
+	status        map[string]any
 }
 
 func New(config Config, db *database.DB) *Service {
@@ -94,6 +97,29 @@ func New(config Config, db *database.DB) *Service {
 	svc.FetchSample = func() ([]byte, error) { return nil, errors.New("fetch sample not configured") }
 	svc.FetchFull = func() ([]byte, error) { return nil, errors.New("fetch full not configured") }
 	svc.FetchText = func(string) (string, error) { return "", errors.New("fetch text not configured") }
+	svc.FetchJSONHTTP = func(rawURL string) (map[string]any, error) {
+		req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("User-Agent", "Mozilla/5.0")
+		client := &http.Client{Timeout: time.Duration(svc.Config.TimeoutSeconds * float64(time.Second))}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		payload := map[string]any{}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return map[string]any{}, nil
+		}
+		return payload, nil
+	}
 	return svc
 }
 
@@ -436,7 +462,7 @@ func (s *Service) runOnceHiringCafe() error {
 	previousFirstJobURL, _ := statePayload["first_job_url"].(string)
 	previousFirstDT := parseISOTime(previousFirstJobPostDate)
 
-	totalCountPayload, err := s.fetchJSON(s.Config.HiringCafeTotalCountURL)
+	totalCountPayload, err := s.FetchJSONHTTP(s.Config.HiringCafeTotalCountURL)
 	if err != nil {
 		return err
 	}
@@ -465,7 +491,7 @@ func (s *Service) runOnceHiringCafe() error {
 
 	for page := 0; page < totalPages; page++ {
 		pageURL := hiringcafe.BuildSearchAPIURL(s.Config.HiringCafeSearchAPIURL, page, s.Config.HiringCafePageSize)
-		response, err := s.fetchJSON(pageURL)
+		response, err := s.FetchJSONHTTP(pageURL)
 		if err != nil {
 			return err
 		}
@@ -692,18 +718,6 @@ func (s *Service) findExistingSourceURLs(source string, urls []string) (map[stri
 		out[rowURL] = struct{}{}
 	}
 	return out, rows.Err()
-}
-
-func (s *Service) fetchJSON(rawURL string) (map[string]any, error) {
-	text, err := s.FetchText(rawURL)
-	if err != nil {
-		return nil, err
-	}
-	payload := map[string]any{}
-	if err := json.Unmarshal([]byte(text), &payload); err != nil {
-		return map[string]any{}, nil
-	}
-	return payload, nil
 }
 
 func (s *Service) upsertHiringCafeJobs(jobs []hiringcafe.NormalizedJob) (int, int, error) {
