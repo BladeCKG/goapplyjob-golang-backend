@@ -22,6 +22,50 @@
       "env": {
         "WORKERS_DEBUG": "true"
       }
+    },
+    {
+      "name": "Importer (cmd/importer)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/importer/main.go",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "WORKERS_DEBUG": "true"
+      }
+    },
+    {
+      "name": "Parsed Freshness (cmd/parsedfreshness)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/parsedfreshness/main.go",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "WORKERS_DEBUG": "true"
+      }
+    },
+    {
+      "name": "Skippable Recheck (cmd/skippablerecheck)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/skippablerecheck/main.go",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "WORKERS_DEBUG": "true"
+      }
+    }
+  ],
+  "compounds": [
+    {
+      "name": "All Workers",
+      "configurations": [
+        "Watcher (cmd/watcher)",
+        "Importer (cmd/importer)",
+        "Parsed Freshness (cmd/parsedfreshness)",
+        "Skippable Recheck (cmd/skippablerecheck)"
+      ]
     }
   ]
 }
