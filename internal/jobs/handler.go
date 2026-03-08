@@ -143,6 +143,8 @@ func NewHandler(cfg config.Config, db *database.DB, authHandler *auth.Handler) *
 func (h *Handler) Register(router gin.IRouter) {
 	router.GET("/jobs/filter-options", h.filterOptions)
 	router.GET("/jobs/metrics", h.metrics)
+	router.GET("/jobs/related-categories", h.relatedCategories)
+	router.GET("/jobs/top-categories", h.topCategories)
 	router.GET("/jobs/sitemap", h.sitemap)
 	router.GET("/job/:jobID", h.jobDetail)
 	router.GET("/jobs/:jobID", h.jobDetail)
@@ -540,6 +542,99 @@ func (h *Handler) sitemap(c *gin.Context) {
 		"total":    total,
 		"items":    items,
 	})
+}
+
+func (h *Handler) relatedCategories(c *gin.Context) {
+	category := strings.TrimSpace(c.Query("category"))
+	if category == "" {
+		c.JSON(http.StatusOK, gin.H{"items": []any{}})
+		return
+	}
+	limit := max(parseIntDefault(c.Query("limit"), 8), 1)
+	if limit > 20 {
+		limit = 20
+	}
+
+	var topFunction sql.NullString
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(),
+		`SELECT categorized_job_function
+		 FROM parsed_jobs
+		 WHERE categorized_job_title = ?
+		   AND categorized_job_function IS NOT NULL
+		   AND categorized_job_function != ''
+		 GROUP BY categorized_job_function
+		 ORDER BY COUNT(id) DESC, categorized_job_function ASC
+		 LIMIT 1`, category).Scan(&topFunction); err != nil || !topFunction.Valid || strings.TrimSpace(topFunction.String) == "" {
+		c.JSON(http.StatusOK, gin.H{"items": []any{}})
+		return
+	}
+	rows, err := h.db.SQL.QueryContext(c.Request.Context(),
+		`SELECT categorized_job_title, COUNT(id) AS score
+		 FROM parsed_jobs
+		 WHERE categorized_job_title IS NOT NULL
+		   AND categorized_job_title != ''
+		   AND categorized_job_function = ?
+		   AND categorized_job_title != ?
+		 GROUP BY categorized_job_title
+		 ORDER BY score DESC, categorized_job_title ASC
+		 LIMIT ?`,
+		topFunction.String, category, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load related categories"})
+		return
+	}
+	defer rows.Close()
+	items := []gin.H{}
+	for rows.Next() {
+		var itemCategory string
+		var score int
+		if err := rows.Scan(&itemCategory, &score); err == nil && strings.TrimSpace(itemCategory) != "" {
+			items = append(items, gin.H{"category": itemCategory, "score": score})
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (h *Handler) topCategories(c *gin.Context) {
+	limit := max(parseIntDefault(c.Query("limit"), 8), 1)
+	if limit > 30 {
+		limit = 30
+	}
+	days := max(parseIntDefault(c.Query("days"), 30), 1)
+	if days > 365 {
+		days = 365
+	}
+	location := strings.TrimSpace(c.Query("location"))
+	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour).Format(time.RFC3339Nano)
+
+	query := `SELECT categorized_job_title, COUNT(id) AS score
+		FROM parsed_jobs
+		WHERE categorized_job_title IS NOT NULL
+		  AND categorized_job_title != ''
+		  AND created_at_source IS NOT NULL
+		  AND created_at_source >= ?`
+	args := []any{cutoff}
+	if location != "" {
+		query += ` AND (location LIKE ? OR location_city LIKE ? OR location_us_states LIKE ?)`
+		args = append(args, "%"+location+"%", "%"+location+"%", "%"+location+"%")
+	}
+	query += ` GROUP BY categorized_job_title ORDER BY score DESC, categorized_job_title ASC LIMIT ?`
+	args = append(args, limit)
+	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, args...)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load top categories"})
+		return
+	}
+	defer rows.Close()
+	items := []gin.H{}
+	for rows.Next() {
+		var category string
+		var score int
+		if err := rows.Scan(&category, &score); err == nil && strings.TrimSpace(category) != "" {
+			items = append(items, gin.H{"category": category, "score": score})
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
 func appendWhere(where, predicate string) string {

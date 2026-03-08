@@ -192,6 +192,66 @@ func TestJobsSitemapEndpointNotPreviewLimited(t *testing.T) {
 	}
 }
 
+func TestJobsRelatedCategoriesAreFunctionBased(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJobWithFunction(t, db, 9101, "Software Engineer", "Engineering", "Software Engineer")
+	insertJobWithFunction(t, db, 9102, "Backend Engineer", "Engineering", "Backend Engineer")
+	insertJobWithFunction(t, db, 9103, "DevOps Engineer", "Engineering", "DevOps Engineer")
+	insertJobWithFunction(t, db, 9104, "Product Manager", "Product", "Product Manager")
+	insertJobWithFunction(t, db, 9105, "Platform Engineer", "Engineering", "Platform Engineer")
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs/related-categories?category=Software+Engineer&limit=3", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	items := body["items"].([]any)
+	categories := map[string]struct{}{}
+	for _, item := range items {
+		row := item.(map[string]any)
+		categories[row["category"].(string)] = struct{}{}
+	}
+	if _, ok := categories["Backend Engineer"]; !ok {
+		t.Fatalf("expected Backend Engineer in related categories %#v", body)
+	}
+	if _, ok := categories["DevOps Engineer"]; !ok {
+		t.Fatalf("expected DevOps Engineer in related categories %#v", body)
+	}
+	if _, ok := categories["Product Manager"]; ok {
+		t.Fatalf("did not expect Product Manager in related categories %#v", body)
+	}
+}
+
+func TestJobsTopCategoriesRespectsLocationAndWindow(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	insertJobWithCreatedAt(t, db, 9201, "Software Engineer", "United States", now.Add(-2*time.Hour))
+	insertJobWithCreatedAt(t, db, 9202, "Software Engineer", "United States", now.Add(-3*time.Hour))
+	insertJobWithCreatedAt(t, db, 9203, "Data Engineer", "Canada", now.Add(-2*time.Hour))
+	insertJobWithCreatedAt(t, db, 9204, "Legacy Role", "United States", now.Add(-40*24*time.Hour))
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs/top-categories?location=United+States&days=30&limit=5", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	items := body["items"].([]any)
+	if len(items) == 0 {
+		t.Fatalf("expected top categories payload %#v", body)
+	}
+	first := items[0].(map[string]any)
+	if first["category"].(string) != "Software Engineer" {
+		t.Fatalf("unexpected top category payload %#v", body)
+	}
+}
+
 func TestJobsDefaultSortUsesCreatedAtSource(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
@@ -1306,6 +1366,20 @@ func insertEmploymentTypeJob(t *testing.T, db *database.DB, rawID int, employmen
 		t.Fatal(err)
 	}
 	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, employment_type, created_at_source, url) VALUES (?, 'Software Engineer', ?, ?, ?)`, rawID+6000, employmentType, time.Now().UTC().Format(time.RFC3339Nano), "https://jobs.example.com/employment-"+strconv.Itoa(rawID))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertJobWithCreatedAt(t *testing.T, db *database.DB, rawID int, category, location string, createdAt time.Time) {
+	t.Helper()
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, 1, 0, 1, 0, '{}')`,
+		rawID+7000, "https://example.com/top-"+strconv.Itoa(rawID), createdAt.Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, location, created_at_source, url) VALUES (?, ?, ?, ?, ?)`,
+		rawID+7000, category, location, createdAt.Format(time.RFC3339Nano), "https://jobs.example.com/top-"+strconv.Itoa(rawID))
 	if err != nil {
 		t.Fatal(err)
 	}
