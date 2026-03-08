@@ -9,7 +9,9 @@ def slugify(value: str | None) -> str | None:
     if not isinstance(value, str):
         return None
     normalized = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
-    return normalized or None
+    if not normalized or not re.search(r"[a-z]", normalized):
+        return None
+    return normalized
 
 
 def slug_from_url_path(value: str | None) -> str | None:
@@ -19,19 +21,11 @@ def slug_from_url_path(value: str | None) -> str | None:
     parts = [part for part in parsed.path.split("/") if part]
     if not parts:
         return None
-    last = re.sub(r"-\d+$", "", parts[-1])
+    last = parts[-1]
+    if last.isdigit() and len(parts) >= 2:
+        last = parts[-2]
+    last = re.sub(r"-\d+$", "", last)
     return slugify(last or parts[-1])
-
-
-def slug_from_url_host(value: str | None) -> str | None:
-    if not isinstance(value, str) or not value.strip():
-        return None
-    host = (urlparse(value.strip()).hostname or "").lower().strip(".")
-    if host.startswith("www."):
-        host = host[4:]
-    if not host:
-        return None
-    return slugify(host.split(".")[0])
 
 
 def backfill_companies(cur: sqlite3.Cursor, limit: int | None) -> tuple[int, int]:
@@ -45,9 +39,6 @@ def backfill_companies(cur: sqlite3.Cursor, limit: int | None) -> tuple[int, int
         scanned += 1
         slug = (
             slugify(row["name"])
-            or slug_from_url_host(row["home_page_url"])
-            or slug_from_url_host(row["linkedin_url"])
-            or slugify(row["external_company_id"])
             or f"company-{row['id']}"
         )
         cur.execute("UPDATE parsed_companies SET slug = ? WHERE id = ?", (slug, row["id"]))
@@ -55,21 +46,29 @@ def backfill_companies(cur: sqlite3.Cursor, limit: int | None) -> tuple[int, int
     return scanned, updated
 
 
+def build_job_slug(role_title: str | None, source: str | None, raw_url: str | None, job_id: int) -> str:
+    normalized_source = (source or "").strip().lower()
+    if normalized_source in {"builtin", "remotive"}:
+        return slug_from_url_path(raw_url) or slugify(role_title) or f"job-{job_id}"
+    return slugify(role_title) or slug_from_url_path(raw_url) or f"job-{job_id}"
+
+
 def backfill_jobs(cur: sqlite3.Cursor, limit: int | None) -> tuple[int, int]:
     rows = cur.execute(
-        "SELECT id, role_title, url, external_job_id, slug FROM parsed_jobs WHERE slug IS NULL OR trim(slug) = '' ORDER BY id ASC"
+        """
+        SELECT p.id, p.role_title, p.slug, r.source, r.url
+        FROM parsed_jobs p
+        JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
+        WHERE p.slug IS NULL OR trim(p.slug) = ''
+        ORDER BY p.id ASC
+        """
     ).fetchall()
     if limit and limit > 0:
         rows = rows[:limit]
     scanned = updated = 0
     for row in rows:
         scanned += 1
-        slug = (
-            slugify(row["role_title"])
-            or slug_from_url_path(row["url"])
-            or slugify(row["external_job_id"])
-            or f"job-{row['id']}"
-        )
+        slug = build_job_slug(row["role_title"], row["source"], row["url"], row["id"])
         cur.execute("UPDATE parsed_jobs SET slug = ? WHERE id = ?", (slug, row["id"]))
         updated += 1
     return scanned, updated

@@ -170,17 +170,13 @@ func buildRawPayload(item map[string]any, urlValue string, postDate time.Time) m
 		}
 	}
 	isEntry, isJunior, isMid, isSenior, isLead := inferSeniority(title)
-	companySlug := firstNonEmpty(
-		slugify(stringValue(company["title"])),
-		slugFromCompanyURL(stringValue(company["website"])),
-		slugFromCompanyURL(stringValue(company["url"])),
-	)
+	companySlug := slugify(stringValue(company["title"]))
 	if companySlug == "" {
 		companySlug = "workable-company"
 	}
 	jobSlug := firstNonEmpty(
-		slugFromURLPath(urlValue),
 		slugify(title),
+		slugFromURLPath(urlValue),
 	)
 	if jobSlug == "" {
 		jobSlug = "workable-job"
@@ -307,7 +303,16 @@ func slugFromURLPath(rawURL string) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return slugify(parts[len(parts)-1])
+	candidate := parts[len(parts)-1]
+	if regexp.MustCompile(`^\d+$`).MatchString(candidate) && len(parts) >= 2 {
+		candidate = parts[len(parts)-2]
+	}
+	candidate = regexp.MustCompile(`-\d+$`).ReplaceAllString(candidate, "")
+	slug := slugify(candidate)
+	if slug == "" || !regexp.MustCompile(`[a-z]`).MatchString(slug) {
+		return ""
+	}
+	return slug
 }
 
 func slugFromCompanyURL(rawURL string) string {

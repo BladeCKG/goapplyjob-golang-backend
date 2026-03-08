@@ -114,7 +114,7 @@ func ExtractJob(htmlText, companyHTML string) map[string]any {
 		"isLead":                                   levelFlags["isLead"],
 		"salaryRange":                              salaryRange,
 		"techStack":                                techStack,
-		"slug":                                     slugFromURL(firstNonEmpty(extractCanonicalURL(htmlText), jobURL)),
+		"slug":                                     slugFromURL(extractCanonicalURL(htmlText)),
 		"isPromoted":                               false,
 		"employmentType":                           normalizeEmploymentType(stringValue(jobPosting["employmentType"])),
 		"location":                                 firstNonEmpty(strings.Join(locationLabels, " | "), applicantCountry),
@@ -139,6 +139,15 @@ func ExtractJobFromHTML(htmlText string, fallbackJobURL string) map[string]any {
 	if company, _ := payload["company"].(map[string]any); company == nil || len(company) == 0 {
 		jobPosting := findJobPostingLD(htmlText)
 		payload["company"] = toRawCompanyShape(fallbackCompanyFromJobPosting(jobPosting, htmlText))
+	}
+	if jobPosting := findJobPostingLD(htmlText); len(jobPosting) > 0 {
+		companySameAs := stringValueFromMap(jobPosting, "hiringOrganization", "sameAs")
+		if companySlug := extractBuiltinCompanySlugFromURL(companySameAs); companySlug != "" {
+			if company, _ := payload["company"].(map[string]any); company != nil {
+				company["slug"] = companySlug
+				company["sourceCompanySlug"] = companySlug
+			}
+		}
 	}
 	return payload
 }
@@ -261,15 +270,33 @@ func slugFromURL(rawURL string) any {
 	if rawURL == "" {
 		return nil
 	}
-	re := regexp.MustCompile(`/job/([^/?#]+)/(\d+)`)
-	if match := re.FindStringSubmatch(rawURL); len(match) == 3 {
-		return match[1] + "-" + match[2]
-	}
-	parts := strings.FieldsFunc(rawURL, func(r rune) bool { return r == '/' })
-	if len(parts) == 0 {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
 		return nil
 	}
-	return parts[len(parts)-1]
+	segments := []string{}
+	for _, segment := range strings.Split(parsed.Path, "/") {
+		segment = strings.TrimSpace(segment)
+		if segment != "" {
+			segments = append(segments, segment)
+		}
+	}
+	if len(segments) == 0 {
+		return nil
+	}
+	candidate := segments[len(segments)-1]
+	if len(segments) >= 3 && regexp.MustCompile(`^\d+$`).MatchString(candidate) && strings.EqualFold(segments[len(segments)-3], "job") {
+		candidate = segments[len(segments)-2]
+	} else if regexp.MustCompile(`^\d+$`).MatchString(candidate) && len(segments) >= 2 {
+		candidate = segments[len(segments)-2]
+	}
+	candidate = regexp.MustCompile(`-\d+$`).ReplaceAllString(strings.ToLower(candidate), "")
+	candidate = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(candidate, "-")
+	candidate = strings.Trim(candidate, "-")
+	if candidate == "" || !regexp.MustCompile(`[a-z]`).MatchString(candidate) {
+		return nil
+	}
+	return candidate
 }
 
 func extractExternalJobID(rawURL, identifier string) any {
@@ -972,6 +999,15 @@ func companySlugFromURL(value string) string {
 		return ""
 	}
 	return strings.TrimSpace(match[1])
+}
+
+func extractBuiltinCompanySlugFromURL(value string) string {
+	slug := strings.ToLower(strings.TrimSpace(companySlugFromURL(value)))
+	if slug == "" {
+		return ""
+	}
+	slug = regexp.MustCompile(`[^a-z0-9-]+`).ReplaceAllString(slug, "-")
+	return strings.Trim(slug, "-")
 }
 
 func normalizeNameForKey(value string) string {

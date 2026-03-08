@@ -81,7 +81,7 @@ func TestExtractJobBuildsBuiltInRawJobShape(t *testing.T) {
 	if payload["url"] != "https://jobs.acme.example/apply/12345" {
 		t.Fatalf("expected canonical url, got %#v", payload["url"])
 	}
-	if payload["slug"] != "platform-engineer-12345" {
+	if payload["slug"] != "platform-engineer" {
 		t.Fatalf("expected slug from canonical url, got %#v", payload["slug"])
 	}
 	if payload["employmentType"] != "full-time" {

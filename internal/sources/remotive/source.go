@@ -60,8 +60,7 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 	benefitsText := nilIfEmpty(descriptionSections["benefits"])
 	companyTagline := nilIfEmpty(descriptionSections["company_description"])
 	externalID := stringValue(extractExternalID(stringValue(jobPosting["url"]), sourceURL, jobPosting["identifier"]))
-	roleTitleText := stringValue(normalizeTitle(stringValue(jobPosting["title"])))
-	jobSlug := buildJobSlug(roleTitleText, stringValue(jobPosting["url"]), externalID)
+	jobSlug := buildJobSlug(stringValue(jobPosting["url"]))
 	return map[string]any{
 		"id":                           nilIfEmpty(externalID),
 		"url":                          firstNonEmpty(stringValue(jobPosting["url"]), sourceURL),
@@ -378,10 +377,7 @@ func trimDescriptionSummary(value string) string {
 	return trimmed[:280] + "..."
 }
 
-func buildJobSlug(roleTitle, canonicalURL, externalJobID string) string {
-	if value := slugFromText(roleTitle); value != "" && value != "unknown" {
-		return value
-	}
+func buildJobSlug(canonicalURL string) string {
 	if strings.TrimSpace(canonicalURL) != "" {
 		parsed, err := url.Parse(strings.TrimSpace(canonicalURL))
 		if err == nil {
@@ -398,9 +394,6 @@ func buildJobSlug(roleTitle, canonicalURL, externalJobID string) string {
 				}
 			}
 		}
-	}
-	if strings.TrimSpace(externalJobID) != "" {
-		return "remotive-job-" + strings.TrimSpace(externalJobID)
 	}
 	return "remotive-job"
 }
