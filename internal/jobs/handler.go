@@ -637,8 +637,9 @@ func (h *Handler) scheduleFilterCacheRefresh(force bool) {
 	}()
 }
 
-func (h *Handler) WarmFilterCache(ctx context.Context) error {
-	return h.ensureFilterCacheFresh(ctx, true)
+func (h *Handler) WarmFilterCache(_ context.Context) error {
+	h.scheduleFilterCacheRefresh(true)
+	return nil
 }
 
 func (h *Handler) filterOptions(c *gin.Context) {
