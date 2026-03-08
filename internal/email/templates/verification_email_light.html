@@ -1,33 +1,54 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>__SITE_NAME__ verification code</title>
 </head>
-<body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;color:#0f172a;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="padding:24px 0;">
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:Inter,Segoe UI,Arial,sans-serif;color:#0f172a;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f1f5f9;padding:24px 12px;">
     <tr>
       <td align="center">
-        <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="max-width:600px;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">
+        <table role="presentation" width="640" cellspacing="0" cellpadding="0" border="0" style="max-width:640px;width:100%;background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;">
           <tr>
-            <td style="padding:24px;border-bottom:1px solid #e2e8f0;">
-              <h1 style="margin:0;font-size:24px;line-height:1.25;color:#0f172a;">Your verification code</h1>
-              <p style="margin:8px 0 0 0;font-size:14px;color:#475569;">Sign in to __SITE_NAME__ securely.</p>
+            <td style="padding:24px 28px;background:linear-gradient(135deg,#e0f2fe 0%,#eef2ff 100%);border-bottom:1px solid #e2e8f0;">
+              <p style="margin:0;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#0369a1;font-weight:700;">__SITE_NAME__</p>
+              <h1 style="margin:10px 0 0 0;font-size:28px;line-height:1.2;color:#0f172a;font-weight:800;">Your verification code</h1>
+              <p style="margin:10px 0 0 0;font-size:15px;line-height:1.6;color:#334155;">
+                Use this code to sign in. It expires in <strong>__TTL_MINUTES__ minutes</strong>.
+              </p>
             </td>
           </tr>
+
           <tr>
-            <td style="padding:24px;">
-              <p style="margin:0 0 8px 0;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#64748b;font-weight:700;">Verification Code</p>
-              <p style="margin:0 0 16px 0;font-size:36px;letter-spacing:.18em;font-weight:700;color:#0f172a;">__CODE__</p>
-              <p style="margin:0 0 16px 0;font-size:14px;color:#334155;">This code expires in <strong>__TTL_MINUTES__ minutes</strong>.</p>
-              <p style="margin:0 0 20px 0;"><a href="__MAGIC_LINK__" style="display:inline-block;padding:12px 18px;background:#0f172a;color:#ffffff;text-decoration:none;border-radius:8px;font-size:14px;font-weight:700;">Log In Instantly</a></p>
-              <p style="margin:0;font-size:13px;color:#64748b;">If you did not request this code, you can safely ignore this email.</p>
+            <td style="padding:28px;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%;">
+                <tr>
+                  <td align="center" style="padding:20px;border:1px dashed #cbd5e1;border-radius:14px;background:#f8fafc;">
+                    <p style="margin:0 0 8px 0;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#64748b;font-weight:700;">Verification code</p>
+                    <p style="margin:0;font-size:40px;line-height:1;letter-spacing:0.16em;font-weight:800;color:#0f172a;">__CODE__</p>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:16px 0 8px 0;font-size:13px;line-height:1.6;color:#475569;">
+                Or log in instantly with one click:
+              </p>
+              <a href="__MAGIC_LINK__" style="display:inline-block;background:#0ea5e9;color:#082f49;text-decoration:none;font-size:14px;font-weight:800;padding:10px 16px;border-radius:10px;">
+                Log In Instantly
+              </a>
+
+              <p style="margin:22px 0 0 0;font-size:14px;line-height:1.7;color:#475569;">
+                If you did not request this code, you can safely ignore this email.
+              </p>
             </td>
           </tr>
+
           <tr>
-            <td style="padding:16px 24px;background:#f8fafc;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;">
-              __SITE_NAME__ · <a href="__SITE_URL__" style="color:#0f172a;text-decoration:none;">__SITE_URL__</a>
+            <td style="padding:18px 28px;border-top:1px solid #e2e8f0;background:#f8fafc;">
+              <p style="margin:0;font-size:12px;line-height:1.6;color:#64748b;">
+                This code is intended only for your __SITE_NAME__ account.
+              </p>
             </td>
           </tr>
         </table>

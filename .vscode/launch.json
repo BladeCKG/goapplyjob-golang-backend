@@ -35,22 +35,22 @@
       }
     },
     {
-      "name": "Parsed Freshness (cmd/parsedfreshness)",
+      "name": "Raw Job Worker (cmd/rawjobworker)",
       "type": "go",
       "request": "launch",
       "mode": "auto",
-      "program": "${workspaceFolder}/cmd/parsedfreshness/main.go",
+      "program": "${workspaceFolder}/cmd/rawjobworker/main.go",
       "envFile": "${workspaceFolder}/.env",
       "env": {
         "WORKERS_DEBUG": "true"
       }
     },
     {
-      "name": "Skippable Recheck (cmd/skippablerecheck)",
+      "name": "Parsed Job Worker (cmd/parsedjobworker)",
       "type": "go",
       "request": "launch",
       "mode": "auto",
-      "program": "${workspaceFolder}/cmd/skippablerecheck/main.go",
+      "program": "${workspaceFolder}/cmd/parsedjobworker/main.go",
       "envFile": "${workspaceFolder}/.env",
       "env": {
         "WORKERS_DEBUG": "true"
@@ -63,8 +63,8 @@
       "configurations": [
         "Watcher (cmd/watcher)",
         "Importer (cmd/importer)",
-        "Parsed Freshness (cmd/parsedfreshness)",
-        "Skippable Recheck (cmd/skippablerecheck)"
+        "Raw Job Worker (cmd/rawjobworker)",
+        "Parsed Job Worker (cmd/parsedjobworker)"
       ]
     }
   ]

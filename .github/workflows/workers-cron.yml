@@ -64,14 +64,15 @@ jobs:
       - name: Run hourly raw worker
         if: steps.workers_service.outputs.run_workers == 'true'
         env:
+          RAW_JOB_RUN_ONCE: "true"
           RAW_JOB_RETENTION_DAYS: ${{ secrets.RAW_JOB_RETENTION_DAYS }}
           RAW_JOB_WORKER_BATCH_SIZE: "100"
           RAW_JOB_HTTP_429_RETRY_DELAY_SECONDS: "10"
-        run: go run ./cmd/skippablerecheck
+        run: go run ./cmd/rawjobworker
 
       - name: Run hourly parsed worker
         if: steps.workers_service.outputs.run_workers == 'true'
         env:
           PARSED_JOB_RUN_ONCE: "true"
           PARSED_JOB_WORKER_BATCH_SIZE: "100"
-        run: go run ./cmd/parsedfreshness
+        run: go run ./cmd/parsedjobworker

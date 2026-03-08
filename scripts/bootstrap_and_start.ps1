@@ -51,11 +51,17 @@ if (Test-Path "logs\processes.json") {
 if ($ForceRebuild) {
     go build ./cmd/api
     go build ./cmd/watcher
+    go build ./cmd/importer
+    go build ./cmd/rawjobworker
+    go build ./cmd/parsedjobworker
 }
 
 $services = @(
     @{ Name = "api"; Out = "logs\api.out.log"; Err = "logs\api.err.log"; Args = @("run", "./cmd/api") },
-    @{ Name = "watcher"; Out = "logs\watcher.out.log"; Err = "logs\watcher.err.log"; Args = @("run", "./cmd/watcher") }
+    @{ Name = "watcher"; Out = "logs\watcher.out.log"; Err = "logs\watcher.err.log"; Args = @("run", "./cmd/watcher") },
+    @{ Name = "importer"; Out = "logs\importer.out.log"; Err = "logs\importer.err.log"; Args = @("run", "./cmd/importer") },
+    @{ Name = "rawjobworker"; Out = "logs\rawjobworker.out.log"; Err = "logs\rawjobworker.err.log"; Args = @("run", "./cmd/rawjobworker") },
+    @{ Name = "parsedjobworker"; Out = "logs\parsedjobworker.out.log"; Err = "logs\parsedjobworker.err.log"; Args = @("run", "./cmd/parsedjobworker") }
 )
 
 $started = @()

@@ -111,3 +111,57 @@ services:
         value: oxapay
       - key: OXAPAY_MERCHANT_API_KEY
         sync: false
+
+  - type: worker
+    name: goapplyjob-worker-raw-jobs
+    runtime: docker
+    plan: starter
+    dockerContext: .
+    dockerfilePath: ./Dockerfile
+    dockerCommand: /app/rawjobworker
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: goapplyjob-backend-db
+          property: connectionString
+      - key: ENABLED_SOURCES
+        sync: false
+      - key: RAW_JOB_WORKER_BATCH_SIZE
+        value: "320"
+      - key: RAW_JOB_WORKER_POLL_SECONDS
+        value: "5"
+      - key: RAW_JOB_HTTP_429_RETRIES
+        value: "3"
+      - key: RAW_JOB_HTTP_429_RETRY_DELAY_SECONDS
+        value: "10"
+      - key: RAW_JOB_RUN_ONCE
+        value: "false"
+      - key: CRYPTO_PAYMENT_PROVIDER
+        value: oxapay
+      - key: OXAPAY_MERCHANT_API_KEY
+        sync: false
+
+  - type: worker
+    name: goapplyjob-worker-parsed-jobs
+    runtime: docker
+    plan: starter
+    dockerContext: .
+    dockerfilePath: ./Dockerfile
+    dockerCommand: /app/parsedjobworker
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: goapplyjob-backend-db
+          property: connectionString
+      - key: PARSED_JOB_WORKER_BATCH_SIZE
+        value: "260"
+      - key: PARSED_JOB_WORKER_POLL_SECONDS
+        value: "5"
+      - key: PARSED_JOB_RUN_ONCE
+        value: "false"
+      - key: CRYPTO_PAYMENT_PROVIDER
+        value: oxapay
+      - key: OXAPAY_MERCHANT_API_KEY
+        sync: false

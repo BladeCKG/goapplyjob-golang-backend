@@ -113,7 +113,7 @@ What these scripts do:
 * validate `DATABASE_URL` is PostgreSQL
 * ensure `logs/` exists
 * run `go run ./cmd/migrate`
-* start the Go API and watcher commands in background
+* start the Go API and all workers (`watcher`, `importer`, `rawjobworker`, `parsedjobworker`) in background
 
 Source selection is runtime-configurable through `ENABLED_SOURCES`.
 Examples:
@@ -201,7 +201,7 @@ This repo includes `.github/workflows/workers-cron.yml` for scheduled worker exe
 
 Schedule:
 
-* every 2 hours: `watcher`, `importer`, `raw`, `parsed`, `parsedfreshness`
+* every 2 hours: `watcher`, `importer`, `rawjobworker`, `parsedjobworker`
 * manual `workflow_dispatch`: runs all configured worker steps immediately
 
 Required repository secrets:

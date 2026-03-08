@@ -55,6 +55,9 @@ run_service() {
 
 run_service "api" "api.log" go run ./cmd/api
 run_service "watcher" "watcher.log" go run ./cmd/watcher
+run_service "importer" "importer.log" go run ./cmd/importer
+run_service "rawjobworker" "rawjobworker.log" go run ./cmd/rawjobworker
+run_service "parsedjobworker" "parsedjobworker.log" go run ./cmd/parsedjobworker
 
 echo
 echo "All services started."
