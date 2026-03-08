@@ -344,6 +344,75 @@ func TestJobsFilterOptionsAnnualized(t *testing.T) {
 	}
 }
 
+func TestJobsFilterOptionsIncludesHierarchyMetadata(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJobWithFunction(t, db, 201, "Data Engineer", "Engineering", "Data Engineer")
+	insertJobWithFunction(t, db, 202, "Software Engineer", "Engineering", "Software Engineer")
+	if _, err := db.SQL.ExecContext(context.Background(), `UPDATE parsed_jobs SET location = ?, location_city = ?, location_us_states = ? WHERE raw_us_job_id = ?`, "United States", "Austin", `["Texas"]`, 3201); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SQL.ExecContext(context.Background(), `UPDATE parsed_jobs SET location = ?, location_city = ?, location_us_states = ? WHERE raw_us_job_id = ?`, "Canada", "Toronto", `["Ontario"]`, 3202); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs/filter-options", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	jobCategories := body["job_categories"].([]any)
+	if len(jobCategories) < 3 {
+		t.Fatalf("expected category hierarchy options, got %#v", body)
+	}
+	jobCategoryQueryValues := body["job_category_query_values"].(map[string]any)
+	jobCategoryParents := body["job_category_parents"].(map[string]any)
+	if jobCategoryQueryValues["Engineering"] != "Engineering" {
+		t.Fatalf("missing Engineering query value %#v", body)
+	}
+	if len(jobCategoryParents["Data Engineer"].([]any)) == 0 || jobCategoryParents["Data Engineer"].([]any)[0] != "Engineering" {
+		t.Fatalf("missing Data Engineer parent metadata %#v", body)
+	}
+
+	locations := body["locations"].([]any)
+	if len(locations) < 6 {
+		t.Fatalf("expected expanded location options %#v", body)
+	}
+	locationQueryValues := body["location_query_values"].(map[string]any)
+	locationParents := body["location_parents"].(map[string]any)
+	if locationQueryValues["Austin"] != "Austin" {
+		t.Fatalf("missing Austin query value %#v", body)
+	}
+	austinParents := locationParents["Austin"].([]any)
+	if len(austinParents) < 2 || austinParents[0] != "Texas" || austinParents[1] != "United States" {
+		t.Fatalf("unexpected Austin parent metadata %#v", body)
+	}
+}
+
+func TestJobsListLocationFilterSupportsStateWithCountryLabel(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJob(t, db, 401, "https://example.com/state-1", "Austin", "Texas", 120, 160, true, time.Now().UTC())
+	insertJob(t, db, 402, "https://example.com/state-2", "Seattle", "Washington", 120, 160, true, time.Now().UTC())
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?location=Texas,+United+States", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	if body["total"].(float64) != 1 {
+		t.Fatalf("expected one location-matched job, got %#v", body)
+	}
+	if body["items"].([]any)[0].(map[string]any)["location_city"] != "Austin" {
+		t.Fatalf("unexpected location-matched item %#v", body)
+	}
+}
+
 func TestJobDetailEndpoint(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()

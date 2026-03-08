@@ -219,6 +219,35 @@ func tokenizeTitleSearchText(value string) []string {
 	return strings.Fields(normalized)
 }
 
+func expandLocationQueryTerms(values []string) []string {
+	expanded := []string{}
+	seen := map[string]struct{}{}
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		candidates := []string{value}
+		if strings.Contains(value, ",") {
+			for _, part := range strings.Split(value, ",") {
+				trimmed := strings.TrimSpace(part)
+				if trimmed != "" {
+					candidates = append(candidates, trimmed)
+				}
+			}
+		}
+		for _, candidate := range candidates {
+			key := strings.ToLower(candidate)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			expanded = append(expanded, candidate)
+		}
+	}
+	return expanded
+}
+
 func uniqueStrings(values []string) []string {
 	if len(values) == 0 {
 		return nil
@@ -252,26 +281,132 @@ func distinctNonEmptyStrings(c *gin.Context, db *database.DB, column string) ([]
 }
 
 func (h *Handler) filterOptions(c *gin.Context) {
-	categories, err := distinctNonEmptyStrings(c, h.db, "categorized_job_title")
+	categoriesRows, err := h.db.SQL.QueryContext(c.Request.Context(),
+		`SELECT categorized_job_title, categorized_job_function
+		 FROM parsed_jobs
+		 WHERE categorized_job_title IS NOT NULL OR categorized_job_function IS NOT NULL`)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
 		return
 	}
+	defer categoriesRows.Close()
 
-	locationSet := map[string]struct{}{}
-	for _, column := range []string{"location_city", "location"} {
-		values, err := distinctNonEmptyStrings(c, h.db, column)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
+	jobCategoryQueryValues := map[string]string{}
+	jobCategoryParents := map[string][]string{}
+	addJobCategoryOption := func(label, queryValue string, parents []string) {
+		label = strings.TrimSpace(label)
+		queryValue = strings.TrimSpace(queryValue)
+		if label == "" || queryValue == "" {
 			return
 		}
-		for _, value := range values {
-			locationSet[value] = struct{}{}
+		if _, exists := jobCategoryQueryValues[label]; exists {
+			return
+		}
+		cleanParents := []string{}
+		for _, parent := range parents {
+			parent = strings.TrimSpace(parent)
+			if parent != "" {
+				cleanParents = append(cleanParents, parent)
+			}
+		}
+		jobCategoryQueryValues[label] = queryValue
+		jobCategoryParents[label] = cleanParents
+	}
+
+	for categoriesRows.Next() {
+		var title, function sql.NullString
+		if err := categoriesRows.Scan(&title, &function); err != nil {
+			continue
+		}
+		titleValue := strings.TrimSpace(title.String)
+		functionValue := strings.TrimSpace(function.String)
+		if functionValue != "" {
+			addJobCategoryOption(functionValue, functionValue, nil)
+		}
+		if titleValue != "" && !strings.EqualFold(titleValue, functionValue) {
+			parents := []string{}
+			if functionValue != "" {
+				parents = append(parents, functionValue)
+			}
+			addJobCategoryOption(titleValue, titleValue, parents)
 		}
 	}
-	locations := make([]string, 0, len(locationSet))
-	for value := range locationSet {
-		locations = append(locations, value)
+	categories := make([]string, 0, len(jobCategoryQueryValues))
+	for label := range jobCategoryQueryValues {
+		categories = append(categories, label)
+	}
+	sortStrings(categories)
+
+	locationRows, err := h.db.SQL.QueryContext(c.Request.Context(),
+		`SELECT location, location_city, location_us_states
+		 FROM parsed_jobs
+		 WHERE location IS NOT NULL OR location_city IS NOT NULL OR location_us_states IS NOT NULL`)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
+		return
+	}
+	defer locationRows.Close()
+
+	locationQueryValues := map[string]string{}
+	locationParents := map[string][]string{}
+	addLocationOption := func(label, queryValue string, parents []string) {
+		label = strings.TrimSpace(label)
+		queryValue = strings.TrimSpace(queryValue)
+		if label == "" || queryValue == "" {
+			return
+		}
+		if _, exists := locationQueryValues[label]; exists {
+			return
+		}
+		cleanParents := []string{}
+		for _, parent := range parents {
+			parent = strings.TrimSpace(parent)
+			if parent != "" {
+				cleanParents = append(cleanParents, parent)
+			}
+		}
+		locationQueryValues[label] = queryValue
+		locationParents[label] = cleanParents
+	}
+	for locationRows.Next() {
+		var country, city, statesRaw sql.NullString
+		if err := locationRows.Scan(&country, &city, &statesRaw); err != nil {
+			continue
+		}
+		countryValue := strings.TrimSpace(country.String)
+		cityValue := strings.TrimSpace(city.String)
+		stateValues := []string{}
+		if statesRaw.Valid && strings.TrimSpace(statesRaw.String) != "" {
+			_ = json.Unmarshal([]byte(statesRaw.String), &stateValues)
+		}
+		if countryValue != "" {
+			addLocationOption(countryValue, countryValue, nil)
+		}
+		for idx := range stateValues {
+			stateValues[idx] = strings.TrimSpace(stateValues[idx])
+		}
+		stateValues = uniqueStrings(stateValues)
+		for _, state := range stateValues {
+			parents := []string{}
+			if countryValue != "" {
+				parents = append(parents, countryValue)
+			}
+			addLocationOption(state, state, parents)
+		}
+		if cityValue != "" {
+			parents := []string{}
+			if len(stateValues) > 0 {
+				parents = append(parents, stateValues[0])
+			}
+			if countryValue != "" {
+				parents = append(parents, countryValue)
+			}
+			addLocationOption(cityValue, cityValue, parents)
+		}
+	}
+	locations := make([]string, 0, len(locationQueryValues))
+	for label := range locationQueryValues {
+		locations = append(locations, label)
 	}
 	sortStrings(locations)
 
@@ -317,13 +452,17 @@ func (h *Handler) filterOptions(c *gin.Context) {
 	seniorities := []string{"entry", "junior", "mid", "senior", "lead"}
 
 	c.JSON(http.StatusOK, gin.H{
-		"job_categories":     categories,
-		"locations":          locations,
-		"employment_types":   employmentTypes,
-		"post_date_options":  postDateOptions,
-		"tech_stacks":        techStacks,
-		"min_salary_options": minSalaryOptions,
-		"seniorities":        seniorities,
+		"job_categories":            categories,
+		"locations":                 locations,
+		"job_category_query_values": jobCategoryQueryValues,
+		"job_category_parents":      jobCategoryParents,
+		"location_query_values":     locationQueryValues,
+		"location_parents":          locationParents,
+		"employment_types":          employmentTypes,
+		"post_date_options":         postDateOptions,
+		"tech_stacks":               techStacks,
+		"min_salary_options":        minSalaryOptions,
+		"seniorities":               seniorities,
 	})
 }
 
@@ -675,7 +814,7 @@ func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includ
 		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 	}
 	if locations := parseCSVQuery(c.Query("location")); len(locations) > 0 {
-		locations = uniqueStrings(locations)
+		locations = uniqueStrings(expandLocationQueryTerms(locations))
 		parts := make([]string, 0, len(locations))
 		for _, location := range locations {
 			parts = append(parts, `(p.location LIKE ? OR p.location_city LIKE ? OR p.location_us_states LIKE ?)`)
