@@ -1,8 +1,6 @@
 package app
 
 import (
-	"encoding/json"
-	"io"
 	"log"
 	"net/http"
 	"time"
@@ -39,40 +37,6 @@ func NewRouter(cfg config.Config, db *database.DB) *gin.Engine {
 		}
 		c.JSON(http.StatusOK, gin.H{"status": status})
 	})
-	router.GET("/debug/hiringcafe/total-count", func(c *gin.Context) {
-		rawURL := config.Getenv("WATCH_HIRINGCAFE_TOTAL_COUNT_URL", "")
-		if rawURL == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "WATCH_HIRINGCAFE_TOTAL_COUNT_URL is not set"})
-			return
-		}
-		req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, rawURL, nil)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		req.Header.Set("Accept", "application/json")
-		req.Header.Set("User-Agent", "Mozilla/5.0")
-		client := &http.Client{Timeout: 30 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
-			return
-		}
-		defer resp.Body.Close()
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
-			return
-		}
-		payload := map[string]any{}
-		_ = json.Unmarshal(body, &payload)
-		c.JSON(http.StatusOK, gin.H{
-			"url":             rawURL,
-			"status_code":     resp.StatusCode,
-			"total_count_raw": payload,
-		})
-	})
-
 	authHandler.Register(router)
 	employerHandler.Register(router)
 	jobActionsHandler.Register(router)
