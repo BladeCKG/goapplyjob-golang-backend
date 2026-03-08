@@ -9,11 +9,18 @@ import (
 )
 
 type HandlerController struct {
-	querier         sqlc.Querier
+	querier         userQuerier
 	userRouterGroup *gin.RouterGroup
 }
 
-func NewHandlerController(userRouterGroup *gin.RouterGroup, db sqlc.Querier) *HandlerController {
+type userQuerier interface {
+	AddUser(context.Context, sqlc.AddUserParams) (int32, error)
+	DeleteUser(context.Context, string) (*sqlc.HomepageSchemaUser, error)
+	GetUser(context.Context, string) (*sqlc.HomepageSchemaUser, error)
+	ListUsers(context.Context) ([]*sqlc.HomepageSchemaUser, error)
+}
+
+func NewHandlerController(userRouterGroup *gin.RouterGroup, db userQuerier) *HandlerController {
 	return &HandlerController{
 		userRouterGroup: userRouterGroup,
 		querier:         db,

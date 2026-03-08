@@ -22,7 +22,7 @@ func TestHandlerController_DeleteHandler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	type fields struct {
-		querier sqlc.Querier
+		querier userQuerier
 	}
 	type args struct {
 		c *gin.Context

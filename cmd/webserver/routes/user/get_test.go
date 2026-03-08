@@ -23,7 +23,7 @@ func TestHandlerController_IndexHandler(t *testing.T) {
 	}
 
 	type fields struct {
-		querier sqlc.Querier
+		querier userQuerier
 	}
 	type args struct {
 		c *gin.Context
@@ -172,7 +172,7 @@ func TestHandlerController_GetHandler(t *testing.T) {
 	}
 
 	type fields struct {
-		querier sqlc.Querier
+		querier userQuerier
 	}
 	type args struct {
 		c *gin.Context

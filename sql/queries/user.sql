@@ -18,4 +18,3 @@ RETURNING id;
 DELETE FROM homepage_schema.user
 	WHERE name = $1
 	RETURNING *;
-

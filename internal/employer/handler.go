@@ -3,6 +3,7 @@ package employer
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -12,8 +13,11 @@ import (
 	"goapplyjob-golang-backend/internal/auth"
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
+	gensqlc "goapplyjob-golang-backend/pkg/generated/sqlc"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const (
@@ -28,6 +32,7 @@ type Handler struct {
 	cfg  config.Config
 	db   *database.DB
 	auth *auth.Handler
+	q    *gensqlc.Queries
 }
 
 type organizationResponse struct {
@@ -88,7 +93,7 @@ type jobResponse struct {
 }
 
 func NewHandler(cfg config.Config, db *database.DB, authHandler *auth.Handler) *Handler {
-	return &Handler{cfg: cfg, db: db, auth: authHandler}
+	return &Handler{cfg: cfg, db: db, auth: authHandler, q: gensqlc.New(db.PGX)}
 }
 
 func (h *Handler) Register(router gin.IRouter) {
@@ -118,12 +123,20 @@ func (h *Handler) createOrganization(c *gin.Context) {
 		return
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	var orgID int64
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `INSERT INTO employer_organizations (name, created_by_user_id, created_at) VALUES (?, ?, ?) RETURNING id`, strings.TrimSpace(payload.Name), user.ID, now).Scan(&orgID); err != nil {
+	orgID, err := h.q.CreateEmployerOrganization(c.Request.Context(), gensqlc.CreateEmployerOrganizationParams{
+		Name:            strings.TrimSpace(payload.Name),
+		CreatedByUserID: user.ID,
+		CreatedAt:       now,
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create organization"})
 		return
 	}
-	if _, err := h.db.SQL.ExecContext(c.Request.Context(), `INSERT INTO employer_organization_members (organization_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)`, orgID, user.ID, now); err != nil {
+	if err := h.q.CreateEmployerOrganizationOwnerMembership(c.Request.Context(), gensqlc.CreateEmployerOrganizationOwnerMembershipParams{
+		OrganizationID: orgID,
+		UserID:         user.ID,
+		CreatedAt:      now,
+	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create organization membership"})
 		return
 	}
@@ -135,22 +148,14 @@ func (h *Handler) listOrganizations(c *gin.Context) {
 	if !ok {
 		return
 	}
-	rows, err := h.db.SQL.QueryContext(c.Request.Context(), `SELECT o.id, o.name, m.role
-		FROM employer_organizations o
-		JOIN employer_organization_members m ON m.organization_id = o.id
-		WHERE m.user_id = ?
-		ORDER BY o.created_at DESC, o.id DESC`, user.ID)
+	rows, err := h.q.ListEmployerOrganizationsByUser(c.Request.Context(), user.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load organizations"})
 		return
 	}
-	defer rows.Close()
 	result := []organizationResponse{}
-	for rows.Next() {
-		var item organizationResponse
-		if err := rows.Scan(&item.ID, &item.Name, &item.Role); err == nil {
-			result = append(result, item)
-		}
+	for _, row := range rows {
+		result = append(result, organizationResponse{ID: row.ID, Name: row.Name, Role: row.Role})
 	}
 	c.JSON(http.StatusOK, result)
 }
@@ -181,24 +186,41 @@ func (h *Handler) createJobDraft(c *gin.Context) {
 	now := time.Now().UTC()
 	locationsJSON := marshalStringSlice(payload.Locations)
 	techStackJSON := marshalStringSlice(payload.TechStack)
-	var jobID int64
-	err = h.db.SQL.QueryRowContext(c.Request.Context(), `INSERT INTO employer_jobs (
-		organization_id, created_by_user_id, status, title, department, description, requirements, benefits,
-		employment_type, location_type, locations_json, seniority, tech_stack, apply_url, apply_email,
-		salary_currency, salary_period, salary_min, salary_max, posting_fee_usd, posting_fee_status, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?) RETURNING id`,
-		orgID, user.ID, statusDraft, payload.Title, payload.Department, payload.Description, payload.Requirements, payload.Benefits,
-		payload.EmploymentType, payload.LocationType, locationsJSON, payload.Seniority, techStackJSON, payload.ApplyURL, payload.ApplyEmail,
-		payload.SalaryCurrency, payload.SalaryPeriod, payload.SalaryMin, payload.SalaryMax, max(h.cfg.EmployerPostingFeeUSD, 0),
-		now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano),
-	).Scan(&jobID)
+	jobID, err := h.q.CreateEmployerJobDraft(c.Request.Context(), gensqlc.CreateEmployerJobDraftParams{
+		OrganizationID:  orgID,
+		CreatedByUserID: user.ID,
+		Status:          statusDraft,
+		Title:           nullableText(payload.Title),
+		Department:      nullableText(payload.Department),
+		Description:     nullableText(payload.Description),
+		Requirements:    nullableText(payload.Requirements),
+		Benefits:        nullableText(payload.Benefits),
+		EmploymentType:  nullableText(payload.EmploymentType),
+		LocationType:    nullableText(payload.LocationType),
+		LocationsJson:   nullableText(locationsJSON),
+		Seniority:       nullableText(payload.Seniority),
+		TechStack:       nullableText(techStackJSON),
+		ApplyUrl:        nullableText(payload.ApplyURL),
+		ApplyEmail:      nullableText(payload.ApplyEmail),
+		SalaryCurrency:  nullableText(payload.SalaryCurrency),
+		SalaryPeriod:    nullableText(payload.SalaryPeriod),
+		SalaryMin:       nullableFloat(payload.SalaryMin),
+		SalaryMax:       nullableFloat(payload.SalaryMax),
+		PostingFeeUsd:   int32(max(h.cfg.EmployerPostingFeeUSD, 0)),
+		CreatedAt:       now.Format(time.RFC3339Nano),
+		UpdatedAt:       now.Format(time.RFC3339Nano),
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create draft"})
 		return
 	}
 	if payload.Title != nil && strings.TrimSpace(*payload.Title) != "" {
 		slug := slugify(*payload.Title) + "-" + strconv.FormatInt(jobID, 10)
-		_, _ = h.db.SQL.ExecContext(c.Request.Context(), `UPDATE employer_jobs SET slug = ?, updated_at = ? WHERE id = ?`, slug, time.Now().UTC().Format(time.RFC3339Nano), jobID)
+		_ = h.q.UpdateEmployerJobSlug(c.Request.Context(), gensqlc.UpdateEmployerJobSlugParams{
+			Slug:      pgtype.Text{String: slug, Valid: true},
+			UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			ID:        jobID,
+		})
 	}
 	_ = h.addAuditEvent(c, jobID, user.ID, "draft_created", map[string]any{"organization_id": orgID})
 	h.respondJob(c, jobID)
@@ -209,32 +231,24 @@ func (h *Handler) listJobs(c *gin.Context) {
 	if !ok {
 		return
 	}
-	query := `SELECT j.id
-		FROM employer_jobs j
-		JOIN employer_organization_members m ON m.organization_id = j.organization_id
-		WHERE m.user_id = ?`
-	args := []any{user.ID}
-	if orgID := strings.TrimSpace(c.Query("organization_id")); orgID != "" {
-		query += ` AND j.organization_id = ?`
-		args = append(args, orgID)
+	orgID := int64(0)
+	if raw := strings.TrimSpace(c.Query("organization_id")); raw != "" {
+		if parsed, parseErr := strconv.ParseInt(raw, 10, 64); parseErr == nil {
+			orgID = parsed
+		}
 	}
-	if statusFilter := strings.TrimSpace(c.Query("status_filter")); statusFilter != "" {
-		query += ` AND j.status = ?`
-		args = append(args, statusFilter)
-	}
-	query += ` ORDER BY j.updated_at DESC, j.id DESC`
-	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, args...)
+	statusFilter := strings.TrimSpace(c.Query("status_filter"))
+	ids, err := h.q.ListEmployerJobIDsByUser(c.Request.Context(), gensqlc.ListEmployerJobIDsByUserParams{
+		UserID:  user.ID,
+		Column2: orgID,
+		Column3: statusFilter,
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs"})
 		return
 	}
-	defer rows.Close()
 	result := []jobResponse{}
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			continue
-		}
+	for _, id := range ids {
 		item, err := h.loadJobByID(c, id)
 		if err == nil {
 			result = append(result, item)
@@ -294,30 +308,27 @@ func (h *Handler) updateJob(c *gin.Context) {
 	if job.Status == statusPublished {
 		nextStatus = statusReview
 	}
-	_, err = h.db.SQL.ExecContext(c.Request.Context(), `UPDATE employer_jobs SET
-		title = COALESCE(?, title),
-		department = COALESCE(?, department),
-		description = COALESCE(?, description),
-		requirements = COALESCE(?, requirements),
-		benefits = COALESCE(?, benefits),
-		employment_type = COALESCE(?, employment_type),
-		location_type = COALESCE(?, location_type),
-		locations_json = COALESCE(?, locations_json),
-		seniority = COALESCE(?, seniority),
-		tech_stack = COALESCE(?, tech_stack),
-		apply_url = COALESCE(?, apply_url),
-		apply_email = COALESCE(?, apply_email),
-		salary_currency = COALESCE(?, salary_currency),
-		salary_period = COALESCE(?, salary_period),
-		salary_min = COALESCE(?, salary_min),
-		salary_max = COALESCE(?, salary_max),
-		status = ?,
-		updated_at = ?
-		WHERE id = ?`,
-		payload.Title, payload.Department, payload.Description, payload.Requirements, payload.Benefits,
-		payload.EmploymentType, payload.LocationType, locationsJSON, payload.Seniority, techStackJSON,
-		payload.ApplyURL, payload.ApplyEmail, payload.SalaryCurrency, payload.SalaryPeriod, payload.SalaryMin, payload.SalaryMax,
-		nextStatus, time.Now().UTC().Format(time.RFC3339Nano), jobID)
+	err = h.q.UpdateEmployerJobPatch(c.Request.Context(), gensqlc.UpdateEmployerJobPatchParams{
+		Title:          nullableText(payload.Title),
+		Department:     nullableText(payload.Department),
+		Description:    nullableText(payload.Description),
+		Requirements:   nullableText(payload.Requirements),
+		Benefits:       nullableText(payload.Benefits),
+		EmploymentType: nullableText(payload.EmploymentType),
+		LocationType:   nullableText(payload.LocationType),
+		LocationsJson:  nullableText(locationsJSON),
+		Seniority:      nullableText(payload.Seniority),
+		TechStack:      nullableText(techStackJSON),
+		ApplyUrl:       nullableText(payload.ApplyURL),
+		ApplyEmail:     nullableText(payload.ApplyEmail),
+		SalaryCurrency: nullableText(payload.SalaryCurrency),
+		SalaryPeriod:   nullableText(payload.SalaryPeriod),
+		SalaryMin:      nullableFloat(payload.SalaryMin),
+		SalaryMax:      nullableFloat(payload.SalaryMax),
+		Status:         nextStatus,
+		UpdatedAt:      time.Now().UTC().Format(time.RFC3339Nano),
+		ID:             jobID,
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to update job"})
 		return
@@ -354,8 +365,12 @@ func (h *Handler) payPostingFee(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"detail": "Insufficient role"})
 		return
 	}
-	_, _ = h.db.SQL.ExecContext(c.Request.Context(), `UPDATE employer_jobs SET posting_fee_status = 'paid', posting_fee_paid_at = ?, updated_at = ? WHERE id = ?`,
-		time.Now().UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano), jobID)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_ = h.q.MarkEmployerJobPostingFeePaid(c.Request.Context(), gensqlc.MarkEmployerJobPostingFeePaidParams{
+		PostingFeePaidAt: pgtype.Text{String: now, Valid: true},
+		UpdatedAt:        now,
+		ID:               jobID,
+	})
 	_ = h.addAuditEvent(c, jobID, user.ID, "posting_fee_paid", map[string]any{"posting_fee_usd": max(h.cfg.EmployerPostingFeeUSD, 0)})
 	h.respondJob(c, jobID)
 }
@@ -413,14 +428,26 @@ func (h *Handler) transitionStatus(c *gin.Context, nextStatus string, allowed fu
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	switch nextStatus {
 	case statusPublished:
-		_, _ = h.db.SQL.ExecContext(c.Request.Context(), `UPDATE employer_jobs SET status = ?, published_at = COALESCE(published_at, ?), expires_at = COALESCE(expires_at, ?), closed_at = NULL, updated_at = ? WHERE id = ?`,
-			nextStatus, now, time.Now().UTC().Add(30*24*time.Hour).Format(time.RFC3339Nano), now, jobID)
+		_ = h.q.UpdateEmployerJobStatusPublished(c.Request.Context(), gensqlc.UpdateEmployerJobStatusPublishedParams{
+			Status:      nextStatus,
+			PublishedAt: pgtype.Text{String: now, Valid: true},
+			ExpiresAt:   pgtype.Text{String: time.Now().UTC().Add(30 * 24 * time.Hour).Format(time.RFC3339Nano), Valid: true},
+			UpdatedAt:   now,
+			ID:          jobID,
+		})
 	case statusClosed:
-		_, _ = h.db.SQL.ExecContext(c.Request.Context(), `UPDATE employer_jobs SET status = ?, closed_at = ?, updated_at = ? WHERE id = ?`,
-			nextStatus, now, now, jobID)
+		_ = h.q.UpdateEmployerJobStatusClosed(c.Request.Context(), gensqlc.UpdateEmployerJobStatusClosedParams{
+			Status:    nextStatus,
+			ClosedAt:  pgtype.Text{String: now, Valid: true},
+			UpdatedAt: now,
+			ID:        jobID,
+		})
 	default:
-		_, _ = h.db.SQL.ExecContext(c.Request.Context(), `UPDATE employer_jobs SET status = ?, updated_at = ? WHERE id = ?`,
-			nextStatus, now, jobID)
+		_ = h.q.UpdateEmployerJobStatusSimple(c.Request.Context(), gensqlc.UpdateEmployerJobStatusSimpleParams{
+			Status:    nextStatus,
+			UpdatedAt: now,
+			ID:        jobID,
+		})
 	}
 	_ = h.addAuditEvent(c, jobID, user.ID, eventType, nil)
 	h.respondJob(c, jobID)
@@ -439,27 +466,36 @@ func (h *Handler) resolveOrganizationForCreate(c *gin.Context, userID int64, req
 	if requested != nil && *requested > 0 {
 		return h.requireOrganizationMember(c, *requested, userID)
 	}
-	var orgID int64
-	var role string
-	err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT organization_id, role FROM employer_organization_members WHERE user_id = ? AND role = 'owner' ORDER BY id ASC LIMIT 1`, userID).Scan(&orgID, &role)
+	ownerMembership, err := h.q.GetOwnerEmployerOrganizationByUser(c.Request.Context(), userID)
 	if err == nil {
-		return orgID, role, nil
+		return ownerMembership.OrganizationID, ownerMembership.Role, nil
 	}
-	if err != sql.ErrNoRows {
+	if !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, pgx.ErrNoRows) {
 		return 0, "", err
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	name := strings.SplitN("user-"+strconv.FormatInt(userID, 10), "@", 2)[0] + " jobs"
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `INSERT INTO employer_organizations (name, created_by_user_id, created_at) VALUES (?, ?, ?) RETURNING id`, name, userID, now).Scan(&orgID); err != nil {
+	orgID, err := h.q.CreateEmployerOrganization(c.Request.Context(), gensqlc.CreateEmployerOrganizationParams{
+		Name:            name,
+		CreatedByUserID: userID,
+		CreatedAt:       now,
+	})
+	if err != nil {
 		return 0, "", err
 	}
-	_, err = h.db.SQL.ExecContext(c.Request.Context(), `INSERT INTO employer_organization_members (organization_id, user_id, role, created_at) VALUES (?, ?, 'owner', ?)`, orgID, userID, now)
+	err = h.q.CreateEmployerOrganizationOwnerMembership(c.Request.Context(), gensqlc.CreateEmployerOrganizationOwnerMembershipParams{
+		OrganizationID: orgID,
+		UserID:         userID,
+		CreatedAt:      now,
+	})
 	return orgID, "owner", err
 }
 
 func (h *Handler) requireOrganizationMember(c *gin.Context, orgID, userID int64) (int64, string, error) {
-	var role string
-	err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT role FROM employer_organization_members WHERE organization_id = ? AND user_id = ? LIMIT 1`, orgID, userID).Scan(&role)
+	role, err := h.q.GetEmployerOrganizationMemberRole(c.Request.Context(), gensqlc.GetEmployerOrganizationMemberRoleParams{
+		OrganizationID: orgID,
+		UserID:         userID,
+	})
 	if err != nil {
 		return 0, "", err
 	}
@@ -467,28 +503,39 @@ func (h *Handler) requireOrganizationMember(c *gin.Context, orgID, userID int64)
 }
 
 func (h *Handler) requireJobMember(c *gin.Context, jobID, userID int64) (employerJob, string, error) {
-	var job employerJob
-	var orgID int64
-	err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT id, organization_id, status, posting_fee_status FROM employer_jobs WHERE id = ? LIMIT 1`, jobID).Scan(&job.ID, &orgID, &job.Status, &job.PostingFeeStatus)
+	jobRow, err := h.q.GetEmployerJobForMemberCheck(c.Request.Context(), jobID)
 	if err != nil {
 		return employerJob{}, "", err
 	}
-	var role string
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT role FROM employer_organization_members WHERE organization_id = ? AND user_id = ? LIMIT 1`, orgID, userID).Scan(&role); err != nil {
+	role, err := h.q.GetEmployerOrganizationMemberRole(c.Request.Context(), gensqlc.GetEmployerOrganizationMemberRoleParams{
+		OrganizationID: jobRow.OrganizationID,
+		UserID:         userID,
+	})
+	if err != nil {
 		return employerJob{}, "", err
 	}
-	return job, role, nil
+	return employerJob{
+		ID:               jobRow.ID,
+		Status:           jobRow.Status,
+		PostingFeeStatus: jobRow.PostingFeeStatus,
+	}, role, nil
 }
 
 func (h *Handler) addAuditEvent(c *gin.Context, jobID, actorUserID int64, eventType string, detail map[string]any) error {
-	var detailJSON any
+	var detailJSON string
+	detailValid := false
 	if detail != nil {
 		body, _ := json.Marshal(detail)
 		detailJSON = string(body)
+		detailValid = true
 	}
-	_, err := h.db.SQL.ExecContext(c.Request.Context(), `INSERT INTO employer_job_audit_events (employer_job_id, actor_user_id, event_type, detail_json, created_at) VALUES (?, ?, ?, ?, ?)`,
-		jobID, actorUserID, eventType, detailJSON, time.Now().UTC().Format(time.RFC3339Nano))
-	return err
+	return h.q.InsertEmployerJobAuditEvent(c.Request.Context(), gensqlc.InsertEmployerJobAuditEventParams{
+		EmployerJobID: jobID,
+		ActorUserID:   pgtype.Int8{Int64: actorUserID, Valid: true},
+		EventType:     eventType,
+		DetailJson:    pgtype.Text{String: detailJSON, Valid: detailValid},
+		CreatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
+	})
 }
 
 func (h *Handler) respondJob(c *gin.Context, jobID int64) {
@@ -501,47 +548,47 @@ func (h *Handler) respondJob(c *gin.Context, jobID int64) {
 }
 
 func (h *Handler) loadJobByID(c *gin.Context, jobID int64) (jobResponse, error) {
-	row := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT
-		id, organization_id, status, title, slug, department, description, requirements, benefits, employment_type,
-		location_type, locations_json, seniority, tech_stack, apply_url, apply_email, salary_currency, salary_period,
-		salary_min, salary_max, posting_fee_usd, posting_fee_status, posting_fee_paid_at, published_at, closed_at, expires_at, created_at, updated_at
-		FROM employer_jobs WHERE id = ? LIMIT 1`, jobID)
-	var item jobResponse
-	var title, slug, department, description, requirements, benefits, employmentType, locationType, locationsJSON, seniority, techStackJSON, applyURL, applyEmail, salaryCurrency, salaryPeriod sql.NullString
-	var salaryMin, salaryMax sql.NullFloat64
-	var postingPaidAt, publishedAt, closedAt, expiresAt sql.NullString
-	if err := row.Scan(&item.ID, &item.OrganizationID, &item.Status, &title, &slug, &department, &description, &requirements, &benefits, &employmentType, &locationType, &locationsJSON, &seniority, &techStackJSON, &applyURL, &applyEmail, &salaryCurrency, &salaryPeriod, &salaryMin, &salaryMax, &item.PostingFeeUSD, &item.PostingStatus, &postingPaidAt, &publishedAt, &closedAt, &expiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	row, err := h.q.GetEmployerJobByID(c.Request.Context(), jobID)
+	if err != nil {
 		return jobResponse{}, err
 	}
-	item.Title = nullableString(title)
-	item.Slug = nullableString(slug)
-	item.Department = nullableString(department)
-	item.Description = nullableString(description)
-	item.Requirements = nullableString(requirements)
-	item.Benefits = nullableString(benefits)
-	item.EmploymentType = nullableString(employmentType)
-	item.LocationType = nullableString(locationType)
-	item.Seniority = nullableString(seniority)
-	item.ApplyURL = nullableString(applyURL)
-	item.ApplyEmail = nullableString(applyEmail)
-	item.SalaryCurrency = nullableString(salaryCurrency)
-	item.SalaryPeriod = nullableString(salaryPeriod)
-	item.SalaryMin = nullableFloat64(salaryMin)
-	item.SalaryMax = nullableFloat64(salaryMax)
-	item.PostingPaidAt = nullableString(postingPaidAt)
-	item.PublishedAt = nullableString(publishedAt)
-	item.ClosedAt = nullableString(closedAt)
-	item.ExpiresAt = nullableString(expiresAt)
-	if locationsJSON.Valid && strings.TrimSpace(locationsJSON.String) != "" {
-		_ = json.Unmarshal([]byte(locationsJSON.String), &item.Locations)
+	var item jobResponse
+	item.ID = row.ID
+	item.OrganizationID = row.OrganizationID
+	item.Status = row.Status
+	item.PostingFeeUSD = int(row.PostingFeeUsd)
+	item.PostingStatus = row.PostingFeeStatus
+	item.CreatedAt = row.CreatedAt
+	item.UpdatedAt = row.UpdatedAt
+	item.Title = nullableString(row.Title)
+	item.Slug = nullableString(row.Slug)
+	item.Department = nullableString(row.Department)
+	item.Description = nullableString(row.Description)
+	item.Requirements = nullableString(row.Requirements)
+	item.Benefits = nullableString(row.Benefits)
+	item.EmploymentType = nullableString(row.EmploymentType)
+	item.LocationType = nullableString(row.LocationType)
+	item.Seniority = nullableString(row.Seniority)
+	item.ApplyURL = nullableString(row.ApplyUrl)
+	item.ApplyEmail = nullableString(row.ApplyEmail)
+	item.SalaryCurrency = nullableString(row.SalaryCurrency)
+	item.SalaryPeriod = nullableString(row.SalaryPeriod)
+	item.SalaryMin = nullableFloat64(row.SalaryMin)
+	item.SalaryMax = nullableFloat64(row.SalaryMax)
+	item.PostingPaidAt = nullableString(row.PostingFeePaidAt)
+	item.PublishedAt = nullableString(row.PublishedAt)
+	item.ClosedAt = nullableString(row.ClosedAt)
+	item.ExpiresAt = nullableString(row.ExpiresAt)
+	if row.LocationsJson.Valid && strings.TrimSpace(row.LocationsJson.String) != "" {
+		_ = json.Unmarshal([]byte(row.LocationsJson.String), &item.Locations)
 	}
-	if techStackJSON.Valid && strings.TrimSpace(techStackJSON.String) != "" {
-		_ = json.Unmarshal([]byte(techStackJSON.String), &item.TechStack)
+	if row.TechStack.Valid && strings.TrimSpace(row.TechStack.String) != "" {
+		_ = json.Unmarshal([]byte(row.TechStack.String), &item.TechStack)
 	}
 	return item, nil
 }
 
-func nullableString(value sql.NullString) *string {
+func nullableString(value pgtype.Text) *string {
 	if !value.Valid || strings.TrimSpace(value.String) == "" {
 		return nil
 	}
@@ -549,7 +596,7 @@ func nullableString(value sql.NullString) *string {
 	return &v
 }
 
-func nullableFloat64(value sql.NullFloat64) *float64 {
+func nullableFloat64(value pgtype.Float8) *float64 {
 	if !value.Valid {
 		return nil
 	}
@@ -557,12 +604,31 @@ func nullableFloat64(value sql.NullFloat64) *float64 {
 	return &v
 }
 
-func marshalStringSlice(values []string) any {
+func marshalStringSlice(values []string) *string {
 	if len(values) == 0 {
 		return nil
 	}
 	body, _ := json.Marshal(values)
-	return string(body)
+	value := string(body)
+	return &value
+}
+
+func nullableText(value *string) pgtype.Text {
+	if value == nil {
+		return pgtype.Text{}
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: trimmed, Valid: true}
+}
+
+func nullableFloat(value *float64) pgtype.Float8 {
+	if value == nil {
+		return pgtype.Float8{}
+	}
+	return pgtype.Float8{Float64: *value, Valid: true}
 }
 
 func parseJobID(raw string) (int64, error) {

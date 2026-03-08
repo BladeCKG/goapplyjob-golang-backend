@@ -2,6 +2,7 @@ package jobactions
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -9,13 +10,16 @@ import (
 
 	"goapplyjob-golang-backend/internal/auth"
 	"goapplyjob-golang-backend/internal/database"
+	gensqlc "goapplyjob-golang-backend/pkg/generated/sqlc"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 )
 
 type Handler struct {
 	db   *database.DB
 	auth *auth.Handler
+	q    *gensqlc.Queries
 }
 
 type actionItem struct {
@@ -27,7 +31,7 @@ type actionItem struct {
 }
 
 func NewHandler(db *database.DB, authHandler *auth.Handler) *Handler {
-	return &Handler{db: db, auth: authHandler}
+	return &Handler{db: db, auth: authHandler, q: gensqlc.New(db.PGX)}
 }
 
 func (h *Handler) Register(router gin.IRouter) {
@@ -49,33 +53,24 @@ func (h *Handler) getJobActions(c *gin.Context) {
 		return
 	}
 
-	placeholders := make([]string, 0, len(jobIDs))
-	args := make([]any, 0, len(jobIDs)+1)
-	args = append(args, user.ID)
-	for _, jobID := range jobIDs {
-		placeholders = append(placeholders, "?")
-		args = append(args, jobID)
-	}
-	rows, err := h.db.SQL.QueryContext(c.Request.Context(),
-		`SELECT parsed_job_id, is_applied, is_saved, is_hidden, updated_at
-		 FROM user_job_actions
-		 WHERE user_id = ? AND parsed_job_id IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	rows, err := h.q.GetUserJobActionsByJobIDs(c.Request.Context(), gensqlc.GetUserJobActionsByJobIDsParams{
+		UserID:  user.ID,
+		Column2: jobIDs,
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load job actions"})
 		return
 	}
-	defer rows.Close()
 
 	items := []actionItem{}
-	for rows.Next() {
-		var item actionItem
-		var isApplied, isSaved, isHidden int
-		if err := rows.Scan(&item.JobID, &isApplied, &isSaved, &isHidden, &item.UpdatedAt); err == nil {
-			item.IsApplied = isApplied == 1
-			item.IsSaved = isSaved == 1
-			item.IsHidden = isHidden == 1
-			items = append(items, item)
-		}
+	for _, row := range rows {
+		items = append(items, actionItem{
+			JobID:     row.ParsedJobID,
+			IsApplied: row.IsApplied == 1,
+			IsSaved:   row.IsSaved == 1,
+			IsHidden:  row.IsHidden == 1,
+			UpdatedAt: row.UpdatedAt,
+		})
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
@@ -105,39 +100,48 @@ func (h *Handler) updateJobAction(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "At least one action flag is required"})
 		return
 	}
-	var exists int
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT COUNT(1) FROM parsed_jobs WHERE id = ?`, jobID).Scan(&exists); err != nil || exists == 0 {
+	exists, err := h.q.CountParsedJobsByID(c.Request.Context(), jobID)
+	if err != nil || exists == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"detail": "Job not found"})
 		return
 	}
 
-	tx, err := h.db.SQL.BeginTx(c.Request.Context(), nil)
+	tx, err := h.db.PGX.Begin(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to update job action"})
 		return
 	}
-	defer tx.Rollback()
+	defer tx.Rollback(c.Request.Context())
+	qtx := h.q.WithTx(tx)
 
 	var current actionItem
-	var isApplied, isSaved, isHidden int
-	rowErr := tx.QueryRowContext(c.Request.Context(), `SELECT parsed_job_id, is_applied, is_saved, is_hidden, updated_at FROM user_job_actions WHERE user_id = ? AND parsed_job_id = ? LIMIT 1`, user.ID, jobID).Scan(&current.JobID, &isApplied, &isSaved, &isHidden, &current.UpdatedAt)
-	if rowErr != nil && rowErr != sql.ErrNoRows {
+	row, rowErr := qtx.GetUserJobActionByUserAndJob(c.Request.Context(), gensqlc.GetUserJobActionByUserAndJobParams{
+		UserID:      user.ID,
+		ParsedJobID: jobID,
+	})
+	if rowErr != nil && !errors.Is(rowErr, sql.ErrNoRows) && !errors.Is(rowErr, pgx.ErrNoRows) {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to update job action"})
 		return
 	}
-	if rowErr == sql.ErrNoRows {
+	if errors.Is(rowErr, sql.ErrNoRows) || errors.Is(rowErr, pgx.ErrNoRows) {
 		now := time.Now().UTC().Format(time.RFC3339Nano)
-		_, err = tx.ExecContext(c.Request.Context(), `INSERT INTO user_job_actions (user_id, parsed_job_id, is_applied, is_saved, is_hidden, updated_at, created_at) VALUES (?, ?, 0, 0, 0, ?, ?)`,
-			user.ID, jobID, now, now)
+		err = qtx.InsertUserJobActionDefaults(c.Request.Context(), gensqlc.InsertUserJobActionDefaultsParams{
+			UserID:      user.ID,
+			ParsedJobID: jobID,
+			UpdatedAt:   now,
+			CreatedAt:   now,
+		})
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to update job action"})
 			return
 		}
 		current = actionItem{JobID: jobID, UpdatedAt: now}
 	} else {
-		current.IsApplied = isApplied == 1
-		current.IsSaved = isSaved == 1
-		current.IsHidden = isHidden == 1
+		current.JobID = row.ParsedJobID
+		current.IsApplied = row.IsApplied == 1
+		current.IsSaved = row.IsSaved == 1
+		current.IsHidden = row.IsHidden == 1
+		current.UpdatedAt = row.UpdatedAt
 	}
 
 	if payload.IsApplied != nil {
@@ -150,15 +154,19 @@ func (h *Handler) updateJobAction(c *gin.Context) {
 		current.IsHidden = *payload.IsHidden
 	}
 	current.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	_, err = tx.ExecContext(c.Request.Context(),
-		`UPDATE user_job_actions SET is_applied = ?, is_saved = ?, is_hidden = ?, updated_at = ? WHERE user_id = ? AND parsed_job_id = ?`,
-		boolToInt(current.IsApplied), boolToInt(current.IsSaved), boolToInt(current.IsHidden), current.UpdatedAt, user.ID, jobID,
-	)
+	err = qtx.UpdateUserJobActionByUserAndJob(c.Request.Context(), gensqlc.UpdateUserJobActionByUserAndJobParams{
+		IsApplied:   int32(boolToInt(current.IsApplied)),
+		IsSaved:     int32(boolToInt(current.IsSaved)),
+		IsHidden:    int32(boolToInt(current.IsHidden)),
+		UpdatedAt:   current.UpdatedAt,
+		UserID:      user.ID,
+		ParsedJobID: jobID,
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to update job action"})
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to update job action"})
 		return
 	}
@@ -171,20 +179,15 @@ func (h *Handler) getJobActionsSummary(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Not authenticated"})
 		return
 	}
-	var appliedCount, savedCount, hiddenCount int
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT
-		COALESCE(SUM(is_applied), 0),
-		COALESCE(SUM(is_saved), 0),
-		COALESCE(SUM(is_hidden), 0)
-		FROM user_job_actions
-		WHERE user_id = ?`, user.ID).Scan(&appliedCount, &savedCount, &hiddenCount); err != nil {
+	summary, err := h.q.GetUserJobActionsSummary(c.Request.Context(), user.ID)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load job action summary"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"applied_count": appliedCount,
-		"saved_count":   savedCount,
-		"hidden_count":  hiddenCount,
+		"applied_count": summary.Column1,
+		"saved_count":   summary.Column2,
+		"hidden_count":  summary.Column3,
 	})
 }
 
@@ -200,35 +203,28 @@ func (h *Handler) clearJobActions(c *gin.Context) {
 		return
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	var result sql.Result
+	var clearedCount int64
 	switch action {
 	case "applied":
-		result, err = h.db.SQL.ExecContext(c.Request.Context(),
-			`UPDATE user_job_actions
-			 SET is_applied = 0, updated_at = ?
-			 WHERE user_id = ? AND is_applied = 1`,
-			now, user.ID,
-		)
+		clearedCount, err = h.q.ClearAppliedJobActionsByUser(c.Request.Context(), gensqlc.ClearAppliedJobActionsByUserParams{
+			UpdatedAt: now,
+			UserID:    user.ID,
+		})
 	case "saved":
-		result, err = h.db.SQL.ExecContext(c.Request.Context(),
-			`UPDATE user_job_actions
-			 SET is_saved = 0, updated_at = ?
-			 WHERE user_id = ? AND is_saved = 1`,
-			now, user.ID,
-		)
+		clearedCount, err = h.q.ClearSavedJobActionsByUser(c.Request.Context(), gensqlc.ClearSavedJobActionsByUserParams{
+			UpdatedAt: now,
+			UserID:    user.ID,
+		})
 	default:
-		result, err = h.db.SQL.ExecContext(c.Request.Context(),
-			`UPDATE user_job_actions
-			 SET is_hidden = 0, updated_at = ?
-			 WHERE user_id = ? AND is_hidden = 1`,
-			now, user.ID,
-		)
+		clearedCount, err = h.q.ClearHiddenJobActionsByUser(c.Request.Context(), gensqlc.ClearHiddenJobActionsByUserParams{
+			UpdatedAt: now,
+			UserID:    user.ID,
+		})
 	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to clear job actions"})
 		return
 	}
-	clearedCount, _ := result.RowsAffected()
 	c.JSON(http.StatusOK, gin.H{
 		"cleared_count": clearedCount,
 		"action":        action,

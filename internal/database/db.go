@@ -14,11 +14,13 @@ import (
 
 	"goapplyjob-golang-backend/internal/config"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 type DB struct {
 	SQL *SQLConn
+	PGX *pgxpool.Pool
 }
 
 type SQLConn struct {
@@ -71,10 +73,24 @@ func Open(dsn string) (*DB, error) {
 		return nil, err
 	}
 
-	return &DB{SQL: &SQLConn{inner: db}}, nil
+	pool, err := pgxpool.New(context.Background(), dsn)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := pool.Ping(context.Background()); err != nil {
+		pool.Close()
+		_ = db.Close()
+		return nil, err
+	}
+
+	return &DB{SQL: &SQLConn{inner: db}, PGX: pool}, nil
 }
 
 func (db *DB) Close() error {
+	if db.PGX != nil {
+		db.PGX.Close()
+	}
 	return db.SQL.Close()
 }
 
@@ -198,6 +214,14 @@ func (c *SQLConn) Query(query string, args ...any) (*sql.Rows, error) {
 
 func (c *SQLConn) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
 	return c.inner.QueryRowContext(ctx, rewritePlaceholders(query), args...)
+}
+
+func (c *SQLConn) PrepareContext(ctx context.Context, query string) (*sql.Stmt, error) {
+	return c.inner.PrepareContext(ctx, rewritePlaceholders(query))
+}
+
+func (c *SQLConn) Raw() *sql.DB {
+	return c.inner
 }
 
 func (c *SQLConn) Begin() (*Tx, error) {

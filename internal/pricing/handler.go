@@ -17,14 +17,18 @@ import (
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
 	paymentcrypto "goapplyjob-golang-backend/internal/payments/crypto"
+	gensqlc "goapplyjob-golang-backend/pkg/generated/sqlc"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Handler struct {
 	cfg  config.Config
 	db   *database.DB
 	auth *auth.Handler
+	q    *gensqlc.Queries
 }
 
 var basePlanDefinitions = []struct {
@@ -42,7 +46,7 @@ var basePlanDefinitions = []struct {
 }
 
 func NewHandler(cfg config.Config, db *database.DB, authHandler *auth.Handler) *Handler {
-	return &Handler{cfg: cfg, db: db, auth: authHandler}
+	return &Handler{cfg: cfg, db: db, auth: authHandler, q: gensqlc.New(db.PGX)}
 }
 
 func (h *Handler) Register(router gin.IRouter) {
@@ -87,32 +91,21 @@ func (h *Handler) listPlans(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load pricing plans"})
 		return
 	}
-	rows, err := h.db.SQL.QueryContext(
-		c.Request.Context(),
-		`SELECT code, name, billing_cycle, duration_days, price_usd
-		 FROM pricing_plans
-		 WHERE is_active = 1
-		 ORDER BY price_usd ASC`,
-	)
+	rows, err := h.q.ListActivePricingPlans(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load pricing plans"})
 		return
 	}
-	defer rows.Close()
 
 	items := []gin.H{}
-	for rows.Next() {
-		var code, name, cycle string
-		var duration, price int
-		if err := rows.Scan(&code, &name, &cycle, &duration, &price); err == nil {
-			items = append(items, gin.H{
-				"code":          code,
-				"name":          name,
-				"billing_cycle": cycle,
-				"duration_days": duration,
-				"price_usd":     price,
-			})
-		}
+	for _, row := range rows {
+		items = append(items, gin.H{
+			"code":          row.Code,
+			"name":          row.Name,
+			"billing_cycle": row.BillingCycle,
+			"duration_days": row.DurationDays,
+			"price_usd":     row.PriceUsd,
+		})
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
@@ -151,34 +144,28 @@ func (h *Handler) subscribe(c *gin.Context) {
 		return
 	}
 
-	var planID int64
-	var planCode, planName string
-	var priceUSD, durationDays int
-	err = h.db.SQL.QueryRowContext(
-		c.Request.Context(),
-		`SELECT id, code, name, duration_days, price_usd
-		 FROM pricing_plans
-		 WHERE code = ? AND is_active = 1
-		 LIMIT 1`,
-		strings.ToLower(strings.TrimSpace(payload.PlanCode)),
-	).Scan(&planID, &planCode, &planName, &durationDays, &priceUSD)
+	plan, err := h.q.GetActivePricingPlanByCode(c.Request.Context(), strings.ToLower(strings.TrimSpace(payload.PlanCode)))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid pricing plan"})
 		return
 	}
+	planID := plan.ID
+	planCode := plan.Code
+	planName := plan.Name
+	durationDays := int(plan.DurationDays)
+	priceUSD := int(plan.PriceUsd)
 	if priceUSD == 0 {
 		now := time.Now().UTC()
-		var paymentID int64
-		if err := h.db.SQL.QueryRowContext(
+		paymentID, err := h.q.CreatePaidInternalPayment(
 			c.Request.Context(),
-			`INSERT INTO pricing_payments
-			(user_id, pricing_plan_id, provider, payment_method, currency, amount_minor, status, provider_checkout_id, checkout_url, provider_payload, paid_at, created_at)
-			VALUES (?, ?, 'internal', 'free', 'USD', 0, 'paid', NULL, NULL, '{}', ?, ?) RETURNING id`,
-			user.ID,
-			planID,
-			now.Format(time.RFC3339Nano),
-			now.Format(time.RFC3339Nano),
-		).Scan(&paymentID); err != nil {
+			gensqlc.CreatePaidInternalPaymentParams{
+				UserID:        user.ID,
+				PricingPlanID: planID,
+				PaidAt:        pgtype.Text{String: now.Format(time.RFC3339Nano), Valid: true},
+				CreatedAt:     now.Format(time.RFC3339Nano),
+			},
+		)
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create payment"})
 			return
 		}
@@ -209,19 +196,17 @@ func (h *Handler) subscribe(c *gin.Context) {
 		cancelURL = h.cfg.PaymentCancelURL
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	var paymentID int64
-	err = h.db.SQL.QueryRowContext(
+	paymentID, err := h.q.CreatePendingPayment(
 		c.Request.Context(),
-		`INSERT INTO pricing_payments
-		(user_id, pricing_plan_id, provider, payment_method, currency, amount_minor, status, provider_checkout_id, checkout_url, provider_payload, created_at)
-		VALUES (?, ?, ?, ?, 'USD', ?, 'pending', NULL, NULL, '{}', ?) RETURNING id`,
-		user.ID,
-		planID,
-		payload.Provider,
-		payload.PaymentMethod,
-		priceUSD*100,
-		now,
-	).Scan(&paymentID)
+		gensqlc.CreatePendingPaymentParams{
+			UserID:        user.ID,
+			PricingPlanID: planID,
+			Provider:      payload.Provider,
+			PaymentMethod: payload.PaymentMethod,
+			AmountMinor:   int32(priceUSD * 100),
+			CreatedAt:     now,
+		},
+	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create payment"})
 		return
@@ -235,15 +220,14 @@ func (h *Handler) subscribe(c *gin.Context) {
 		return
 	}
 	payloadBytes, _ := json.Marshal(providerPayload)
-	_, err = h.db.SQL.ExecContext(
+	err = h.q.UpdatePaymentCheckoutInfo(
 		c.Request.Context(),
-		`UPDATE pricing_payments
-		 SET provider_checkout_id = ?, checkout_url = ?, provider_payload = ?
-		 WHERE id = ?`,
-		checkoutID,
-		checkoutURL,
-		string(payloadBytes),
-		paymentID,
+		gensqlc.UpdatePaymentCheckoutInfoParams{
+			ProviderCheckoutID: pgtype.Text{String: checkoutID, Valid: true},
+			CheckoutUrl:        pgtype.Text{String: checkoutURL, Valid: true},
+			ProviderPayload:    pgtype.Text{String: string(payloadBytes), Valid: true},
+			ID:                 paymentID,
+		},
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create payment"})
@@ -278,7 +262,7 @@ func (h *Handler) confirmPayment(c *gin.Context) {
 		return
 	}
 	if err := h.confirmOrActivatePayment(c, c.Param("paymentID"), user.ID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, pgx.ErrNoRows) {
 			c.JSON(http.StatusNotFound, gin.H{"detail": "Payment not found"})
 			return
 		}
@@ -289,62 +273,55 @@ func (h *Handler) confirmPayment(c *gin.Context) {
 }
 
 func (h *Handler) confirmOrActivatePayment(c *gin.Context, paymentID string, userID int64) error {
-	var (
-		paymentRowID       int64
-		paymentUserID      int64
-		planID             int64
-		paymentStatus      string
-		provider           string
-		providerCheckoutID sql.NullString
-		providerPayloadRaw sql.NullString
-		durationDays       int
-	)
-	err := h.db.SQL.QueryRowContext(
+	paymentIDInt, err := strconv.ParseInt(strings.TrimSpace(paymentID), 10, 64)
+	if err != nil {
+		return sql.ErrNoRows
+	}
+	row, err := h.q.GetPaymentForUser(
 		c.Request.Context(),
-		`SELECT p.id, p.user_id, p.pricing_plan_id, p.status, p.provider, p.provider_checkout_id, p.provider_payload, plan.duration_days
-		 FROM pricing_payments p
-		 JOIN pricing_plans plan ON plan.id = p.pricing_plan_id
-		 WHERE p.id = ? AND p.user_id = ?
-		 LIMIT 1`,
-		paymentID,
-		userID,
-	).Scan(&paymentRowID, &paymentUserID, &planID, &paymentStatus, &provider, &providerCheckoutID, &providerPayloadRaw, &durationDays)
+		gensqlc.GetPaymentForUserParams{
+			ID:     paymentIDInt,
+			UserID: userID,
+		},
+	)
 	if err != nil {
 		return err
 	}
-	if paymentStatus == "paid" {
+	if row.Status == "paid" {
 		return nil
 	}
 
 	resolvedStatus := "pending"
-	if provider == "crypto" {
+	if row.Provider == "crypto" {
 		gateway, err := paymentcrypto.GetGateway(h.cfg)
 		if err == nil {
-			verification, verifyErr := gateway.VerifyPayment(strings.TrimSpace(providerCheckoutID.String), paymentID)
+			verification, verifyErr := gateway.VerifyPayment(strings.TrimSpace(row.ProviderCheckoutID.String), paymentID)
 			if verifyErr == nil && verification != nil {
 				resolvedStatus = string(verification.Status)
 				if verification.ProviderPayload != nil {
-					mergedPayload, mergeErr := mergeProviderPayload(providerPayloadRaw, verification.ProviderPayload)
+					mergedPayload, mergeErr := mergeProviderPayload(row.ProviderPayload, verification.ProviderPayload)
 					if mergeErr == nil {
 						mergedPayload["last_verified_at"] = time.Now().UTC().Format(time.RFC3339Nano)
 						payloadBytes, _ := json.Marshal(mergedPayload)
-						_, _ = h.db.SQL.ExecContext(c.Request.Context(), `UPDATE pricing_payments SET provider_payload = ? WHERE id = ?`, string(payloadBytes), paymentRowID)
+						_ = h.q.UpdatePaymentPayloadByID(c.Request.Context(), gensqlc.UpdatePaymentPayloadByIDParams{
+							ProviderPayload: pgtype.Text{String: string(payloadBytes), Valid: true},
+							ID:              row.ID,
+						})
 					}
 				}
 			} else {
-				resolvedStatus = extractProviderPayloadStatus(providerPayloadRaw)
+				resolvedStatus = extractProviderPayloadStatus(row.ProviderPayload)
 			}
 		}
-	} else if provider == "internal" {
+	} else if row.Provider == "internal" {
 		resolvedStatus = "paid"
 	}
 
 	switch resolvedStatus {
 	case "paid":
-		return h.activatePlan(c, paymentUserID, planID, durationDays, paymentRowID)
+		return h.activatePlan(c, row.UserID, row.PricingPlanID, int(row.DurationDays), row.ID)
 	case "failed":
-		_, err := h.db.SQL.ExecContext(c.Request.Context(), `UPDATE pricing_payments SET status = 'failed' WHERE id = ?`, paymentRowID)
-		return err
+		return h.q.UpdatePaymentFailedByID(c.Request.Context(), row.ID)
 	default:
 		return h.activateSubscription(c, paymentID, userID)
 	}
@@ -365,7 +342,9 @@ func (h *Handler) stripeWebhook(c *gin.Context) {
 			case "checkout.session.completed":
 				_ = h.activateSubscription(c, raw, 0)
 			case "checkout.session.expired", "payment_intent.payment_failed":
-				_, _ = h.db.SQL.ExecContext(c.Request.Context(), `UPDATE pricing_payments SET status = 'failed' WHERE id = ?`, raw)
+				if paymentID, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64); err == nil {
+					_ = h.q.UpdatePaymentFailedByID(c.Request.Context(), paymentID)
+				}
 			}
 		}
 	}
@@ -410,7 +389,7 @@ func (h *Handler) cryptoWebhook(c *gin.Context) {
 		case paymentcrypto.PaymentPaid:
 			_ = h.activatePlan(c, userID, planID, durationDays, paymentRowID)
 		case paymentcrypto.PaymentFailed:
-			_, _ = h.db.SQL.ExecContext(c.Request.Context(), `UPDATE pricing_payments SET status = 'failed' WHERE id = ?`, paymentRowID)
+			_ = h.q.UpdatePaymentFailedByID(c.Request.Context(), paymentRowID)
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -419,22 +398,16 @@ func (h *Handler) cryptoWebhook(c *gin.Context) {
 func (h *Handler) ensurePlans(c *gin.Context) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, plan := range h.planDefinitions() {
-		_, err := h.db.SQL.ExecContext(
+		err := h.q.UpsertPricingPlanByCode(
 			c.Request.Context(),
-			`INSERT INTO pricing_plans (code, name, billing_cycle, duration_days, price_usd, is_active, created_at)
-			 VALUES (?, ?, ?, ?, ?, 1, ?)
-			 ON CONFLICT(code) DO UPDATE SET
-			   name = excluded.name,
-			   billing_cycle = excluded.billing_cycle,
-			   duration_days = excluded.duration_days,
-			   price_usd = excluded.price_usd,
-			   is_active = 1`,
-			plan.Code,
-			plan.Name,
-			plan.BillingCycle,
-			plan.DurationDays,
-			plan.PriceUSD,
-			now,
+			gensqlc.UpsertPricingPlanByCodeParams{
+				Code:         plan.Code,
+				Name:         plan.Name,
+				BillingCycle: plan.BillingCycle,
+				DurationDays: int32(plan.DurationDays),
+				PriceUsd:     int32(plan.PriceUSD),
+				CreatedAt:    now,
+			},
 		)
 		if err != nil {
 			return err
@@ -444,121 +417,149 @@ func (h *Handler) ensurePlans(c *gin.Context) error {
 }
 
 func (h *Handler) activateSubscription(c *gin.Context, paymentID string, userID int64) error {
-	tx, err := h.db.SQL.BeginTx(c.Request.Context(), nil)
+	paymentIDInt, err := strconv.ParseInt(strings.TrimSpace(paymentID), 10, 64)
+	if err != nil {
+		return sql.ErrNoRows
+	}
+	tx, err := h.db.PGX.Begin(c.Request.Context())
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
-
-	query := `SELECT id, user_id, pricing_plan_id, status FROM pricing_payments WHERE id = ?`
-	args := []any{paymentID}
-	if userID != 0 {
-		query += ` AND user_id = ?`
-		args = append(args, userID)
-	}
+	defer tx.Rollback(c.Request.Context())
+	qtx := h.q.WithTx(tx)
 
 	var paymentRowID, paymentUserID, planID int64
 	var paymentStatus string
-	if err := tx.QueryRowContext(c.Request.Context(), query, args...).Scan(&paymentRowID, &paymentUserID, &planID, &paymentStatus); err != nil {
-		return err
+	if userID != 0 {
+		row, err := qtx.GetPaymentByIDAndUser(c.Request.Context(), gensqlc.GetPaymentByIDAndUserParams{
+			ID:     paymentIDInt,
+			UserID: userID,
+		})
+		if err != nil {
+			return err
+		}
+		paymentRowID = row.ID
+		paymentUserID = row.UserID
+		planID = row.PricingPlanID
+		paymentStatus = row.Status
+	} else {
+		row, err := qtx.GetPaymentByID(c.Request.Context(), paymentIDInt)
+		if err != nil {
+			return err
+		}
+		paymentRowID = row.ID
+		paymentUserID = row.UserID
+		planID = row.PricingPlanID
+		paymentStatus = row.Status
 	}
 	if paymentStatus == "paid" {
-		return tx.Commit()
+		return tx.Commit(c.Request.Context())
 	}
 
-	var durationDays int
-	if err := tx.QueryRowContext(c.Request.Context(), `SELECT duration_days FROM pricing_plans WHERE id = ? LIMIT 1`, planID).Scan(&durationDays); err != nil {
+	durationDays, err := qtx.GetPlanDurationByID(c.Request.Context(), planID)
+	if err != nil {
 		return err
 	}
 
 	now := time.Now().UTC()
 	endsAt := now.Add(time.Duration(durationDays) * 24 * time.Hour)
-	if _, err := tx.ExecContext(c.Request.Context(), `UPDATE user_subscriptions SET is_active = 0 WHERE user_id = ? AND is_active = 1`, paymentUserID); err != nil {
+	if err := qtx.DeactivateActiveSubscriptionsByUser(c.Request.Context(), paymentUserID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(
+	if err := qtx.CreateUserSubscriptionActive(
 		c.Request.Context(),
-		`INSERT INTO user_subscriptions (user_id, pricing_plan_id, starts_at, ends_at, is_active, created_at) VALUES (?, ?, ?, ?, 1, ?)`,
-		paymentUserID,
-		planID,
-		now.Format(time.RFC3339Nano),
-		endsAt.Format(time.RFC3339Nano),
-		now.Format(time.RFC3339Nano),
+		gensqlc.CreateUserSubscriptionActiveParams{
+			UserID:        paymentUserID,
+			PricingPlanID: planID,
+			StartsAt:      now.Format(time.RFC3339Nano),
+			EndsAt:        endsAt.Format(time.RFC3339Nano),
+			CreatedAt:     now.Format(time.RFC3339Nano),
+		},
 	); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(c.Request.Context(), `UPDATE pricing_payments SET status = 'paid', paid_at = ? WHERE id = ?`, now.Format(time.RFC3339Nano), paymentRowID); err != nil {
+	if err := qtx.MarkPaymentPaidByID(
+		c.Request.Context(),
+		gensqlc.MarkPaymentPaidByIDParams{
+			PaidAt: pgtype.Text{String: now.Format(time.RFC3339Nano), Valid: true},
+			ID:     paymentRowID,
+		},
+	); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return tx.Commit(c.Request.Context())
 }
 
 func (h *Handler) activatePlan(c *gin.Context, userID, planID int64, durationDays int, paymentID int64) error {
 	now := time.Now().UTC()
 	endsAt := now.Add(time.Duration(durationDays) * 24 * time.Hour)
-	tx, err := h.db.SQL.BeginTx(c.Request.Context(), nil)
+	tx, err := h.db.PGX.Begin(c.Request.Context())
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(c.Request.Context(), `UPDATE user_subscriptions SET is_active = 0 WHERE user_id = ? AND is_active = 1`, userID); err != nil {
+	defer tx.Rollback(c.Request.Context())
+	qtx := h.q.WithTx(tx)
+	if err := qtx.DeactivateActiveSubscriptionsByUser(c.Request.Context(), userID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(
+	if err := qtx.CreateUserSubscriptionActive(
 		c.Request.Context(),
-		`INSERT INTO user_subscriptions (user_id, pricing_plan_id, starts_at, ends_at, is_active, created_at) VALUES (?, ?, ?, ?, 1, ?)`,
-		userID,
-		planID,
-		now.Format(time.RFC3339Nano),
-		endsAt.Format(time.RFC3339Nano),
-		now.Format(time.RFC3339Nano),
+		gensqlc.CreateUserSubscriptionActiveParams{
+			UserID:        userID,
+			PricingPlanID: planID,
+			StartsAt:      now.Format(time.RFC3339Nano),
+			EndsAt:        endsAt.Format(time.RFC3339Nano),
+			CreatedAt:     now.Format(time.RFC3339Nano),
+		},
 	); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(c.Request.Context(), `UPDATE pricing_payments SET status = 'paid', paid_at = ? WHERE id = ?`, now.Format(time.RFC3339Nano), paymentID); err != nil {
+	if err := qtx.MarkPaymentPaidByID(
+		c.Request.Context(),
+		gensqlc.MarkPaymentPaidByIDParams{
+			PaidAt: pgtype.Text{String: now.Format(time.RFC3339Nano), Valid: true},
+			ID:     paymentID,
+		},
+	); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return tx.Commit(c.Request.Context())
 }
 
 func (h *Handler) renderPaymentStatus(c *gin.Context, userID int64) {
-	var paymentID int64
-	var planCode, provider, paymentMethod, paymentStatus string
-	var checkoutURL, paidAt, providerPayload sql.NullString
-	row := h.db.SQL.QueryRowContext(
-		c.Request.Context(),
-		`SELECT p.id, plan.code, p.provider, p.payment_method, p.status, p.checkout_url, p.paid_at, p.provider_payload
-		 FROM pricing_payments p
-		 JOIN pricing_plans plan ON plan.id = p.pricing_plan_id
-		 WHERE p.id = ? AND p.user_id = ?
-		 LIMIT 1`,
-		c.Param("paymentID"),
-		userID,
-	)
-	if err := row.Scan(&paymentID, &planCode, &provider, &paymentMethod, &paymentStatus, &checkoutURL, &paidAt, &providerPayload); err != nil {
+	paymentID, err := strconv.ParseInt(strings.TrimSpace(c.Param("paymentID")), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "Payment not found"})
+		return
+	}
+	row, err := h.q.GetPaymentStatusViewByIDAndUser(c.Request.Context(), gensqlc.GetPaymentStatusViewByIDAndUserParams{
+		ID:     paymentID,
+		UserID: userID,
+	})
+	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"detail": "Payment not found"})
 		return
 	}
 
 	response := gin.H{
-		"payment_id":     paymentID,
-		"plan_code":      planCode,
-		"provider":       provider,
-		"payment_method": paymentMethod,
-		"payment_status": paymentStatus,
+		"payment_id":     row.ID,
+		"plan_code":      row.Code,
+		"provider":       row.Provider,
+		"payment_method": row.PaymentMethod,
+		"payment_status": row.Status,
 		"checkout_url":   nil,
 		"paid_at":        nil,
 	}
-	if checkoutURL.Valid {
-		response["checkout_url"] = checkoutURL.String
-		response["invoice_url"] = checkoutURL.String
+	if row.CheckoutUrl.Valid {
+		response["checkout_url"] = row.CheckoutUrl.String
+		response["invoice_url"] = row.CheckoutUrl.String
 	}
-	if paidAt.Valid {
-		response["paid_at"] = paidAt.String
+	if row.PaidAt.Valid {
+		response["paid_at"] = row.PaidAt.String
 	}
-	if providerPayload.Valid {
+	if row.ProviderPayload.Valid {
 		payload := map[string]any{}
-		if json.Unmarshal([]byte(providerPayload.String), &payload) == nil {
+		if json.Unmarshal([]byte(row.ProviderPayload.String), &payload) == nil {
 			response["crypto_payment"] = extractCryptoPayment(payload, response["checkout_url"])
 		}
 	}
@@ -591,19 +592,7 @@ func (h *Handler) subscriptionStatus(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Not authenticated"})
 		return
 	}
-	var subscriptionID, planID int64
-	var planCode, planName string
-	var startsAt, endsAt sql.NullString
-	err = h.db.SQL.QueryRowContext(
-		c.Request.Context(),
-		`SELECT s.id, p.id, p.code, p.name, s.starts_at, s.ends_at
-		 FROM user_subscriptions s
-		 JOIN pricing_plans p ON p.id = s.pricing_plan_id
-		 WHERE s.user_id = ? AND p.is_active = 1
-		 ORDER BY s.ends_at DESC
-		 LIMIT 1`,
-		user.ID,
-	).Scan(&subscriptionID, &planID, &planCode, &planName, &startsAt, &endsAt)
+	subscription, err := h.q.GetLatestSubscriptionWithPlanByUser(c.Request.Context(), user.ID)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"is_active":              false,
@@ -625,31 +614,26 @@ func (h *Handler) subscriptionStatus(c *gin.Context) {
 	isActive := false
 	status := "expired"
 	var daysLeft any
-	if endsAt.Valid {
-		if parsed, err := parseUTCDateTime(endsAt.String); err == nil {
-			nowUTC := ensureUTC(now)
-			if parsed.After(nowUTC) {
-				isActive = true
-				status = "active"
-			}
-			daysLeft = getDaysLeft(parsed, nowUTC)
+	if parsed, parseErr := parseUTCDateTime(subscription.EndsAt); parseErr == nil {
+		nowUTC := ensureUTC(now)
+		if parsed.After(nowUTC) {
+			isActive = true
+			status = "active"
 		}
+		daysLeft = getDaysLeft(parsed, nowUTC)
 	}
 	if !isActive {
-		_, _ = h.db.SQL.ExecContext(c.Request.Context(), `UPDATE user_subscriptions SET is_active = 0 WHERE id = ? AND is_active = 1`, subscriptionID)
+		_ = h.q.DeactivateSubscriptionByID(c.Request.Context(), subscription.ID)
 	}
-	var provider, paymentMethod sql.NullString
-	var providerPayload sql.NullString
-	_ = h.db.SQL.QueryRowContext(
-		c.Request.Context(),
-		`SELECT provider, payment_method, provider_payload
-		 FROM pricing_payments
-		 WHERE user_id = ? AND pricing_plan_id = ? AND status = 'paid'
-		 ORDER BY paid_at DESC, created_at DESC
-		 LIMIT 1`,
-		user.ID,
-		planID,
-	).Scan(&provider, &paymentMethod, &providerPayload)
+	var provider, paymentMethod, providerPayload pgtype.Text
+	if meta, metaErr := h.q.GetLatestPaidPaymentMetaByUserAndPlan(c.Request.Context(), gensqlc.GetLatestPaidPaymentMetaByUserAndPlanParams{
+		UserID:        user.ID,
+		PricingPlanID: subscription.ID_2,
+	}); metaErr == nil {
+		provider = pgtype.Text{String: meta.Provider, Valid: true}
+		paymentMethod = pgtype.Text{String: meta.PaymentMethod, Valid: true}
+		providerPayload = meta.ProviderPayload
+	}
 	cancelAtPeriodEnd := false
 	canCancel := false
 	var stripeSubscriptionID any
@@ -667,10 +651,10 @@ func (h *Handler) subscriptionStatus(c *gin.Context) {
 		"is_active":              isActive,
 		"status":                 status,
 		"days_left":              daysLeft,
-		"plan_code":              planCode,
-		"plan_name":              planName,
-		"starts_at":              nullStringValue(startsAt),
-		"ends_at":                nullStringValue(endsAt),
+		"plan_code":              subscription.Code,
+		"plan_name":              subscription.Name,
+		"starts_at":              nullStringValue(pgtype.Text{String: subscription.StartsAt, Valid: strings.TrimSpace(subscription.StartsAt) != ""}),
+		"ends_at":                nullStringValue(pgtype.Text{String: subscription.EndsAt, Valid: strings.TrimSpace(subscription.EndsAt) != ""}),
 		"provider":               nullStringValue(provider),
 		"payment_method":         nullStringValue(paymentMethod),
 		"can_cancel":             canCancel,
@@ -685,26 +669,17 @@ func (h *Handler) cancelSubscription(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Not authenticated"})
 		return
 	}
-	var paymentID int64
-	var providerPayloadRaw sql.NullString
-	err = h.db.SQL.QueryRowContext(
-		c.Request.Context(),
-		`SELECT p.id, p.provider_payload
-		 FROM pricing_payments p
-		 JOIN user_subscriptions s ON s.pricing_plan_id = p.pricing_plan_id
-		 WHERE s.user_id = ? AND s.is_active = 1 AND p.user_id = ? AND p.provider = 'stripe' AND p.status = 'paid'
-		 ORDER BY p.paid_at DESC, p.created_at DESC
-		 LIMIT 1`,
-		user.ID,
-		user.ID,
-	).Scan(&paymentID, &providerPayloadRaw)
+	row, err := h.q.GetStripeCancelablePaymentByUser(c.Request.Context(), gensqlc.GetStripeCancelablePaymentByUserParams{
+		UserID:   user.ID,
+		UserID_2: user.ID,
+	})
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "No active Stripe subscription to cancel"})
 		return
 	}
 	payload := map[string]any{}
-	if providerPayloadRaw.Valid && strings.TrimSpace(providerPayloadRaw.String) != "" {
-		_ = json.Unmarshal([]byte(providerPayloadRaw.String), &payload)
+	if row.ProviderPayload.Valid && strings.TrimSpace(row.ProviderPayload.String) != "" {
+		_ = json.Unmarshal([]byte(row.ProviderPayload.String), &payload)
 	}
 	stripeSubscriptionID, _ := payload["stripe_subscription_id"].(string)
 	if strings.TrimSpace(stripeSubscriptionID) == "" {
@@ -713,7 +688,10 @@ func (h *Handler) cancelSubscription(c *gin.Context) {
 	}
 	payload["stripe_cancel_at_period_end"] = true
 	payloadBytes, _ := json.Marshal(payload)
-	if _, err := h.db.SQL.ExecContext(c.Request.Context(), `UPDATE pricing_payments SET provider_payload = ? WHERE id = ?`, string(payloadBytes), paymentID); err != nil {
+	if err := h.q.UpdatePaymentPayloadByID(c.Request.Context(), gensqlc.UpdatePaymentPayloadByIDParams{
+		ProviderPayload: pgtype.Text{String: string(payloadBytes), Valid: true},
+		ID:              row.ID,
+	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to cancel Stripe subscription"})
 		return
 	}
@@ -775,7 +753,7 @@ func appendQueryParam(rawURL, key, value string) string {
 	return parsed.String()
 }
 
-func mergeProviderPayload(existing sql.NullString, latest map[string]any) (map[string]any, error) {
+func mergeProviderPayload(existing pgtype.Text, latest map[string]any) (map[string]any, error) {
 	merged := map[string]any{}
 	if existing.Valid && strings.TrimSpace(existing.String) != "" {
 		if err := json.Unmarshal([]byte(existing.String), &merged); err != nil {
@@ -788,7 +766,7 @@ func mergeProviderPayload(existing sql.NullString, latest map[string]any) (map[s
 	return merged, nil
 }
 
-func extractProviderPayloadStatus(existing sql.NullString) string {
+func extractProviderPayloadStatus(existing pgtype.Text) string {
 	if !existing.Valid || strings.TrimSpace(existing.String) == "" {
 		return "pending"
 	}
@@ -857,24 +835,22 @@ func lookupNowPaymentsRefs(payload map[string]any) (int64, string) {
 }
 
 func (h *Handler) lookupPaymentForWebhook(c *gin.Context, paymentID int64, providerCheckoutID string) (int64, int64, int64, int, error) {
-	query := `SELECT pay.id, pay.user_id, pay.pricing_plan_id, plan.duration_days
-		FROM pricing_payments pay
-		JOIN pricing_plans plan ON plan.id = pay.pricing_plan_id`
-	args := []any{}
 	switch {
 	case paymentID != 0:
-		query += ` WHERE pay.id = ? LIMIT 1`
-		args = append(args, paymentID)
+		row, err := h.q.GetPaymentForWebhookByPaymentID(c.Request.Context(), paymentID)
+		if err != nil {
+			return 0, 0, 0, 0, err
+		}
+		return row.ID, row.UserID, row.PricingPlanID, int(row.DurationDays), nil
 	case providerCheckoutID != "":
-		query += ` WHERE pay.provider_checkout_id = ? LIMIT 1`
-		args = append(args, providerCheckoutID)
+		row, err := h.q.GetPaymentForWebhookByCheckoutID(c.Request.Context(), pgtype.Text{String: providerCheckoutID, Valid: true})
+		if err != nil {
+			return 0, 0, 0, 0, err
+		}
+		return row.ID, row.UserID, row.PricingPlanID, int(row.DurationDays), nil
 	default:
 		return 0, 0, 0, 0, sql.ErrNoRows
 	}
-	var rowID, userID, planID int64
-	var durationDays int
-	err := h.db.SQL.QueryRowContext(c.Request.Context(), query, args...).Scan(&rowID, &userID, &planID, &durationDays)
-	return rowID, userID, planID, durationDays, err
 }
 
 func extractCryptoPayment(providerPayload map[string]any, checkoutURL any) any {
@@ -966,7 +942,7 @@ func nestedMap(value any) map[string]any {
 	return map[string]any{}
 }
 
-func nullStringValue(value sql.NullString) any {
+func nullStringValue(value pgtype.Text) any {
 	if !value.Valid {
 		return nil
 	}

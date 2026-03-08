@@ -19,8 +19,10 @@ import (
 
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
+	gensqlc "goapplyjob-golang-backend/pkg/generated/sqlc"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgtype"
 	"golang.org/x/crypto/pbkdf2"
 )
 
@@ -34,6 +36,7 @@ const (
 type Handler struct {
 	cfg        config.Config
 	db         *database.DB
+	queries    *gensqlc.Queries
 	httpClient *http.Client
 }
 
@@ -44,8 +47,9 @@ type User struct {
 
 func NewHandler(cfg config.Config, db *database.DB) *Handler {
 	return &Handler{
-		cfg: cfg,
-		db:  db,
+		cfg:     cfg,
+		db:      db,
+		queries: gensqlc.New(db.PGX),
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
 		},
@@ -70,21 +74,14 @@ func (h *Handler) CurrentUser(c *gin.Context) (*User, error) {
 		return nil, errors.New("missing auth cookie")
 	}
 
-	row := h.db.SQL.QueryRowContext(
-		c.Request.Context(),
-		`SELECT u.id, u.email
-        FROM auth_sessions s
-        JOIN auth_users u ON u.id = s.user_id
-        WHERE s.session_token_hash = ? AND s.expires_at > ?
-        LIMIT 1`,
-		hashText(token),
-		utcNow().Format(time.RFC3339Nano),
-	)
-	var user User
-	if err := row.Scan(&user.ID, &user.Email); err != nil {
+	row, err := h.queries.GetCurrentUserBySession(c.Request.Context(), gensqlc.GetCurrentUserBySessionParams{
+		SessionTokenHash: hashText(token),
+		ExpiresAt:        utcNow().Format(time.RFC3339Nano),
+	})
+	if err != nil {
 		return nil, err
 	}
-	return &user, nil
+	return &User{ID: row.ID, Email: row.Email}, nil
 }
 
 func (h *Handler) OptionalCurrentUser(c *gin.Context) *User {
@@ -123,26 +120,40 @@ func (h *Handler) requestCode(c *gin.Context) {
 	magicToken := randomToken()
 	now := utcNow()
 	expiresAt := now.Add(time.Duration(max(h.cfg.AuthCodeTTLMinutes, 1)) * time.Minute)
-	tx, err := h.db.SQL.BeginTx(c.Request.Context(), nil)
+	tx, err := h.db.PGX.Begin(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to store login code"})
 		return
 	}
-	defer tx.Rollback()
+	defer tx.Rollback(c.Request.Context())
+	qtx := h.queries.WithTx(tx)
 
-	if _, err := tx.ExecContext(c.Request.Context(), `UPDATE auth_verification_codes SET consumed_at = ? WHERE user_id = ? AND consumed_at IS NULL`, now.Format(time.RFC3339Nano), userID); err != nil {
+	if err := qtx.ConsumeActiveVerificationCodesByUser(c.Request.Context(), gensqlc.ConsumeActiveVerificationCodesByUserParams{
+		ConsumedAt: pgtype.Text{String: now.Format(time.RFC3339Nano), Valid: true},
+		UserID:     userID,
+	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to store login code"})
 		return
 	}
-	if _, err := tx.ExecContext(c.Request.Context(), `INSERT INTO auth_verification_codes (user_id, code_hash, expires_at, created_at) VALUES (?, ?, ?, ?)`, userID, hashText(code), expiresAt.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
+	if err := qtx.InsertVerificationCode(c.Request.Context(), gensqlc.InsertVerificationCodeParams{
+		UserID:    userID,
+		CodeHash:  hashText(code),
+		ExpiresAt: expiresAt.Format(time.RFC3339Nano),
+		CreatedAt: now.Format(time.RFC3339Nano),
+	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to store login code"})
 		return
 	}
-	if _, err := tx.ExecContext(c.Request.Context(), `INSERT INTO auth_verification_codes (user_id, code_hash, expires_at, created_at) VALUES (?, ?, ?, ?)`, userID, hashText(magicToken), expiresAt.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
+	if err := qtx.InsertVerificationCode(c.Request.Context(), gensqlc.InsertVerificationCodeParams{
+		UserID:    userID,
+		CodeHash:  hashText(magicToken),
+		ExpiresAt: expiresAt.Format(time.RFC3339Nano),
+		CreatedAt: now.Format(time.RFC3339Nano),
+	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to store login code"})
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to store login code"})
 		return
 	}
@@ -188,31 +199,40 @@ func (h *Handler) verifyCode(c *gin.Context) {
 		return
 	}
 
-	tx, err := h.db.SQL.BeginTx(c.Request.Context(), nil)
+	tx, err := h.db.PGX.Begin(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create session"})
 		return
 	}
-	defer tx.Rollback()
+	defer tx.Rollback(c.Request.Context())
+	qtx := h.queries.WithTx(tx)
 
-	var userID int64
-	if err := tx.QueryRowContext(c.Request.Context(), `SELECT id FROM auth_users WHERE email = ? LIMIT 1`, email).Scan(&userID); err != nil {
+	userRow, err := qtx.GetAuthUserByEmail(c.Request.Context(), email)
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Invalid email or code"})
 		return
 	}
+	userID := userRow.ID
 
-	var codeID int64
-	if err := tx.QueryRowContext(c.Request.Context(), `SELECT id FROM auth_verification_codes WHERE user_id = ? AND code_hash = ? AND consumed_at IS NULL AND expires_at > ? ORDER BY created_at DESC LIMIT 1`, userID, hashText(code), utcNow().Format(time.RFC3339Nano)).Scan(&codeID); err != nil {
+	codeID, err := qtx.GetVerificationCodeIDByUser(c.Request.Context(), gensqlc.GetVerificationCodeIDByUserParams{
+		UserID:    userID,
+		CodeHash:  hashText(code),
+		ExpiresAt: utcNow().Format(time.RFC3339Nano),
+	})
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Invalid email or code"})
 		return
 	}
 
 	now := utcNow()
-	if _, err := tx.ExecContext(c.Request.Context(), `UPDATE auth_verification_codes SET consumed_at = ? WHERE id = ?`, now.Format(time.RFC3339Nano), codeID); err != nil {
+	if err := qtx.MarkVerificationCodeConsumed(c.Request.Context(), gensqlc.MarkVerificationCodeConsumedParams{
+		ConsumedAt: pgtype.Text{String: now.Format(time.RFC3339Nano), Valid: true},
+		ID:         codeID,
+	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create session"})
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create session"})
 		return
 	}
@@ -248,38 +268,34 @@ func (h *Handler) verifyLink(c *gin.Context) {
 		return
 	}
 
-	tx, err := h.db.SQL.BeginTx(c.Request.Context(), nil)
+	tx, err := h.db.PGX.Begin(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create session"})
 		return
 	}
-	defer tx.Rollback()
+	defer tx.Rollback(c.Request.Context())
+	qtx := h.queries.WithTx(tx)
 
-	var (
-		codeID int64
-		userID int64
-	)
-	if err := tx.QueryRowContext(
-		c.Request.Context(),
-		`SELECT avc.id, u.id
-		 FROM auth_verification_codes avc
-		 JOIN auth_users u ON u.id = avc.user_id
-		 WHERE avc.code_hash = ? AND avc.consumed_at IS NULL AND avc.expires_at > ?
-		 ORDER BY avc.created_at DESC
-		 LIMIT 1`,
-		hashText(token),
-		utcNow().Format(time.RFC3339Nano),
-	).Scan(&codeID, &userID); err != nil {
+	codeRow, err := qtx.GetMagicLinkVerificationCode(c.Request.Context(), gensqlc.GetMagicLinkVerificationCodeParams{
+		CodeHash:  hashText(token),
+		ExpiresAt: utcNow().Format(time.RFC3339Nano),
+	})
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Invalid or expired sign-in link"})
 		return
 	}
+	codeID := codeRow.ID
+	userID := codeRow.UserID
 
 	now := utcNow()
-	if _, err := tx.ExecContext(c.Request.Context(), `UPDATE auth_verification_codes SET consumed_at = ? WHERE id = ?`, now.Format(time.RFC3339Nano), codeID); err != nil {
+	if err := qtx.MarkVerificationCodeConsumed(c.Request.Context(), gensqlc.MarkVerificationCodeConsumedParams{
+		ConsumedAt: pgtype.Text{String: now.Format(time.RFC3339Nano), Valid: true},
+		ID:         codeID,
+	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create session"})
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(c.Request.Context()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create session"})
 		return
 	}
@@ -322,8 +338,7 @@ func (h *Handler) passwordSignup(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create password account"})
 		return
 	}
-	var existing int
-	err = h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT COUNT(1) FROM auth_password_credentials WHERE user_id = ?`, userID).Scan(&existing)
+	existing, err := h.queries.CountPasswordCredentialsByUser(c.Request.Context(), userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create password account"})
 		return
@@ -336,7 +351,12 @@ func (h *Handler) passwordSignup(c *gin.Context) {
 	salt := make([]byte, passwordSaltBytes)
 	_, _ = rand.Read(salt)
 	now := utcNow().Format(time.RFC3339Nano)
-	if _, err := h.db.SQL.ExecContext(c.Request.Context(), `INSERT INTO auth_password_credentials (user_id, password_salt, password_hash, created_at) VALUES (?, ?, ?, ?)`, userID, hex.EncodeToString(salt), passwordHash(password, salt), now); err != nil {
+	if err := h.queries.InsertPasswordCredential(c.Request.Context(), gensqlc.InsertPasswordCredentialParams{
+		UserID:       userID,
+		PasswordSalt: hex.EncodeToString(salt),
+		PasswordHash: passwordHash(password, salt),
+		CreatedAt:    now,
+	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create password account"})
 		return
 	}
@@ -419,17 +439,19 @@ func (h *Handler) passwordLogin(c *gin.Context) {
 		return
 	}
 
-	var userID int64
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT id FROM auth_users WHERE email = ? LIMIT 1`, email).Scan(&userID); err != nil {
+	userRow, err := h.queries.GetAuthUserByEmail(c.Request.Context(), email)
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Invalid email or password"})
 		return
 	}
+	userID := userRow.ID
 
-	var saltHex, storedHash string
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT password_salt, password_hash FROM auth_password_credentials WHERE user_id = ? LIMIT 1`, userID).Scan(&saltHex, &storedHash); err != nil {
+	cred, err := h.queries.GetPasswordCredentialByUser(c.Request.Context(), userID)
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Invalid email or password"})
 		return
 	}
+	saltHex, storedHash := cred.PasswordSalt, cred.PasswordHash
 	salt, err := hex.DecodeString(saltHex)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Invalid email or password"})
@@ -482,11 +504,12 @@ func (h *Handler) passwordChange(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
 		return
 	}
-	var saltHex, storedHash string
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT password_salt, password_hash FROM auth_password_credentials WHERE user_id = ? LIMIT 1`, user.ID).Scan(&saltHex, &storedHash); err != nil {
+	cred, err := h.queries.GetPasswordCredentialByUser(c.Request.Context(), user.ID)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "Password account is not configured"})
 		return
 	}
+	saltHex, storedHash := cred.PasswordSalt, cred.PasswordHash
 	salt, err := hex.DecodeString(saltHex)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Invalid current password"})
@@ -498,8 +521,11 @@ func (h *Handler) passwordChange(c *gin.Context) {
 	}
 	newSalt := make([]byte, passwordSaltBytes)
 	_, _ = rand.Read(newSalt)
-	_, err = h.db.SQL.ExecContext(c.Request.Context(), `UPDATE auth_password_credentials SET password_salt = ?, password_hash = ? WHERE user_id = ?`, hex.EncodeToString(newSalt), passwordHash(newPassword, newSalt), user.ID)
-	if err != nil {
+	if err := h.queries.UpdatePasswordCredentialByUser(c.Request.Context(), gensqlc.UpdatePasswordCredentialByUserParams{
+		PasswordSalt: hex.EncodeToString(newSalt),
+		PasswordHash: passwordHash(newPassword, newSalt),
+		UserID:       user.ID,
+	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to update password"})
 		return
 	}
@@ -507,7 +533,7 @@ func (h *Handler) passwordChange(c *gin.Context) {
 }
 func (h *Handler) logout(c *gin.Context) {
 	if token, err := c.Cookie(h.cfg.AuthCookieName); err == nil && token != "" {
-		_, _ = h.db.SQL.ExecContext(c.Request.Context(), `DELETE FROM auth_sessions WHERE session_token_hash = ?`, hashText(token))
+		_ = h.queries.DeleteAuthSessionByTokenHash(c.Request.Context(), hashText(token))
 	}
 	c.SetSameSite(parseSameSite(h.cfg.AuthCookieSameSite))
 	c.SetCookie(h.cfg.AuthCookieName, "", -1, "/", h.cfg.AuthCookieDomain, h.cfg.AuthCookieSecure, true)
@@ -515,16 +541,19 @@ func (h *Handler) logout(c *gin.Context) {
 }
 
 func (h *Handler) getOrCreateUser(c *gin.Context, email string) (int64, error) {
-	var userID int64
-	err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT id FROM auth_users WHERE email = ? LIMIT 1`, email).Scan(&userID)
+	row, err := h.queries.GetAuthUserByEmail(c.Request.Context(), email)
 	if err == nil {
-		return userID, nil
+		return row.ID, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return 0, err
 	}
 	now := utcNow().Format(time.RFC3339Nano)
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `INSERT INTO auth_users (email, created_at) VALUES (?, ?) RETURNING id`, email, now).Scan(&userID); err != nil {
+	userID, err := h.queries.CreateAuthUser(c.Request.Context(), gensqlc.CreateAuthUserParams{
+		Email:     email,
+		CreatedAt: now,
+	})
+	if err != nil {
 		return 0, err
 	}
 	return userID, nil
@@ -534,8 +563,12 @@ func (h *Handler) createSessionForUser(c *gin.Context, userID int64) (string, er
 	now := utcNow()
 	expiresAt := now.Add(time.Duration(max(h.cfg.AuthSessionTTLMin, 1)) * time.Minute)
 	sessionToken := randomToken()
-	_, err := h.db.SQL.ExecContext(c.Request.Context(), `INSERT INTO auth_sessions (user_id, session_token_hash, expires_at, created_at) VALUES (?, ?, ?, ?)`, userID, hashText(sessionToken), expiresAt.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
-	if err != nil {
+	if err := h.queries.InsertAuthSession(c.Request.Context(), gensqlc.InsertAuthSessionParams{
+		UserID:           userID,
+		SessionTokenHash: hashText(sessionToken),
+		ExpiresAt:        expiresAt.Format(time.RFC3339Nano),
+		CreatedAt:        now.Format(time.RFC3339Nano),
+	}); err != nil {
 		return "", err
 	}
 	return sessionToken, nil
@@ -543,56 +576,37 @@ func (h *Handler) createSessionForUser(c *gin.Context, userID int64) (string, er
 
 func (h *Handler) ensureDefaultFreeSubscription(c *gin.Context, userID int64) error {
 	now := utcNow()
-	_, err := h.db.SQL.ExecContext(
-		c.Request.Context(),
-		`INSERT INTO pricing_plans (code, name, billing_cycle, duration_days, price_usd, is_active, created_at)
-		 VALUES (?, ?, ?, ?, ?, 1, ?)
-		 ON CONFLICT(code) DO UPDATE SET
-		   name = excluded.name,
-		   billing_cycle = excluded.billing_cycle,
-		   duration_days = excluded.duration_days,
-		   price_usd = excluded.price_usd,
-		   is_active = 1`,
-		freePlanCode,
-		"Free",
-		"free",
-		max(h.cfg.FreePlanDurationDays, 1),
-		0,
-		now.Format(time.RFC3339Nano),
-	)
-	if err != nil {
+	if err := h.queries.UpsertPricingPlanByCode(c.Request.Context(), gensqlc.UpsertPricingPlanByCodeParams{
+		Code:         freePlanCode,
+		Name:         "Free",
+		BillingCycle: "free",
+		DurationDays: int32(max(h.cfg.FreePlanDurationDays, 1)),
+		PriceUsd:     0,
+		CreatedAt:    now.Format(time.RFC3339Nano),
+	}); err != nil {
 		return err
 	}
 
-	var subscriptionCount int
-	if err := h.db.SQL.QueryRowContext(
-		c.Request.Context(),
-		`SELECT COUNT(1)
-		 FROM user_subscriptions
-		 WHERE user_id = ?`,
-		userID,
-	).Scan(&subscriptionCount); err != nil {
+	subscriptionCount, err := h.queries.CountUserSubscriptions(c.Request.Context(), userID)
+	if err != nil {
 		return err
 	}
 	if subscriptionCount > 0 {
 		return nil
 	}
 
-	var planID int64
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT id FROM pricing_plans WHERE code = ? AND is_active = 1 LIMIT 1`, freePlanCode).Scan(&planID); err != nil {
+	planID, err := h.queries.GetActivePricingPlanIDByCode(c.Request.Context(), freePlanCode)
+	if err != nil {
 		return err
 	}
 	endsAt := now.Add(time.Duration(max(h.cfg.FreePlanDurationDays, 1)) * 24 * time.Hour)
-	_, err = h.db.SQL.ExecContext(
-		c.Request.Context(),
-		`INSERT INTO user_subscriptions (user_id, pricing_plan_id, starts_at, ends_at, is_active, created_at) VALUES (?, ?, ?, ?, 1, ?)`,
-		userID,
-		planID,
-		now.Format(time.RFC3339Nano),
-		endsAt.Format(time.RFC3339Nano),
-		now.Format(time.RFC3339Nano),
-	)
-	return err
+	return h.queries.InsertUserSubscription(c.Request.Context(), gensqlc.InsertUserSubscriptionParams{
+		UserID:        userID,
+		PricingPlanID: planID,
+		StartsAt:      now.Format(time.RFC3339Nano),
+		EndsAt:        endsAt.Format(time.RFC3339Nano),
+		CreatedAt:     now.Format(time.RFC3339Nano),
+	})
 }
 
 func (h *Handler) setAuthCookie(c *gin.Context, sessionToken string) {

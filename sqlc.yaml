@@ -1,6 +1,9 @@
 version: "2"
 sql:
-- schema: "sql/schemas/"
+- schema:
+  - "sql/schemas/"
+  - "internal/database/migrations/000001_init.up.sql"
+  - "internal/database/migrations/000002_parity_columns_indexes.up.sql"
   queries: "sql/queries/"
   engine: "postgresql"
   gen:
