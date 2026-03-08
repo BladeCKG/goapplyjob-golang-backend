@@ -19,6 +19,21 @@ New-Item -ItemType Directory -Force -Path "logs" | Out-Null
 
 go run ./cmd/migrate
 
+if (Test-Path "logs\processes.json") {
+    try {
+        $existing = Get-Content "logs\processes.json" -ErrorAction Stop | ConvertFrom-Json
+        foreach ($proc in @($existing)) {
+            if ($null -ne $proc.pid) {
+                Stop-Process -Id ([int]$proc.pid) -ErrorAction SilentlyContinue
+                Write-Host ("Stopped previous process PID: {0}" -f $proc.pid)
+            }
+        }
+    }
+    catch {
+        Write-Host "Could not parse logs\processes.json, continuing startup."
+    }
+}
+
 if ($ForceRebuild) {
     go build ./cmd/api
     go build ./cmd/watcher

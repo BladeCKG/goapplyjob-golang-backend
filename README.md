@@ -156,15 +156,17 @@ go run ./cmd/migrate
 
 DB health endpoint: `http://127.0.0.1:8080/db/health`.
 
-### Render Deployment (API + Workers)
+### Render Deployment (API + Cron Workers)
 
 This repo includes `render.yaml` for one-click Render Blueprint deployment with:
 
 * 1 PostgreSQL database
 * 1 web service for the Gin API
-* background workers for:
-  * `watcher`
-  * `importer`
+* 1 cron service that runs every 2 hours and executes, in order:
+  * `watcher` (run once)
+  * `importer` (run once, tuned batch sizes)
+  * `raw` (run once)
+  * `parsed` (run once)
 
 Steps:
 
@@ -198,8 +200,7 @@ This repo includes `.github/workflows/workers-cron.yml` for scheduled worker exe
 
 Schedule:
 
-* every 3 hours: `watcher` and `importer`
-* every 3 hours: `parsedfreshness`
+* every 2 hours: `watcher`, `importer`, `raw`, `parsed`, `parsedfreshness`
 * manual `workflow_dispatch`: runs all configured worker steps immediately
 
 Required repository secrets:

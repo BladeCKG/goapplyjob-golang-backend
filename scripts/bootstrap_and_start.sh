@@ -18,6 +18,15 @@ mkdir -p logs
 
 go run ./cmd/migrate
 
+if [[ -f "logs/processes.pid" ]]; then
+  while read -r pid _name; do
+    if [[ -n "${pid:-}" ]] && kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+      echo "Stopped previous process PID: $pid"
+    fi
+  done < "logs/processes.pid"
+fi
+
 run_service() {
   local name="$1"
   local logfile="$2"
