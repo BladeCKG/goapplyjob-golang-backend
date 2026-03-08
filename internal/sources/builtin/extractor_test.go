@@ -137,6 +137,35 @@ func TestExtractRoleRequirementsAndCleanDescription(t *testing.T) {
 	}
 }
 
+func TestExtractRoleRequirementsFromBoldSectionHeaders(t *testing.T) {
+	descriptionHTML := `
+    <div>
+      <p><b>Overview</b><br>Build scalable backend services.</p>
+      <p><b>Duties</b></p>
+      <ul>
+        <li>Design APIs</li>
+        <li>Own incident response</li>
+      </ul>
+      <p><b>Requirements</b></p>
+      <ul>
+        <li>5+ years Python</li>
+        <li>Strong SQL</li>
+      </ul>
+      <p><b>Benefits</b></p>
+      <ul><li>Health insurance</li></ul>
+    </div>`
+	requirements, cleanedDescription := extractRoleRequirementsAndCleanDescription(descriptionHTML)
+	if requirements == nil || !strings.Contains(requirements.(string), "5+ years Python") {
+		t.Fatalf("expected requirements from bold section, got %#v", requirements)
+	}
+	if strings.Contains(requirements.(string), "Health insurance") {
+		t.Fatalf("did not expect benefits in requirements %#v", requirements)
+	}
+	if cleanedDescription == nil || !strings.Contains(cleanedDescription.(string), "Build scalable backend services.") {
+		t.Fatalf("expected cleaned description to include overview %#v", cleanedDescription)
+	}
+}
+
 func TestExtractIndustrySpecialitiesFromJobPostingHandlesListAndCSV(t *testing.T) {
 	values, _ := extractIndustrySpecialitiesFromJobPosting(map[string]any{
 		"industry": []any{"Software", "AI, Analytics", "software", "Cloud"},
@@ -191,6 +220,37 @@ func TestExtractJobFromHTMLUsesFallbackCompanyWhenCompanyMissing(t *testing.T) {
 	}
 	if company["id"] != "builtin_company_acme" {
 		t.Fatalf("expected fallback company id, got %#v", company["id"])
+	}
+}
+
+func TestExtractJobFromHTMLMapsJobBenefitsFromLDJSON(t *testing.T) {
+	htmlText := `
+<html>
+  <head>
+    <link rel="canonical" href="https://builtin.com/job/test-benefits/10" />
+    <script type="application/ld+json">
+      {
+        "@context":"http://schema.org/",
+        "@type":"JobPosting",
+        "title":"Platform Engineer",
+        "employmentType":"FULL_TIME",
+        "hiringOrganization":{"@type":"Organization","name":"Acme","sameAs":"https://builtin.com/company/acme"},
+        "jobLocation":[{"@type":"Place","address":{"@type":"PostalAddress","addressCountry":"US"}}],
+        "applicantLocationRequirements":[{"@type":"Country","name":"United States"}],
+        "description":"<b>Job Description</b><br>Build internal platform.<br><b>Requirements</b><br>5+ years backend.",
+        "jobBenefits":"<p>Medical, dental, vision</p><p>401(k) match</p>"
+      }
+    </script>
+  </head>
+  <body></body>
+</html>`
+	payload := ExtractJobFromHTML(htmlText, "https://builtin.com/job/test-benefits/10")
+	if payload["benefits"] != "<p>Medical, dental, vision</p><p>401(k) match</p>" {
+		t.Fatalf("expected benefits passthrough, got %#v", payload["benefits"])
+	}
+	requirements, _ := payload["roleRequirements"].(string)
+	if !strings.Contains(requirements, "5+ years backend.") {
+		t.Fatalf("expected requirements extracted from description, got %#v", payload["roleRequirements"])
 	}
 }
 

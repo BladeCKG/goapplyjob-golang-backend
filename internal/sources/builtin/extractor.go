@@ -61,6 +61,7 @@ func ExtractJob(htmlText, companyHTML string) map[string]any {
 		levelFlags = inferLevelFlags(roleTitle, seniorityLabel)
 	}
 	salaryRange := parseSalaryRange(jobPosting, htmlText)
+	benefits := valueOrNil(jobPosting["jobBenefits"])
 
 	return map[string]any{
 		"id":                           extractExternalJobID(jobURL, identifierValue),
@@ -73,7 +74,7 @@ func ExtractJob(htmlText, companyHTML string) map[string]any {
 		"isOnLinkedIn":                 rawCompanyMap != nil && stringValue(rawCompanyMap["linkedInURL"]) != "",
 		"roleDescription":              roleDescription,
 		"roleRequirements":             nil,
-		"benefits":                     nil,
+		"benefits":                     benefits,
 		"jobDescriptionSummary":        jobSummary,
 		"twoLineJobDescriptionSummary": twoLineSummary,
 		"educationRequirementsCredentialCategory":  stringValueFromMap(jobPosting, "EducationRequirements", "credentialCategory"),
@@ -130,7 +131,14 @@ func ExtractJobFromHTML(htmlText string, fallbackJobURL string) map[string]any {
 	if strings.TrimSpace(stringValue(payload["url"])) == "" && strings.TrimSpace(fallbackJobURL) != "" {
 		payload["url"] = fallbackJobURL
 	}
-	requirements, cleanedDescription := extractRoleRequirementsAndCleanDescription(stringValue(payload["roleDescription"]))
+	rawDescriptionHTML := ""
+	if jobPosting := findJobPostingLD(htmlText); len(jobPosting) > 0 {
+		rawDescriptionHTML = stringValue(jobPosting["description"])
+	}
+	if strings.TrimSpace(rawDescriptionHTML) == "" {
+		rawDescriptionHTML = stringValue(payload["roleDescription"])
+	}
+	requirements, cleanedDescription := extractRoleRequirementsAndCleanDescription(rawDescriptionHTML)
 	if requirements != nil {
 		payload["roleRequirements"] = requirements
 	}
@@ -336,11 +344,14 @@ func extractRoleRequirementsAndCleanDescription(descriptionText string) (any, an
 	if strings.TrimSpace(descriptionText) == "" {
 		return nil, nil
 	}
+	if strings.Contains(descriptionText, "<") && strings.Contains(descriptionText, ">") {
+		descriptionText = stringValue(toPlainText(descriptionText))
+	}
 	lines := strings.Split(descriptionText, "\n")
 	cleanedLines := make([]string, 0, len(lines))
 	requirementLines := []string{}
 	capturing := false
-	requirementHeadingPattern := regexp.MustCompile(`(?i)(requirement|qualification|what you'll bring|what you bring|must have|who you are|experience you have|skills and qualifications)`)
+	requirementHeadingPattern := regexp.MustCompile(`(?i)(requirement|required|qualification|what you'll bring|what you bring|must have|who you are|experience you have|skills and qualifications|\bskills\b)`)
 	stopHeadingPattern := regexp.MustCompile(`(?i)(about|responsibilit|what you'll do|what you will do|benefit|perks|compensation|salary|about the role|company)`)
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
