@@ -463,7 +463,7 @@ func (s *Service) runOnceRemotive() error {
 	deltaRows := make([]map[string]any, 0)
 	seenURLs := map[string]struct{}{}
 	scannedRowsCount := 0
-	newLatestJobID := 0
+	newLatestJobID := previousLatestJobID
 	scannedIndexes := make([]int, 0)
 
 	latestIndex, hasLatestIndex := extractRemotiveSitemapIndex(latestURL)
@@ -480,9 +480,10 @@ func (s *Service) runOnceRemotive() error {
 		if len(rows) == 0 {
 			return false
 		}
-		if newLatestJobID == 0 {
-			lastURL, _ := rows[len(rows)-1]["url"].(string)
-			newLatestJobID = extractRemotiveJobIDFromURL(lastURL)
+		lastURL, _ := rows[len(rows)-1]["url"].(string)
+		partitionMaxJobID := extractRemotiveJobIDFromURL(lastURL)
+		if partitionMaxJobID > newLatestJobID {
+			newLatestJobID = partitionMaxJobID
 		}
 		for idx := len(rows) - 1; idx >= 0; idx-- {
 			row := rows[idx]
