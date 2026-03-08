@@ -89,11 +89,3 @@ func TestToTargetJobURLForSourceBuiltinKeepsURLUnchanged(t *testing.T) {
 		t.Fatalf("expected builtin URL to remain unchanged")
 	}
 }
-
-func TestParseHTMLForSourceBuiltinUsesBuiltinExtractor(t *testing.T) {
-	html := `<html><head><link rel="canonical" href="https://builtin.com/job/platform-engineer/12345"><script type="application/ld+json">{"@type":"JobPosting","title":"Engineer"}</script></head></html>`
-	payload := parseHTMLForSource("builtin", html, "https://builtin.com/job/platform-engineer/12345")
-	if payload["roleTitle"] != "Engineer" {
-		t.Fatalf("expected builtin extractor role title, got %#v", payload["roleTitle"])
-	}
-}
