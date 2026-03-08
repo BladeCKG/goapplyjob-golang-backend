@@ -135,6 +135,7 @@ func NewHandler(cfg config.Config, db *database.DB, authHandler *auth.Handler) *
 
 func (h *Handler) Register(router gin.IRouter) {
 	router.GET("/jobs/filter-options", h.filterOptions)
+	router.GET("/jobs/metrics", h.metrics)
 	router.GET("/job/:jobID", h.jobDetail)
 	router.GET("/jobs/:jobID", h.jobDetail)
 	router.GET("/jobs", h.listJobs)
@@ -350,120 +351,7 @@ func (h *Handler) listJobs(c *gin.Context) {
 		perPage = 100
 	}
 
-	filters := []string{}
-	args := []any{}
-	if titles := parseCSVQuery(c.Query("job_title")); len(titles) > 0 {
-		titles = uniqueStrings(titles)
-		parts := make([]string, 0, len(titles))
-		normalizedTitleSet := map[string]struct{}{}
-		for _, title := range titles {
-			normalizedTitle := strings.ToLower(strings.TrimSpace(title))
-			normalizedTitleSet[normalizedTitle] = struct{}{}
-			titleParts := []string{
-				`lower(trim(COALESCE(p.role_title, ''))) = ?`,
-				`lower(trim(COALESCE(p.categorized_job_function, ''))) = ?`,
-				`p.categorized_job_title LIKE ?`,
-				`p.role_title LIKE ?`,
-			}
-			args = append(args, normalizedTitle)
-			args = append(args, normalizedTitle)
-			args = append(args, "%"+title+"%")
-			args = append(args, "%"+title+"%")
-			if tokens := tokenizeTitleSearchText(title); len(tokens) > 0 {
-				tokenParts := make([]string, 0, len(tokens))
-				for _, token := range tokens {
-					tokenParts = append(tokenParts, `p.role_title LIKE ?`)
-					args = append(args, "%"+token+"%")
-				}
-				titleParts = append(titleParts, "("+strings.Join(tokenParts, " AND ")+")")
-			}
-			parts = append(parts, "("+strings.Join(titleParts, " OR ")+")")
-		}
-		if len(normalizedTitleSet) > 0 {
-			normalizedTitles := make([]string, 0, len(normalizedTitleSet))
-			for normalizedTitle := range normalizedTitleSet {
-				normalizedTitles = append(normalizedTitles, normalizedTitle)
-			}
-			sortStrings(normalizedTitles)
-		}
-		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
-	}
-	if locations := parseCSVQuery(c.Query("location")); len(locations) > 0 {
-		locations = uniqueStrings(locations)
-		parts := make([]string, 0, len(locations))
-		for _, location := range locations {
-			parts = append(parts, `(p.location LIKE ? OR p.location_city LIKE ? OR p.location_us_states LIKE ?)`)
-			args = append(args, "%"+location+"%", "%"+location+"%", "%"+location+"%")
-		}
-		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
-	}
-	if techStacks := parseCSVQuery(c.Query("tech_stack")); len(techStacks) > 0 {
-		techStacks = uniqueStrings(techStacks)
-		parts := make([]string, 0, len(techStacks))
-		for _, techStack := range techStacks {
-			normalizedStack := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(techStack)), `"`, `\"`)
-			parts = append(parts, `lower(COALESCE(p.tech_stack, '')) LIKE ?`)
-			args = append(args, `%`+"\""+normalizedStack+"\""+`%`)
-		}
-		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
-	}
-	if employmentTypes := parseCSVQuery(c.Query("employment_type")); len(employmentTypes) > 0 {
-		employmentTypes = uniqueStrings(employmentTypes)
-		parts := make([]string, 0, len(employmentTypes))
-		for _, employmentType := range employmentTypes {
-			parts = append(parts, `p.employment_type LIKE ?`)
-			args = append(args, "%"+employmentType+"%")
-		}
-		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
-	}
-	if postDate := strings.ToLower(strings.TrimSpace(c.Query("post_date"))); postDate != "" {
-		if window, ok := postDateWindows[postDate]; ok {
-			cutoff := time.Now().UTC().Add(-window)
-			filters = append(filters, `p.created_at_source >= ?`)
-			args = append(args, cutoff.Format(time.RFC3339Nano))
-		}
-	}
-	if minSalary := strings.TrimSpace(c.Query("min_salary")); minSalary != "" {
-		if parsed, err := strconv.ParseFloat(minSalary, 64); err == nil {
-			filters = append(filters, minSalaryFilterSQL())
-			args = append(args, parsed, parsed)
-		}
-	}
-	if seniorities := parseCSVQuery(c.Query("seniority")); len(seniorities) > 0 {
-		seniorities = uniqueStrings(seniorities)
-		parts := []string{}
-		fieldMap := map[string]string{"entry": "p.is_entry_level = 1", "junior": "p.is_junior = 1", "mid": "p.is_mid_level = 1", "senior": "p.is_senior = 1", "lead": "p.is_lead = 1"}
-		for _, seniority := range seniorities {
-			if _, valid := validSeniorities[seniority]; valid {
-				if predicate, ok := fieldMap[seniority]; ok {
-					parts = append(parts, predicate)
-				}
-			}
-		}
-		if len(parts) > 0 {
-			filters = append(filters, "("+strings.Join(parts, " OR ")+")")
-		}
-	}
-	if currentUser != nil {
-		actionFilter := strings.ToLower(strings.TrimSpace(c.DefaultQuery("user_job_action", "all")))
-		hiddenExists := `EXISTS (SELECT 1 FROM user_job_actions uja WHERE uja.user_id = ? AND uja.parsed_job_id = p.id AND uja.is_hidden = 1)`
-		appliedExists := `EXISTS (SELECT 1 FROM user_job_actions uja WHERE uja.user_id = ? AND uja.parsed_job_id = p.id AND uja.is_applied = 1)`
-		savedExists := `EXISTS (SELECT 1 FROM user_job_actions uja WHERE uja.user_id = ? AND uja.parsed_job_id = p.id AND uja.is_saved = 1)`
-		switch actionFilter {
-		case "hidden":
-			filters = append(filters, hiddenExists)
-			args = append(args, currentUser.ID)
-		case "applied":
-			filters = append(filters, appliedExists)
-			args = append(args, currentUser.ID)
-		case "saved":
-			filters = append(filters, savedExists)
-			args = append(args, currentUser.ID)
-		default:
-			filters = append(filters, "NOT ("+hiddenExists+")")
-			args = append(args, currentUser.ID)
-		}
-	}
+	filters, args := h.buildJobFilters(c, currentUser, true)
 
 	where := ""
 	if len(filters) > 0 {
@@ -562,6 +450,162 @@ func (h *Handler) listJobs(c *gin.Context) {
 		"requires_upgrade": currentUser != nil && isPreview && rawTotal > len(items),
 		"items":            items,
 	})
+}
+
+func (h *Handler) metrics(c *gin.Context) {
+	currentUser := h.auth.OptionalCurrentUser(c)
+	filters, args := h.buildJobFilters(c, currentUser, false)
+	where := ""
+	if len(filters) > 0 {
+		where = " WHERE " + strings.Join(filters, " AND ")
+	}
+	now := time.Now().UTC()
+	todayCutoff := now.Add(-24 * time.Hour).Format(time.RFC3339Nano)
+	lastHourCutoff := now.Add(-1 * time.Hour).Format(time.RFC3339Nano)
+
+	todayArgs := append(append([]any{}, args...), todayCutoff)
+	lastHourArgs := append(append([]any{}, args...), lastHourCutoff)
+	companyArgs := append(append([]any{}, args...), todayCutoff)
+
+	var jobsToday, jobsLastHour, companiesHiringNow int
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(),
+		`SELECT COUNT(p.id) FROM parsed_jobs p`+where+appendWhere(where, `p.created_at_source IS NOT NULL AND p.created_at_source >= ?`),
+		todayArgs...).Scan(&jobsToday); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs metrics"})
+		return
+	}
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(),
+		`SELECT COUNT(p.id) FROM parsed_jobs p`+where+appendWhere(where, `p.created_at_source IS NOT NULL AND p.created_at_source >= ?`),
+		lastHourArgs...).Scan(&jobsLastHour); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs metrics"})
+		return
+	}
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(),
+		`SELECT COUNT(DISTINCT p.company_id) FROM parsed_jobs p`+where+appendWhere(where, `p.company_id IS NOT NULL AND p.created_at_source IS NOT NULL AND p.created_at_source >= ?`),
+		companyArgs...).Scan(&companiesHiringNow); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs metrics"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"jobs_today":           jobsToday,
+		"jobs_last_hour":       jobsLastHour,
+		"companies_hiring_now": companiesHiringNow,
+	})
+}
+
+func appendWhere(where, predicate string) string {
+	if strings.TrimSpace(where) == "" {
+		return " WHERE " + predicate
+	}
+	return " AND " + predicate
+}
+
+func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includePostDate bool) ([]string, []any) {
+	filters := []string{}
+	args := []any{}
+	if titles := parseCSVQuery(c.Query("job_title")); len(titles) > 0 {
+		titles = uniqueStrings(titles)
+		parts := make([]string, 0, len(titles))
+		for _, title := range titles {
+			normalizedTitle := strings.ToLower(strings.TrimSpace(title))
+			titleParts := []string{
+				`lower(trim(COALESCE(p.role_title, ''))) = ?`,
+				`lower(trim(COALESCE(p.categorized_job_function, ''))) = ?`,
+				`p.categorized_job_title LIKE ?`,
+				`p.role_title LIKE ?`,
+			}
+			args = append(args, normalizedTitle, normalizedTitle, "%"+title+"%", "%"+title+"%")
+			if tokens := tokenizeTitleSearchText(title); len(tokens) > 0 {
+				tokenParts := make([]string, 0, len(tokens))
+				for _, token := range tokens {
+					tokenParts = append(tokenParts, `p.role_title LIKE ?`)
+					args = append(args, "%"+token+"%")
+				}
+				titleParts = append(titleParts, "("+strings.Join(tokenParts, " AND ")+")")
+			}
+			parts = append(parts, "("+strings.Join(titleParts, " OR ")+")")
+		}
+		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
+	}
+	if locations := parseCSVQuery(c.Query("location")); len(locations) > 0 {
+		locations = uniqueStrings(locations)
+		parts := make([]string, 0, len(locations))
+		for _, location := range locations {
+			parts = append(parts, `(p.location LIKE ? OR p.location_city LIKE ? OR p.location_us_states LIKE ?)`)
+			args = append(args, "%"+location+"%", "%"+location+"%", "%"+location+"%")
+		}
+		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
+	}
+	if techStacks := parseCSVQuery(c.Query("tech_stack")); len(techStacks) > 0 {
+		techStacks = uniqueStrings(techStacks)
+		parts := make([]string, 0, len(techStacks))
+		for _, techStack := range techStacks {
+			normalizedStack := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(techStack)), `"`, `\"`)
+			parts = append(parts, `lower(COALESCE(p.tech_stack, '')) LIKE ?`)
+			args = append(args, `%`+"\""+normalizedStack+"\""+`%`)
+		}
+		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
+	}
+	if employmentTypes := parseCSVQuery(c.Query("employment_type")); len(employmentTypes) > 0 {
+		employmentTypes = uniqueStrings(employmentTypes)
+		parts := make([]string, 0, len(employmentTypes))
+		for _, employmentType := range employmentTypes {
+			parts = append(parts, `p.employment_type LIKE ?`)
+			args = append(args, "%"+employmentType+"%")
+		}
+		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
+	}
+	if includePostDate {
+		if postDate := strings.ToLower(strings.TrimSpace(c.Query("post_date"))); postDate != "" {
+			if window, ok := postDateWindows[postDate]; ok {
+				cutoff := time.Now().UTC().Add(-window)
+				filters = append(filters, `p.created_at_source >= ?`)
+				args = append(args, cutoff.Format(time.RFC3339Nano))
+			}
+		}
+	}
+	if minSalary := strings.TrimSpace(c.Query("min_salary")); minSalary != "" {
+		if parsed, err := strconv.ParseFloat(minSalary, 64); err == nil {
+			filters = append(filters, minSalaryFilterSQL())
+			args = append(args, parsed, parsed)
+		}
+	}
+	if seniorities := parseCSVQuery(c.Query("seniority")); len(seniorities) > 0 {
+		seniorities = uniqueStrings(seniorities)
+		parts := []string{}
+		fieldMap := map[string]string{"entry": "p.is_entry_level = 1", "junior": "p.is_junior = 1", "mid": "p.is_mid_level = 1", "senior": "p.is_senior = 1", "lead": "p.is_lead = 1"}
+		for _, seniority := range seniorities {
+			if _, valid := validSeniorities[seniority]; valid {
+				if predicate, ok := fieldMap[seniority]; ok {
+					parts = append(parts, predicate)
+				}
+			}
+		}
+		if len(parts) > 0 {
+			filters = append(filters, "("+strings.Join(parts, " OR ")+")")
+		}
+	}
+	if currentUser != nil {
+		actionFilter := strings.ToLower(strings.TrimSpace(c.DefaultQuery("user_job_action", "all")))
+		hiddenExists := `EXISTS (SELECT 1 FROM user_job_actions uja WHERE uja.user_id = ? AND uja.parsed_job_id = p.id AND uja.is_hidden = 1)`
+		appliedExists := `EXISTS (SELECT 1 FROM user_job_actions uja WHERE uja.user_id = ? AND uja.parsed_job_id = p.id AND uja.is_applied = 1)`
+		savedExists := `EXISTS (SELECT 1 FROM user_job_actions uja WHERE uja.user_id = ? AND uja.parsed_job_id = p.id AND uja.is_saved = 1)`
+		switch actionFilter {
+		case "hidden":
+			filters = append(filters, hiddenExists)
+			args = append(args, currentUser.ID)
+		case "applied":
+			filters = append(filters, appliedExists)
+			args = append(args, currentUser.ID)
+		case "saved":
+			filters = append(filters, savedExists)
+			args = append(args, currentUser.ID)
+		default:
+			filters = append(filters, "NOT ("+hiddenExists+")")
+			args = append(args, currentUser.ID)
+		}
+	}
+	return filters, args
 }
 
 func selectStrings(c *gin.Context, db *database.DB, query string) ([]string, error) {

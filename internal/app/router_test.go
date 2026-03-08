@@ -464,6 +464,67 @@ func TestJobsEmploymentTypeFilterAndOptions(t *testing.T) {
 	}
 }
 
+func TestJobsMetricsCountsWithFilters(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	insertJob(t, db, 8101, "https://example.com/metrics-a", "Austin", "Texas", 100, 130, true, now.Add(-20*time.Minute))
+	insertJob(t, db, 8102, "https://example.com/metrics-b", "Austin", "Texas", 100, 130, true, now.Add(-3*time.Hour))
+	insertJob(t, db, 8103, "https://example.com/metrics-c", "Austin", "Texas", 100, 130, true, now.Add(-25*time.Hour))
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs/metrics?job_title=Software+Engineer&location=Austin", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	if body["jobs_today"].(float64) != 2 || body["jobs_last_hour"].(float64) != 1 {
+		t.Fatalf("unexpected metrics payload %#v", body)
+	}
+}
+
+func TestJobsMetricsUserActionHiddenFilter(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJob(t, db, 8201, "https://example.com/metrics-hidden-a", "Austin", "Texas", 100, 130, true, time.Now().UTC().Add(-30*time.Minute))
+	insertJob(t, db, 8202, "https://example.com/metrics-hidden-b", "Austin", "Texas", 100, 130, true, time.Now().UTC().Add(-20*time.Minute))
+
+	code := requestLoginCode(t, router, "metrics-hidden@example.com")
+	cookie := verifyLoginCode(t, router, "metrics-hidden@example.com", code)
+
+	hideBody, _ := json.Marshal(map[string]any{"is_hidden": true})
+	hideReq := httptest.NewRequest(http.MethodPut, "/job-actions/2", bytes.NewReader(hideBody))
+	hideReq.Header.Set("Content-Type", "application/json")
+	hideReq.AddCookie(cookie)
+	hideRec := httptest.NewRecorder()
+	router.ServeHTTP(hideRec, hideReq)
+	assertStatus(t, hideRec.Code, http.StatusOK)
+
+	defaultReq := httptest.NewRequest(http.MethodGet, "/jobs/metrics", nil)
+	defaultReq.AddCookie(cookie)
+	defaultRec := httptest.NewRecorder()
+	router.ServeHTTP(defaultRec, defaultReq)
+	assertStatus(t, defaultRec.Code, http.StatusOK)
+	var defaultBody map[string]any
+	decodeBody(t, defaultRec.Body.Bytes(), &defaultBody)
+	if defaultBody["jobs_today"].(float64) != 1 {
+		t.Fatalf("expected hidden jobs excluded in default metrics %#v", defaultBody)
+	}
+
+	hiddenReq := httptest.NewRequest(http.MethodGet, "/jobs/metrics?user_job_action=hidden", nil)
+	hiddenReq.AddCookie(cookie)
+	hiddenRec := httptest.NewRecorder()
+	router.ServeHTTP(hiddenRec, hiddenReq)
+	assertStatus(t, hiddenRec.Code, http.StatusOK)
+	var hiddenBody map[string]any
+	decodeBody(t, hiddenRec.Body.Bytes(), &hiddenBody)
+	if hiddenBody["jobs_today"].(float64) != 1 {
+		t.Fatalf("expected hidden-only metrics count %#v", hiddenBody)
+	}
+}
+
 func TestPricingFlow(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
