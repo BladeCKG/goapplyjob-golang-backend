@@ -157,6 +157,32 @@ type Service struct {
 
 func New(db *database.DB) *Service { return &Service{DB: db} }
 
+func (s *Service) SuggestCategory(ctx context.Context, source, roleTitle, roleDescription string, techStack any) (string, string, error) {
+	normalizedTechStack := normalizeTechStack(techStack)
+	categorizedTitle := ""
+	categorizedFunction := ""
+
+	if strings.TrimSpace(source) == sourceBuiltin && len(normalizedTechStack) == 0 {
+		categorizedTitle = strings.TrimSpace(classifyJobTitleWithGroqSync(roleTitle, roleDescription))
+	}
+	if categorizedTitle == "" {
+		inferredTitle, inferredFunction, err := s.findSimilarRemoteCategories(ctx, roleTitle)
+		if err != nil {
+			return "", "", err
+		}
+		categorizedTitle = strings.TrimSpace(inferredTitle)
+		categorizedFunction = strings.TrimSpace(inferredFunction)
+	}
+	if categorizedTitle != "" && categorizedFunction == "" {
+		resolvedFunction, err := s.resolveJobFunctionForCategory(ctx, categorizedTitle)
+		if err != nil {
+			return "", "", err
+		}
+		categorizedFunction = strings.TrimSpace(resolvedFunction)
+	}
+	return categorizedTitle, categorizedFunction, nil
+}
+
 func parseDT(value any) *time.Time {
 	raw, ok := value.(string)
 	if !ok || raw == "" {

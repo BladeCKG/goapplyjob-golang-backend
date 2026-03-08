@@ -12,6 +12,7 @@ import (
 	"goapplyjob-golang-backend/internal/auth"
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/parsed"
 
 	"github.com/gin-gonic/gin"
 )
@@ -38,6 +39,7 @@ func (h *Handler) Register(router gin.IRouter) {
 	router.GET("/admin/watcher-states", h.listWatcherStates)
 	router.PATCH("/admin/watcher-states/:stateID", h.updateWatcherState)
 	router.GET("/admin/parsed-jobs", h.listParsedJobs)
+	router.POST("/admin/parsed-jobs/:jobID/auto-categorize", h.autoCategorizeParsedJob)
 	router.PATCH("/admin/parsed-jobs/:jobID", h.updateParsedJob)
 	router.GET("/admin/parsed-companies", h.listParsedCompanies)
 	router.PATCH("/admin/parsed-companies/:companyID", h.updateParsedCompany)
@@ -785,6 +787,55 @@ func (h *Handler) updateParsedJob(c *gin.Context) {
 	h.listParsedJobs(c)
 }
 
+func (h *Handler) autoCategorizeParsedJob(c *gin.Context) {
+	if _, ok := h.requireAdmin(c); !ok {
+		return
+	}
+	jobID, err := strconv.ParseInt(c.Param("jobID"), 10, 64)
+	if err != nil || jobID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid parsed job id"})
+		return
+	}
+
+	var (
+		source          string
+		roleTitle       sql.NullString
+		roleDescription sql.NullString
+		techStack       sql.NullString
+	)
+	err = h.db.SQL.QueryRowContext(c.Request.Context(),
+		`SELECT COALESCE(r.source, ''), p.role_title, p.role_description, p.tech_stack
+		 FROM parsed_jobs p
+		 LEFT JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
+		 WHERE p.id = ? LIMIT 1`, jobID).
+		Scan(&source, &roleTitle, &roleDescription, &techStack)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "Parsed job not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to auto-categorize parsed job"})
+		return
+	}
+
+	parsedSvc := parsed.New(h.db)
+	nextTitle, nextFunction, err := parsedSvc.SuggestCategory(
+		c.Request.Context(),
+		source,
+		roleTitle.String,
+		roleDescription.String,
+		parseJSONStringArray(techStack),
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to auto-categorize parsed job"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"categorized_job_title":    nilIfBlank(nextTitle),
+		"categorized_job_function": nilIfBlank(nextFunction),
+	})
+}
+
 func (h *Handler) listParsedCompanies(c *gin.Context) {
 	if _, ok := h.requireAdmin(c); !ok {
 		return
@@ -1453,6 +1504,13 @@ func parseJSONStringArray(value sql.NullString) any {
 		return out
 	}
 	return nil
+}
+
+func nilIfBlank(value string) any {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return strings.TrimSpace(value)
 }
 
 func nullableInt(value sql.NullInt64) any {
