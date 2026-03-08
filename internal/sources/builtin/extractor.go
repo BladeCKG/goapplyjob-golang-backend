@@ -658,7 +658,6 @@ func toRawCompanyShape(parsedCompany map[string]any) any {
 		"industrySpecialitiesGermany": nil,
 		"sponsorsUKSkilledWorkerVisa": nil,
 		"sourceCompanySlug":           parsedCompany["source_company_slug"],
-		"companyMatchKey":             parsedCompany["company_match_key"],
 	}
 }
 

@@ -228,7 +228,6 @@ func buildRawPayload(item map[string]any, urlValue string, postDate time.Time) m
 			"profilePicURL":        stringOrNil(company["image"]),
 			"fundingData":          []any{},
 			"industrySpecialities": nil,
-			"companyMatchKey":      buildCompanyMatchKeys(stringValue(company["website"]), stringValue(company["title"])),
 		},
 	}
 }
@@ -255,29 +254,6 @@ func inferSeniority(title string) (bool, bool, bool, bool, bool) {
 	isLead := hasLead || hasPrincipal || hasStaff || hasHead
 	isMid := !(isEntry || isJunior || isSenior || isLead)
 	return isEntry, isJunior, isMid, isSenior, isLead
-}
-
-func buildCompanyMatchKeys(websiteURL, companyName string) []string {
-	keys := []string{}
-	if strings.TrimSpace(websiteURL) != "" {
-		parsed, err := url.Parse(websiteURL)
-		if err == nil && parsed.Hostname() != "" {
-			host := strings.TrimPrefix(strings.ToLower(parsed.Hostname()), "www.")
-			keys = append(keys, "domain:"+host)
-			parts := strings.Split(host, ".")
-			if len(parts) > 2 {
-				keys = append(keys, "subdomain:"+host)
-			}
-		}
-	}
-	if len(keys) == 0 && strings.TrimSpace(companyName) != "" {
-		normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(companyName), "-")
-		normalized = strings.Trim(normalized, "-")
-		if normalized != "" {
-			keys = append(keys, "name:"+normalized)
-		}
-	}
-	return keys
 }
 
 func slugify(value string) string {
