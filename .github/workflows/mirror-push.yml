@@ -1,0 +1,31 @@
+name: Mirror Backend Repo
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push mirror to Forgejo
+        env:
+          FORGEJO_MIRROR_USERNAME: ${{ secrets.FORGEJO_MIRROR_USERNAME }}
+          FORGEJO_MIRROR_TOKEN: ${{ secrets.FORGEJO_MIRROR_TOKEN }}
+          FORGEJO_MIRROR_URL: https://v14.next.forgejo.org/bladeckg/goapplyjob-backend.git
+        run: |
+          if [ -z "$FORGEJO_MIRROR_USERNAME" ] || [ -z "$FORGEJO_MIRROR_TOKEN" ]; then
+            echo "Missing FORGEJO_MIRROR_USERNAME or FORGEJO_MIRROR_TOKEN secret."
+            exit 1
+          fi
+          AUTH_URL=$(echo "$FORGEJO_MIRROR_URL" | sed "s#https://#https://${FORGEJO_MIRROR_USERNAME}:${FORGEJO_MIRROR_TOKEN}@#")
+          git remote add mirror "$AUTH_URL"
+          git push --mirror mirror
