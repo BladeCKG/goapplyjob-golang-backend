@@ -60,7 +60,8 @@ func (db *DB) Migrate(ctx context.Context) error {
             linkedin_url TEXT,
             employee_range TEXT,
             founded_year TEXT,
-            sponsors_h1b INTEGER
+            sponsors_h1b INTEGER,
+            industry_specialities TEXT
         );`,
 		`CREATE TABLE IF NOT EXISTS parsed_jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -344,6 +345,9 @@ func (db *DB) Migrate(ctx context.Context) error {
 		return err
 	}
 	if err := db.ensureColumn(ctx, "parsed_companies", "founded_year", "TEXT"); err != nil {
+		return err
+	}
+	if err := db.ensureColumn(ctx, "parsed_companies", "industry_specialities", "TEXT"); err != nil {
 		return err
 	}
 	if err := db.ensureColumn(ctx, "employer_jobs", "posting_fee_usd", "INTEGER NOT NULL DEFAULT 10"); err != nil {

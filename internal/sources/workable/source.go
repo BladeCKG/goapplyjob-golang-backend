@@ -228,7 +228,7 @@ func buildRawPayload(item map[string]any, urlValue string, postDate time.Time) m
 			"profilePicURL":        stringOrNil(company["image"]),
 			"fundingData":          []any{},
 			"industrySpecialities": nil,
-			"companyMatchKey":      buildCompanyMatchKeys(stringValue(company["website"]), stringValue(company["url"]), stringValue(company["title"])),
+			"companyMatchKey":      buildCompanyMatchKeys(stringValue(company["website"]), stringValue(company["title"])),
 		},
 	}
 }
@@ -257,21 +257,17 @@ func inferSeniority(title string) (bool, bool, bool, bool, bool) {
 	return isEntry, isJunior, isMid, isSenior, isLead
 }
 
-func buildCompanyMatchKeys(websiteURL, companyURL, companyName string) []string {
+func buildCompanyMatchKeys(websiteURL, companyName string) []string {
 	keys := []string{}
-	for _, rawURL := range []string{websiteURL, companyURL} {
-		if strings.TrimSpace(rawURL) == "" {
-			continue
-		}
-		parsed, err := url.Parse(rawURL)
-		if err != nil || parsed.Hostname() == "" {
-			continue
-		}
-		host := strings.TrimPrefix(strings.ToLower(parsed.Hostname()), "www.")
-		keys = append(keys, "domain:"+host)
-		parts := strings.Split(host, ".")
-		if len(parts) > 2 {
-			keys = append(keys, "subdomain:"+host)
+	if strings.TrimSpace(websiteURL) != "" {
+		parsed, err := url.Parse(websiteURL)
+		if err == nil && parsed.Hostname() != "" {
+			host := strings.TrimPrefix(strings.ToLower(parsed.Hostname()), "www.")
+			keys = append(keys, "domain:"+host)
+			parts := strings.Split(host, ".")
+			if len(parts) > 2 {
+				keys = append(keys, "subdomain:"+host)
+			}
 		}
 	}
 	if len(keys) == 0 && strings.TrimSpace(companyName) != "" {

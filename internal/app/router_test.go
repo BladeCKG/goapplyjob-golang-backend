@@ -877,6 +877,116 @@ func TestClearSelectedJobActionBucket(t *testing.T) {
 	assertStatus(t, invalidRec.Code, http.StatusBadRequest)
 }
 
+func TestJobsListFiltersByCompanySlug(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	acmeResult, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_companies (name, slug) VALUES ('Acme', 'acme')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acmeID, _ := acmeResult.LastInsertId()
+	globexResult, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_companies (name, slug) VALUES ('Globex', 'globex')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	globexID, _ := globexResult.LastInsertId()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (91001, 'https://example.com/company-acme', ?, 1, 0, 1, 0, '{}')`, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (91002, 'https://example.com/company-globex', ?, 1, 0, 1, 0, '{}')`, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, company_id, role_title, created_at_source, url) VALUES (91001, ?, 'Backend Engineer', ?, 'https://jobs.example.com/company-acme')`, acmeID, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, company_id, role_title, created_at_source, url) VALUES (91002, ?, 'Data Engineer', ?, 'https://jobs.example.com/company-globex')`, globexID, now); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?company=acme", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	if int(body["total"].(float64)) != 1 {
+		t.Fatalf("expected one company-filtered row %#v", body)
+	}
+	item := body["items"].([]any)[0].(map[string]any)
+	if item["company_slug"] != "acme" || item["role_title"] != "Backend Engineer" {
+		t.Fatalf("unexpected company-filtered item %#v", item)
+	}
+}
+
+func TestCompanyProfileEndpointReturnsCompanyAndStats(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	industries, _ := json.Marshal([]string{"SaaS", "AI"})
+	result, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_companies (name, slug, tagline, industry_specialities) VALUES ('Acme', 'acme', 'Builds tools', ?)`, string(industries))
+	if err != nil {
+		t.Fatal(err)
+	}
+	companyID, _ := result.LastInsertId()
+	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (92001, 'https://example.com/company-profile-job', ?, 1, 0, 1, 0, '{}')`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, company_id, role_title, created_at_source, url) VALUES (92001, ?, 'Staff Engineer', ?, 'https://jobs.example.com/company-profile-job')`, companyID, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/companies/acme", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	if body["slug"] != "acme" || body["name"] != "Acme" || body["tagline"] != "Builds tools" {
+		t.Fatalf("unexpected company profile payload %#v", body)
+	}
+	if body["total_jobs"] != float64(1) {
+		t.Fatalf("unexpected company profile stats %#v", body)
+	}
+	industryValues := body["industry_specialities"].([]any)
+	if len(industryValues) != 2 || industryValues[0] != "SaaS" || industryValues[1] != "AI" {
+		t.Fatalf("unexpected industry specialities %#v", body["industry_specialities"])
+	}
+}
+
+func TestCompaniesSitemapEndpointListsCompanySlugs(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	result, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_companies (name, slug) VALUES ('Acme', 'acme')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	companyID, _ := result.LastInsertId()
+	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (93001, 'https://example.com/company-sitemap-job', ?, 1, 0, 1, 0, '{}')`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, company_id, role_title, created_at_source, url) VALUES (93001, ?, 'Engineer', ?, 'https://jobs.example.com/company-sitemap-job')`, companyID, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/companies/sitemap?page=1&per_page=10", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	if int(body["total"].(float64)) != 1 {
+		t.Fatalf("unexpected companies sitemap total %#v", body)
+	}
+	items := body["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["slug"] != "acme" {
+		t.Fatalf("unexpected companies sitemap items %#v", body)
+	}
+}
+
 func TestPricingFlow(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()

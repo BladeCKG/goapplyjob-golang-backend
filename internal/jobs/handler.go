@@ -164,6 +164,28 @@ type jobSitemapItem struct {
 	CreatedAtSource  *string `json:"created_at_source"`
 }
 
+type companySitemapItem struct {
+	Slug              string  `json:"slug"`
+	Name              *string `json:"name"`
+	LatestJobPostedAt *string `json:"latest_job_posted_at"`
+}
+
+type companyProfileItem struct {
+	ID                 int64    `json:"id"`
+	Slug               string   `json:"slug"`
+	Name               *string  `json:"name"`
+	Tagline            *string  `json:"tagline"`
+	ProfilePicURL      *string  `json:"profile_pic_url"`
+	HomePageURL        *string  `json:"home_page_url"`
+	LinkedInURL        *string  `json:"linkedin_url"`
+	EmployeeRange      *string  `json:"employee_range"`
+	FoundedYear        *string  `json:"founded_year"`
+	SponsorsH1B        *bool    `json:"sponsors_h1b"`
+	IndustrySpecialies []string `json:"industry_specialities"`
+	TotalJobs          int64    `json:"total_jobs"`
+	LatestJobPostedAt  *string  `json:"latest_job_posted_at"`
+}
+
 func NewHandler(cfg config.Config, db *database.DB, authHandler *auth.Handler) *Handler {
 	return &Handler{
 		cfg:  cfg,
@@ -184,6 +206,8 @@ func (h *Handler) Register(router gin.IRouter) {
 	router.GET("/jobs/related-categories", h.relatedCategories)
 	router.GET("/jobs/top-categories", h.topCategories)
 	router.GET("/jobs/sitemap", h.sitemap)
+	router.GET("/companies/sitemap", h.companiesSitemap)
+	router.GET("/companies/:companySlug", h.companyProfile)
 	router.GET("/job/:jobID", h.jobDetail)
 	router.GET("/jobs/:jobID", h.jobDetail)
 	router.GET("/jobs", h.listJobs)
@@ -650,13 +674,9 @@ func (h *Handler) listJobs(c *gin.Context) {
 		where = " WHERE " + strings.Join(filters, " AND ")
 	}
 
-	var rawTotal int
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT COUNT(p.id) FROM parsed_jobs p`+where, args...).Scan(&rawTotal); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs"})
-		return
-	}
-	var companyCount int
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT COUNT(DISTINCT p.company_id) FROM parsed_jobs p`+where+appendWhere(where, `p.company_id IS NOT NULL`), args...).Scan(&companyCount); err != nil {
+	var rawTotal, companyCount int
+	countQuery := `SELECT COUNT(p.id), COUNT(DISTINCT p.company_id) FROM parsed_jobs p` + where
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), countQuery, args...).Scan(&rawTotal, &companyCount); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs"})
 		return
 	}
@@ -836,6 +856,128 @@ func (h *Handler) sitemap(c *gin.Context) {
 	})
 }
 
+func (h *Handler) companiesSitemap(c *gin.Context) {
+	page := max(parseIntDefault(c.Query("page"), 1), 1)
+	perPage := max(parseIntDefault(c.Query("per_page"), 500), 1)
+	if perPage > 50000 {
+		perPage = 50000
+	}
+	offset := (page - 1) * perPage
+	var total int
+	if err := h.db.SQL.QueryRowContext(
+		c.Request.Context(),
+		`SELECT COUNT(DISTINCT c.id)
+		 FROM parsed_companies c
+		 JOIN parsed_jobs p ON p.company_id = c.id
+		 WHERE c.slug IS NOT NULL AND trim(c.slug) != ''`,
+	).Scan(&total); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load companies sitemap"})
+		return
+	}
+	rows, err := h.db.SQL.QueryContext(
+		c.Request.Context(),
+		`SELECT c.slug, c.name, MAX(p.created_at_source) AS latest_job_posted_at
+		 FROM parsed_companies c
+		 JOIN parsed_jobs p ON p.company_id = c.id
+		 WHERE c.slug IS NOT NULL AND trim(c.slug) != ''
+		 GROUP BY c.id, c.slug, c.name
+		 ORDER BY latest_job_posted_at DESC, c.id DESC
+		 LIMIT ? OFFSET ?`,
+		perPage, offset,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load companies sitemap"})
+		return
+	}
+	defer rows.Close()
+	items := []companySitemapItem{}
+	for rows.Next() {
+		var slug sql.NullString
+		var name sql.NullString
+		var latest sql.NullString
+		if err := rows.Scan(&slug, &name, &latest); err != nil {
+			continue
+		}
+		slugValue := strings.TrimSpace(slug.String)
+		if !slug.Valid || slugValue == "" {
+			continue
+		}
+		items = append(items, companySitemapItem{
+			Slug:              slugValue,
+			Name:              nullableString(name),
+			LatestJobPostedAt: nullableString(latest),
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"page":     page,
+		"per_page": perPage,
+		"total":    total,
+		"items":    items,
+	})
+}
+
+func (h *Handler) companyProfile(c *gin.Context) {
+	slug := strings.ToLower(strings.TrimSpace(c.Param("companySlug")))
+	if slug == "" {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "Company not found"})
+		return
+	}
+	row := h.db.SQL.QueryRowContext(
+		c.Request.Context(),
+		`SELECT id, slug, name, tagline, profile_pic_url, home_page_url, linkedin_url, employee_range, founded_year, sponsors_h1b, industry_specialities
+		 FROM parsed_companies
+		 WHERE lower(trim(COALESCE(slug, ''))) = ?
+		 LIMIT 1`,
+		slug,
+	)
+	var item companyProfileItem
+	var itemSlug sql.NullString
+	var name, tagline, profilePicURL, homePageURL, linkedInURL, employeeRange, foundedYear, industrySpecialities sql.NullString
+	var sponsorsH1B sql.NullBool
+	if err := row.Scan(
+		&item.ID,
+		&itemSlug,
+		&name,
+		&tagline,
+		&profilePicURL,
+		&homePageURL,
+		&linkedInURL,
+		&employeeRange,
+		&foundedYear,
+		&sponsorsH1B,
+		&industrySpecialities,
+	); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "Company not found"})
+		return
+	}
+	item.Slug = strings.TrimSpace(itemSlug.String)
+	item.Name = nullableString(name)
+	item.Tagline = nullableString(tagline)
+	item.ProfilePicURL = nullableString(profilePicURL)
+	item.HomePageURL = nullableString(homePageURL)
+	item.LinkedInURL = nullableString(linkedInURL)
+	item.EmployeeRange = nullableString(employeeRange)
+	item.FoundedYear = nullableString(foundedYear)
+	item.SponsorsH1B = nullableBool(sponsorsH1B)
+	if industrySpecialities.Valid && strings.TrimSpace(industrySpecialities.String) != "" {
+		_ = json.Unmarshal([]byte(industrySpecialities.String), &item.IndustrySpecialies)
+	}
+	statsRow := h.db.SQL.QueryRowContext(
+		c.Request.Context(),
+		`SELECT COUNT(id), MAX(created_at_source)
+		 FROM parsed_jobs
+		 WHERE company_id = ?`,
+		item.ID,
+	)
+	var latestJobPostedAt sql.NullString
+	if err := statsRow.Scan(&item.TotalJobs, &latestJobPostedAt); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load company profile"})
+		return
+	}
+	item.LatestJobPostedAt = nullableString(latestJobPostedAt)
+	c.JSON(http.StatusOK, item)
+}
+
 func (h *Handler) relatedCategories(c *gin.Context) {
 	category := strings.TrimSpace(c.Query("category"))
 	if category == "" {
@@ -1012,6 +1154,31 @@ func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includ
 			args = append(args, "%"+location+"%", "%"+location+"%")
 		}
 		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
+	}
+	if companyValues := parseCSVQuery(c.Query("company")); len(companyValues) > 0 {
+		companyValues = uniqueStrings(companyValues)
+		lowered := make([]string, 0, len(companyValues))
+		for _, value := range companyValues {
+			next := strings.ToLower(strings.TrimSpace(value))
+			if next != "" {
+				lowered = append(lowered, next)
+			}
+		}
+		if len(lowered) > 0 {
+			placeholders := strings.TrimSuffix(strings.Repeat("?,", len(lowered)), ",")
+			subquery := `p.company_id IN (
+				SELECT c.id FROM parsed_companies c
+				WHERE lower(trim(COALESCE(c.slug, ''))) IN (` + placeholders + `)
+				   OR lower(trim(COALESCE(c.name, ''))) IN (` + placeholders + `)
+			)`
+			filters = append(filters, subquery)
+			for _, value := range lowered {
+				args = append(args, value)
+			}
+			for _, value := range lowered {
+				args = append(args, value)
+			}
+		}
 	}
 	if techStacks := parseCSVQuery(c.Query("tech_stack")); len(techStacks) > 0 {
 		techStacks = uniqueStrings(techStacks)
