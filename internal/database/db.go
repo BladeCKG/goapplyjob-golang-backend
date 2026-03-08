@@ -282,8 +282,14 @@ func (db *DB) Migrate(ctx context.Context) error {
 	if _, err := db.SQL.ExecContext(ctx, `DROP INDEX IF EXISTS uq_user_job_action`); err != nil {
 		return fmt.Errorf("drop legacy user_job_actions unique index: %w", err)
 	}
-	if _, err := db.SQL.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS uq_user_job_action_new ON user_job_actions (user_id, parsed_job_id)`); err != nil {
-		return fmt.Errorf("create user_job_actions unique index: %w", err)
+	if _, err := db.SQL.ExecContext(ctx, `DROP INDEX IF EXISTS uq_user_job_action_new`); err != nil {
+		return fmt.Errorf("drop temporary user_job_actions unique index (new): %w", err)
+	}
+	if _, err := db.SQL.ExecContext(ctx, `DROP INDEX IF EXISTS uq_user_job_action_old`); err != nil {
+		return fmt.Errorf("drop temporary user_job_actions unique index (old): %w", err)
+	}
+	if _, err := db.SQL.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_user_job_actions_user_id_parsed_job_id_unique ON user_job_actions (user_id, parsed_job_id)`); err != nil {
+		return fmt.Errorf("create stable user_job_actions unique index: %w", err)
 	}
 	if _, err := db.SQL.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_employer_organizations_name ON employer_organizations (name)`); err != nil {
 		return fmt.Errorf("create employer_organizations name index: %w", err)
