@@ -68,24 +68,32 @@ var registry = map[string]SourcePlugin{
 		InferCategories:      true,
 	},
 	workable.Source: {
-		Source:               workable.Source,
-		PayloadType:          workable.PayloadType,
-		ToTargetJobURL:       workable.ToTargetJobURL,
-		ParseRawHTML:         workable.ParseRawHTML,
-		ParseImportRows:      workable.ParseImportRows,
-		SerializeImportRows:  workable.SerializeImportRows,
+		Source:      workable.Source,
+		PayloadType: "",
+		ToTargetJobURL: func(rawURL string) string {
+			return rawURL
+		},
+		ParseRawHTML: func(_ string, _ string) map[string]any {
+			return map[string]any{}
+		},
+		ParseImportRows:      nil,
+		SerializeImportRows:  nil,
 		UseExternalCompanyID: false,
 		UseCompanyMatchKeys:  true,
 		RunDuplicateCheck:    true,
 		InferCategories:      true,
 	},
 	hiringcafe.Source: {
-		Source:               hiringcafe.Source,
-		PayloadType:          hiringcafe.PayloadType,
-		ToTargetJobURL:       hiringcafe.ToTargetJobURL,
-		ParseRawHTML:         hiringcafe.ParseRawHTML,
-		ParseImportRows:      hiringcafe.ParseImportRows,
-		SerializeImportRows:  hiringcafe.SerializeImportRows,
+		Source:      hiringcafe.Source,
+		PayloadType: "",
+		ToTargetJobURL: func(rawURL string) string {
+			return rawURL
+		},
+		ParseRawHTML: func(_ string, _ string) map[string]any {
+			return map[string]any{}
+		},
+		ParseImportRows:      nil,
+		SerializeImportRows:  nil,
 		UseExternalCompanyID: false,
 		UseCompanyMatchKeys:  true,
 		RunDuplicateCheck:    true,
@@ -104,9 +112,11 @@ var registry = map[string]SourcePlugin{
 		InferCategories:      true,
 	},
 	dailyremote.Source: {
-		Source:               dailyremote.Source,
-		PayloadType:          dailyremote.PayloadType,
-		ToTargetJobURL:       dailyremote.ToTargetJobURL,
+		Source:      dailyremote.Source,
+		PayloadType: dailyremote.PayloadType,
+		ToTargetJobURL: func(rawURL string) string {
+			return rawURL
+		},
 		ParseRawHTML:         dailyremote.ParseRawHTML,
 		ParseImportRows:      dailyremote.ParseImportRows,
 		SerializeImportRows:  dailyremote.SerializeImportRows,

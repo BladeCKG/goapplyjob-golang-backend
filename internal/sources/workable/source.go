@@ -34,8 +34,8 @@ func BuildAPIURL(baseURL, pageToken string, pageLimit int) string {
 
 func ToTargetJobURL(rawURL string) string { return rawURL }
 
-func ParseRawHTML(_ string, sourceURL string) map[string]any {
-	return map[string]any{"url": sourceURL}
+func ParseRawHTML(_ string, _ string) map[string]any {
+	return map[string]any{}
 }
 
 func NormalizeJobs(payloadText string) ([]map[string]any, int) {
