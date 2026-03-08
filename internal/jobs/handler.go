@@ -680,10 +680,22 @@ func (h *Handler) listJobs(c *gin.Context) {
 	}
 
 	var rawTotal, companyCount int
-	countQuery := `SELECT COUNT(p.id), COUNT(DISTINCT p.company_id) FROM parsed_jobs p` + where
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(), countQuery, args...).Scan(&rawTotal, &companyCount); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs"})
-		return
+	hasCompanyFilter := strings.TrimSpace(c.Query("company")) != ""
+	if hasCompanyFilter {
+		countQuery := `SELECT COUNT(p.id) FROM parsed_jobs p` + where
+		if err := h.db.SQL.QueryRowContext(c.Request.Context(), countQuery, args...).Scan(&rawTotal); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs"})
+			return
+		}
+		if rawTotal > 0 {
+			companyCount = 1
+		}
+	} else {
+		countQuery := `SELECT COUNT(p.id), COUNT(DISTINCT p.company_id) FROM parsed_jobs p` + where
+		if err := h.db.SQL.QueryRowContext(c.Request.Context(), countQuery, args...).Scan(&rawTotal, &companyCount); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs"})
+			return
+		}
 	}
 
 	previewPerPage := max(h.cfg.PublicJobsMaxPerPage, 1)
@@ -1208,30 +1220,14 @@ func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includ
 			filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 		}
 	}
-	if companyValues := parseCSVQuery(c.Query("company")); len(companyValues) > 0 {
-		companyValues = uniqueStrings(companyValues)
-		lowered := make([]string, 0, len(companyValues))
-		for _, value := range companyValues {
-			next := strings.ToLower(strings.TrimSpace(value))
-			if next != "" {
-				lowered = append(lowered, next)
-			}
-		}
-		if len(lowered) > 0 {
-			placeholders := strings.TrimSuffix(strings.Repeat("?,", len(lowered)), ",")
-			subquery := `p.company_id IN (
-				SELECT c.id FROM parsed_companies c
-				WHERE lower(trim(COALESCE(c.slug, ''))) IN (` + placeholders + `)
-				   OR lower(trim(COALESCE(c.name, ''))) IN (` + placeholders + `)
-			)`
-			filters = append(filters, subquery)
-			for _, value := range lowered {
-				args = append(args, value)
-			}
-			for _, value := range lowered {
-				args = append(args, value)
-			}
-		}
+	if normalizedCompany := strings.ToLower(strings.TrimSpace(c.Query("company"))); normalizedCompany != "" {
+		subquery := `p.company_id IN (
+			SELECT c.id FROM parsed_companies c
+			WHERE lower(trim(COALESCE(c.slug, ''))) = ?
+			   OR lower(trim(COALESCE(c.name, ''))) = ?
+		)`
+		filters = append(filters, subquery)
+		args = append(args, normalizedCompany, normalizedCompany)
 	}
 	if techStacks := parseCSVQuery(c.Query("tech_stack")); len(techStacks) > 0 {
 		techStacks = uniqueStrings(techStacks)
