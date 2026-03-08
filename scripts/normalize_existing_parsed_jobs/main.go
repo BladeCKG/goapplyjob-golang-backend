@@ -64,7 +64,7 @@ func normalizeRows(ctx context.Context, db *sql.DB, sources []string, dryRun boo
 		placeholders = append(placeholders, "?")
 		args = append(args, source)
 	}
-	query := `SELECT p.id, p.location, p.location_city, p.location_us_states, p.employment_type
+	query := `SELECT p.id, p.location, p.location_city, p.location_us_states, p.employment_type, p.education_requirements_credential_category
 		FROM parsed_jobs p
 		JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
 		WHERE r.source IN (` + strings.Join(placeholders, ", ") + `)
@@ -86,8 +86,8 @@ func normalizeRows(ctx context.Context, db *sql.DB, sources []string, dryRun boo
 	for rows.Next() {
 		scanned++
 		var id int64
-		var location, city, statesJSON, employment sql.NullString
-		if err := rows.Scan(&id, &location, &city, &statesJSON, &employment); err != nil {
+		var location, city, statesJSON, employment, education sql.NullString
+		if err := rows.Scan(&id, &location, &city, &statesJSON, &employment, &education); err != nil {
 			return scanned, updated, err
 		}
 		states := []string{}
@@ -97,17 +97,19 @@ func normalizeRows(ctx context.Context, db *sql.DB, sources []string, dryRun boo
 
 		newLocation, newCity, newStatesJSON := normalizeLocationFields(location.String, city.String, states)
 		newEmployment := normalizeEmploymentType(employment.String)
+		newEducation := normalizeEducationCredentialCategory(education.String)
 		if toNullString(location.String) == toNullString(newLocation) &&
 			toNullString(city.String) == toNullString(newCity) &&
 			toNullString(statesJSON.String) == toNullString(newStatesJSON) &&
-			toNullString(employment.String) == toNullString(newEmployment) {
+			toNullString(employment.String) == toNullString(newEmployment) &&
+			toNullString(education.String) == toNullString(newEducation) {
 			continue
 		}
 
 		updated++
 		if !dryRun {
-			if _, err := tx.ExecContext(ctx, `UPDATE parsed_jobs SET location = ?, location_city = ?, location_us_states = ?, employment_type = ? WHERE id = ?`,
-				nilIfEmpty(newLocation), nilIfEmpty(newCity), nilIfEmpty(newStatesJSON), nilIfEmpty(newEmployment), id); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE parsed_jobs SET location = ?, location_city = ?, location_us_states = ?, employment_type = ?, education_requirements_credential_category = ? WHERE id = ?`,
+				nilIfEmpty(newLocation), nilIfEmpty(newCity), nilIfEmpty(newStatesJSON), nilIfEmpty(newEmployment), nilIfEmpty(newEducation), id); err != nil {
 				return scanned, updated, err
 			}
 			if updated%batchSize == 0 {
@@ -162,6 +164,11 @@ func normalizeEmploymentType(value string) string {
 	default:
 		return normalized
 	}
+}
+
+func normalizeEducationCredentialCategory(value string) string {
+	normalized := strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(strings.ToLower(value), " "))
+	return normalized
 }
 
 func normalizeLocationFields(location, city string, states []string) (string, string, string) {

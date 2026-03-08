@@ -283,3 +283,12 @@ func TestNormalizeLocationFieldsTitleCasesCityAndState(t *testing.T) {
 		t.Fatalf("expected states json [\"New York\"], got %#v", states)
 	}
 }
+
+func TestNormalizeEducationCredentialCategoryLowercases(t *testing.T) {
+	if got := normalizeEducationCredentialCategory("Bachelor Degree"); got != "bachelor degree" {
+		t.Fatalf("expected lowercase value, got %#v", got)
+	}
+	if got := normalizeEducationCredentialCategory("  MASTER'S   DEGREE  "); got != "master's degree" {
+		t.Fatalf("expected normalized lowercase spacing, got %#v", got)
+	}
+}

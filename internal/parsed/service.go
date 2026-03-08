@@ -373,6 +373,18 @@ func normalizeEmploymentTypeValue(value any) any {
 	}
 }
 
+func normalizeEducationCredentialCategory(value any) any {
+	text, ok := value.(string)
+	if !ok {
+		return nil
+	}
+	normalized := strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(strings.ToLower(text), " "))
+	if normalized == "" {
+		return nil
+	}
+	return normalized
+}
+
 func normalizeCountryName(value string) string {
 	normalized := regexp.MustCompile(`[^a-zA-Z.\s]`).ReplaceAllString(value, "")
 	normalized = strings.TrimSpace(strings.ToLower(regexp.MustCompile(`\s+`).ReplaceAllString(normalized, " ")))
@@ -584,8 +596,8 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		err = database.RetryLocked(8, 50*time.Millisecond, func() error {
 			_, execErr := s.DB.SQL.ExecContext(
 				ctx,
-				`INSERT INTO parsed_jobs (raw_us_job_id, external_job_id, created_at_source, url, categorized_job_title, categorized_job_function, role_title, employment_type, location, location_city, location_us_states, updated_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				`INSERT INTO parsed_jobs (raw_us_job_id, external_job_id, created_at_source, url, categorized_job_title, categorized_job_function, role_title, employment_type, location, location_city, location_us_states, education_requirements_credential_category, updated_at)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				 ON CONFLICT(raw_us_job_id) DO UPDATE SET
 				   external_job_id = excluded.external_job_id,
 				   created_at_source = excluded.created_at_source,
@@ -596,6 +608,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				   location = excluded.location,
 				   location_city = excluded.location_city,
 				   location_us_states = excluded.location_us_states,
+				   education_requirements_credential_category = excluded.education_requirements_credential_category,
 				   role_title = excluded.role_title,
 				   updated_at = excluded.updated_at`,
 				row.id,
@@ -609,6 +622,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				normalizedLocation,
 				normalizedLocationCity,
 				normalizedUSStates,
+				normalizeEducationCredentialCategory(payload["educationRequirementsCredentialCategory"]),
 				time.Now().UTC().Format(time.RFC3339Nano),
 			)
 			return execErr
