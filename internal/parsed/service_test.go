@@ -313,3 +313,10 @@ func TestNormalizeTechStackCleansNoisyValuesAndAliases(t *testing.T) {
 		t.Fatalf("unexpected normalized tech stack %#v", got)
 	}
 }
+
+func TestNormalizeTechStackPreservesLeadingDot(t *testing.T) {
+	got := normalizeTechStack([]any{".net", " dotnet. "})
+	if len(got) != 1 || got[0] != ".NET" {
+		t.Fatalf("unexpected normalized tech stack %#v", got)
+	}
+}

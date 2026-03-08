@@ -470,7 +470,8 @@ func normalizeTechStackValue(value string) string {
 	normalized = regexp.MustCompile(`\s*-\s*`).ReplaceAllString(normalized, "-")
 	normalized = regexp.MustCompile(`[;,:]+$`).ReplaceAllString(normalized, "")
 	normalized = regexp.MustCompile(`\s+`).ReplaceAllString(normalized, " ")
-	normalized = strings.Trim(normalized, " .-_/")
+	normalized = strings.Trim(normalized, " -_/")
+	normalized = strings.TrimRight(normalized, ".")
 	if normalized == "" {
 		return ""
 	}
