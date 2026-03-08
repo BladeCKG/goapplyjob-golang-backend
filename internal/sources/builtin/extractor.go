@@ -505,12 +505,13 @@ func fallbackCompanyFromJobPosting(jobPosting map[string]any, jobPageHTML string
 	if value := matchOne(jobPageHTML, `(?is)Year Founded:\s*([0-9]{4})`); value != "" {
 		foundedYear = value
 	}
+	tagline := extractWhatWeDoTagline(jobPageHTML)
 	employeeRange := normalizeEmployeeRange(matchOne(jobPageHTML, `(?is)([0-9][0-9,]*)\s+employees`))
 	return map[string]any{
 		"external_company_id":         nil,
 		"name":                        valueOrNil(companyName),
 		"slug":                        valueOrNil(companySlug),
-		"tagline":                     nil,
+		"tagline":                     valueOrNil(tagline),
 		"founded_year":                foundedYear,
 		"home_page_url":               nil,
 		"linkedin_url":                nil,
@@ -524,6 +525,32 @@ func fallbackCompanyFromJobPosting(jobPosting map[string]any, jobPageHTML string
 		"source_company_profile_init": nil,
 		"updated_at":                  time.Now().UTC().Format(time.RFC3339Nano),
 	}
+}
+
+func extractWhatWeDoTagline(jobPageHTML string) string {
+	if strings.TrimSpace(jobPageHTML) == "" {
+		return ""
+	}
+	section := matchOne(jobPageHTML, `(?is)<h2[^>]*>\s*What\s+We\s+Do\s*</h2>(.*?)(?:<h2[^>]*>|$)`)
+	if strings.TrimSpace(section) == "" {
+		return ""
+	}
+	lines := []string{}
+	seen := map[string]struct{}{}
+	paragraphMatches := regexp.MustCompile(`(?is)<p[^>]*>(.*?)</p>`).FindAllStringSubmatch(section, -1)
+	for _, match := range paragraphMatches {
+		text := strings.TrimSpace(spacePattern.ReplaceAllString(html.UnescapeString(tagPattern.ReplaceAllString(match[1], " ")), " "))
+		if text == "" {
+			continue
+		}
+		key := strings.ToLower(text)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		lines = append(lines, text)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func toRawCompanyShape(parsedCompany map[string]any) any {

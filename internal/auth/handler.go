@@ -565,19 +565,17 @@ func (h *Handler) ensureDefaultFreeSubscription(c *gin.Context, userID int64) er
 		return err
 	}
 
-	var activeCount int
+	var subscriptionCount int
 	if err := h.db.SQL.QueryRowContext(
 		c.Request.Context(),
 		`SELECT COUNT(1)
-		 FROM user_subscriptions s
-		 JOIN pricing_plans p ON p.id = s.pricing_plan_id
-		 WHERE s.user_id = ? AND s.ends_at > ? AND p.is_active = 1`,
+		 FROM user_subscriptions
+		 WHERE user_id = ?`,
 		userID,
-		now.Format(time.RFC3339Nano),
-	).Scan(&activeCount); err != nil {
+	).Scan(&subscriptionCount); err != nil {
 		return err
 	}
-	if activeCount > 0 {
+	if subscriptionCount > 0 {
 		return nil
 	}
 

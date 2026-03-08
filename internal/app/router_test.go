@@ -899,6 +899,30 @@ func TestSubscriptionStatusHandlesExpiredState(t *testing.T) {
 	}
 }
 
+func TestExpiredFreePlanIsNotRecreatedOnLogin(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	code := requestLoginCode(t, router, "expired-free@example.com")
+	_ = verifyLoginCode(t, router, "expired-free@example.com", code)
+
+	_, err := db.SQL.ExecContext(context.Background(), `UPDATE user_subscriptions SET ends_at = ?, is_active = 0`, time.Now().UTC().Add(-2*time.Hour).Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code = requestLoginCode(t, router, "expired-free@example.com")
+	_ = verifyLoginCode(t, router, "expired-free@example.com", code)
+
+	var subscriptionCount int
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT COUNT(1) FROM user_subscriptions`).Scan(&subscriptionCount); err != nil {
+		t.Fatal(err)
+	}
+	if subscriptionCount != 1 {
+		t.Fatalf("expected single subscription record after re-login, got %d", subscriptionCount)
+	}
+}
+
 func TestCryptoWebhookRequiresSignatureAndActivatesSubscription(t *testing.T) {
 	cfg := config.Load()
 	cfg.DatabaseURL = "file:test_crypto_webhook_paid?mode=memory&cache=shared"

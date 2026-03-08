@@ -152,12 +152,15 @@ func TestFallbackCompanyFromJobPosting(t *testing.T) {
 			"name":   "AAA",
 			"sameAs": "https://builtin.com/company/aaa",
 		},
-	}, `<html><body><span>Year Founded: 1902</span><p>We have 14,000 employees in 21 states.</p></body></html>`)
+	}, `<html><body><h2>What We Do</h2><p>Paragraph A</p><p>Paragraph B</p><h2>Other</h2><p>Ignore this.</p><span>Year Founded: 1902</span><p>We have 14,000 employees in 21 states.</p></body></html>`)
 	if company["name"] != "AAA" || company["slug"] != "aaa" {
 		t.Fatalf("unexpected fallback company %#v", company)
 	}
 	if company["founded_year"] != "1902" || company["employee_range"] != "14000" {
 		t.Fatalf("unexpected fallback company values %#v", company)
+	}
+	if company["tagline"] != "Paragraph A\nParagraph B" {
+		t.Fatalf("unexpected fallback company tagline %#v", company["tagline"])
 	}
 }
 
