@@ -63,6 +63,7 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 		"id":                           nilIfEmpty(externalID),
 		"url":                          firstNonEmpty(stringValue(jobPosting["url"]), sourceURL),
 		"created_at":                   postedAt,
+		"validUntilDate":               nilIfEmpty(parseISO(stringValue(jobPosting["validThrough"]))),
 		"roleTitle":                    normalizeTitle(stringValue(jobPosting["title"])),
 		"roleDescription":              nilIfEmpty(roleDescription),
 		"roleRequirements":             roleRequirements,

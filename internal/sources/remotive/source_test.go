@@ -33,6 +33,7 @@ func TestParseRawHTMLExtractsSectionsAndSalaryHandling(t *testing.T) {
   "url": "https://remotive.com/remote/jobs/software/senior-backend-engineer-9990001",
   "description": "<p class='h2 tw-mt-4 remotive-text-bigger'>Role Description</p><p>This role is responsible for platform APIs.</p><p class='h2 tw-mt-4 remotive-text-bigger'>Requirements</p><p>Active WA State RN License</p><p class='h2 tw-mt-4 remotive-text-bigger'>Benefits</p><p>401(k)</p><p class='h2 tw-mt-4 remotive-text-bigger'>Company Description</p><p>Flexible work from home options available.</p>",
   "baseSalary": {"@type":"MonetaryAmount","currency":"USD","value":{"minValue":0,"maxValue":0,"unitText":"YEAR"}},
+  "validThrough": "2026-03-15T00:00:00Z",
   "applicantLocationRequirements": [{"@type":"Country","name":"United States"}],
   "hiringOrganization": {"@type":"Organization","name":"Example Co"}
 }
@@ -44,6 +45,9 @@ func TestParseRawHTMLExtractsSectionsAndSalaryHandling(t *testing.T) {
 	}
 	if payload["salaryRange"] != nil {
 		t.Fatalf("expected nil salaryRange when base salary is zero, got %#v", payload["salaryRange"])
+	}
+	if payload["validUntilDate"] == nil {
+		t.Fatalf("expected validUntilDate mapping, got %#v", payload)
 	}
 	company, _ := payload["company"].(map[string]any)
 	if company == nil || company["profilePicURL"] == nil || company["tagline"] == nil {
