@@ -62,6 +62,16 @@ environmental variable from 0.0 to 1.0.
 Value is measured in percents.
 Therefore 0.5 means 50% of the samples will be collected.
 
+Debug switches:
+
+```env
+API_DEBUG=false
+WORKERS_DEBUG=false
+```
+
+When `API_DEBUG=true`, request logs include query strings and Gin runs in debug mode.
+When `WORKERS_DEBUG=true`, watcher worker cycle/source debug logs are enabled.
+
 ### Demoing usage
 
 ```bash
