@@ -653,6 +653,37 @@ func TestJobsPostDateFilterAndOptions(t *testing.T) {
 	}
 }
 
+func TestJobsSupportsPostDateFromCutoff(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	insertDatedJob(t, db, 911, now.Add(-72*time.Hour))
+	insertDatedJob(t, db, 912, now.Add(-2*time.Hour))
+
+	cutoff := now.Add(-24 * time.Hour).Format(time.RFC3339)
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?post_date_from="+cutoff, nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	if len(body["items"].([]any)) != 1 {
+		t.Fatalf("expected cutoff filter to return one job %#v", body)
+	}
+
+	metricsReq := httptest.NewRequest(http.MethodGet, "/jobs/metrics?post_date_from="+cutoff, nil)
+	metricsRec := httptest.NewRecorder()
+	router.ServeHTTP(metricsRec, metricsReq)
+	assertStatus(t, metricsRec.Code, http.StatusOK)
+	var metricsBody map[string]any
+	decodeBody(t, metricsRec.Body.Bytes(), &metricsBody)
+	if metricsBody["jobs_today"].(float64) < 1 {
+		t.Fatalf("expected metrics with cutoff to include recent job %#v", metricsBody)
+	}
+}
+
 func TestJobsEmploymentTypeFilterAndOptions(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()

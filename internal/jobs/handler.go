@@ -1032,6 +1032,12 @@ func (h *Handler) buildJobFilters(c *gin.Context, currentUser *auth.User, includ
 		}
 		filters = append(filters, "("+strings.Join(parts, " OR ")+")")
 	}
+	if postDateFrom := strings.TrimSpace(c.Query("post_date_from")); postDateFrom != "" {
+		if cutoff, ok := parsePostDateFrom(postDateFrom); ok {
+			filters = append(filters, `p.created_at_source >= ?`)
+			args = append(args, cutoff.Format(time.RFC3339Nano))
+		}
+	}
 	if includePostDate {
 		if postDate := strings.ToLower(strings.TrimSpace(c.Query("post_date"))); postDate != "" {
 			now := time.Now().UTC()
@@ -1341,6 +1347,23 @@ func parseIntDefault(raw string, fallback int) int {
 	}
 	return parsed
 }
+
+func parsePostDateFrom(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if parsed, err := time.Parse(layout, raw); err == nil {
+			return parsed.UTC(), true
+		}
+	}
+	if parsed, err := time.Parse("2006-01-02", raw); err == nil {
+		return time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 0, 0, 0, 0, time.UTC), true
+	}
+	return time.Time{}, false
+}
+
 func sortStrings(values []string) {
 	for i := 0; i < len(values); i++ {
 		for j := i + 1; j < len(values); j++ {
