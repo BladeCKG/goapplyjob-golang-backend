@@ -41,10 +41,15 @@ func ExtractJob(htmlText, companyHTML string) map[string]any {
 	}
 
 	locationLabels, firstLocality, applicantCountry := extractLocationParts(jobPosting)
-	roleDescription := toPlainText(stringValue(jobPosting["description"]))
+	descriptionHTML := stringValue(jobPosting["description"])
+	var roleDescription any
+	if strings.TrimSpace(descriptionHTML) != "" {
+		roleDescription = descriptionHTML
+	}
+	roleDescriptionText := stringValue(toPlainText(descriptionHTML))
 	builtinSummaryText := extractBuiltinSummaryText(htmlText)
 	roleTitle := stringValue(jobPosting["title"])
-	jobSummary, twoLineSummary := summariesFromDescription(roleDescription)
+	jobSummary, twoLineSummary := summariesFromDescription(roleDescriptionText)
 	if builtinSummaryText != "" {
 		jobSummary = builtinSummaryText
 		twoLineSummary = builtinSummaryText
@@ -130,20 +135,6 @@ func ExtractJobFromHTML(htmlText string, fallbackJobURL string) map[string]any {
 	}
 	if strings.TrimSpace(stringValue(payload["url"])) == "" && strings.TrimSpace(fallbackJobURL) != "" {
 		payload["url"] = fallbackJobURL
-	}
-	rawDescriptionHTML := ""
-	if jobPosting := findJobPostingLD(htmlText); len(jobPosting) > 0 {
-		rawDescriptionHTML = stringValue(jobPosting["description"])
-	}
-	if strings.TrimSpace(rawDescriptionHTML) == "" {
-		rawDescriptionHTML = stringValue(payload["roleDescription"])
-	}
-	requirements, cleanedDescription := extractRoleRequirementsAndCleanDescription(rawDescriptionHTML)
-	if requirements != nil {
-		payload["roleRequirements"] = requirements
-	}
-	if cleanedDescription != nil {
-		payload["roleDescription"] = cleanedDescription
 	}
 	if company, _ := payload["company"].(map[string]any); company == nil || len(company) == 0 {
 		jobPosting := findJobPostingLD(htmlText)

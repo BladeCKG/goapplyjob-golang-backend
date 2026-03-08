@@ -248,9 +248,12 @@ func TestExtractJobFromHTMLMapsJobBenefitsFromLDJSON(t *testing.T) {
 	if payload["benefits"] != "<p>Medical, dental, vision</p><p>401(k) match</p>" {
 		t.Fatalf("expected benefits passthrough, got %#v", payload["benefits"])
 	}
-	requirements, _ := payload["roleRequirements"].(string)
-	if !strings.Contains(requirements, "5+ years backend.") {
-		t.Fatalf("expected requirements extracted from description, got %#v", payload["roleRequirements"])
+	if payload["roleRequirements"] != nil {
+		t.Fatalf("expected nil role requirements when preserving html description, got %#v", payload["roleRequirements"])
+	}
+	description, _ := payload["roleDescription"].(string)
+	if !strings.Contains(description, "<b>Job Description</b>") {
+		t.Fatalf("expected raw html roleDescription, got %#v", payload["roleDescription"])
 	}
 }
 
