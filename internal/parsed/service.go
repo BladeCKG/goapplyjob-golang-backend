@@ -34,6 +34,10 @@ var employmentNoiseTokens = map[string]struct{}{
 	"full": {}, "time": {}, "fulltime": {}, "part": {}, "parttime": {}, "contract": {}, "contractor": {}, "temp": {}, "temporary": {}, "intern": {}, "internship": {}, "freelance": {}, "permanent": {},
 }
 
+var workModeNoiseTokens = map[string]struct{}{
+	"remote": {}, "hybrid": {}, "onsite": {}, "wfh": {}, "office": {},
+}
+
 var genericCategoryMatchTokens = map[string]struct{}{
 	"accountant": {}, "administrator": {}, "engineer": {}, "developer": {}, "manager": {}, "specialist": {}, "consultant": {}, "analyst": {}, "architect": {}, "designer": {}, "director": {}, "producer": {}, "writer": {}, "support": {}, "operations": {}, "web": {}, "remote": {}, "lead": {}, "staff": {},
 }
@@ -244,6 +248,9 @@ func shouldSkipRoleToken(token string) bool {
 		return true
 	}
 	if _, ok := employmentNoiseTokens[token]; ok {
+		return true
+	}
+	if _, ok := workModeNoiseTokens[token]; ok {
 		return true
 	}
 	return false

@@ -132,6 +132,19 @@ func TestTokenizeRoleTitleRemovesEmploymentTokens(t *testing.T) {
 	}
 }
 
+func TestTokenizeRoleTitleRemovesWorkModeNoise(t *testing.T) {
+	tokens := tokenizeRoleTitleForSimilarity("Remote Hybrid Backend Engineer")
+	if _, ok := tokens["remote"]; ok {
+		t.Fatal("expected remote to be removed")
+	}
+	if _, ok := tokens["hybrid"]; ok {
+		t.Fatal("expected hybrid to be removed")
+	}
+	if _, ok := tokens["backend"]; !ok {
+		t.Fatal("expected backend token")
+	}
+}
+
 func TestJaccardSimilarityWorksForOverlap(t *testing.T) {
 	left := map[string]struct{}{"backend": {}, "engineer": {}, "python": {}}
 	right := map[string]struct{}{"backend": {}, "engineer": {}, "go": {}}
