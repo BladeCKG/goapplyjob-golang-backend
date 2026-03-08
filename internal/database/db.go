@@ -392,6 +392,51 @@ func (db *DB) Migrate(ctx context.Context) error {
 		)`); err != nil {
 		return fmt.Errorf("backfill watcher_states state_json: %w", err)
 	}
+	if err := db.ensureParsedJobsCompanyFKCascade(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (db *DB) ensureParsedJobsCompanyFKCascade(ctx context.Context) error {
+	// SQLite schema path: parsed_jobs is created with ON DELETE CASCADE and this PRAGMA is supported.
+	if rows, err := db.SQL.QueryContext(ctx, `PRAGMA foreign_key_list(parsed_jobs)`); err == nil {
+		rows.Close()
+		return nil
+	}
+
+	// Postgres path: alter FK in-place (no table rebuild) to avoid dropping referenced PKs.
+	sqlText := `
+DO $$
+BEGIN
+	IF EXISTS (
+		SELECT 1
+		FROM information_schema.table_constraints tc
+		WHERE tc.table_name = 'parsed_jobs'
+		  AND tc.constraint_type = 'FOREIGN KEY'
+		  AND tc.constraint_name = 'parsed_jobs_company_id_fkey'
+	) THEN
+		ALTER TABLE parsed_jobs DROP CONSTRAINT parsed_jobs_company_id_fkey;
+	END IF;
+
+	IF EXISTS (
+		SELECT 1
+		FROM information_schema.tables
+		WHERE table_name = 'parsed_jobs'
+	) THEN
+		ALTER TABLE parsed_jobs
+		ADD CONSTRAINT parsed_jobs_company_id_fkey
+		FOREIGN KEY (company_id)
+		REFERENCES parsed_companies(id)
+		ON DELETE CASCADE;
+	END IF;
+EXCEPTION
+	WHEN undefined_table THEN
+		NULL;
+END $$;`
+	if _, err := db.SQL.ExecContext(ctx, sqlText); err != nil {
+		return fmt.Errorf("ensure parsed_jobs.company_id fk cascade: %w", err)
+	}
 	return nil
 }
 
