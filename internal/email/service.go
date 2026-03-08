@@ -17,6 +17,7 @@ import (
 const (
 	defaultProvider = "brevo"
 	defaultBrevoURL = "https://api.brevo.com/v3/smtp/email"
+	defaultMailtrap = "https://send.api.mailtrap.io/api/send"
 )
 
 //go:embed templates/verification_email.html
@@ -60,19 +61,29 @@ func (s *Service) SendVerificationEmail(toEmail, siteName, siteURL, code string,
 		"Sign in at: " + siteURL + "\r\n\r\n" +
 		"If you did not request this code, you can ignore this email.\r\n"
 
-	switch s.normalizeProvider() {
-	case "brevo":
-		return s.sendViaBrevo(toEmail, siteName, code, textContent, htmlContent)
-	case "smtp":
-		return s.sendViaSMTP(toEmail, siteName, code, textContent, htmlContent)
-	case "auto":
-		if strings.TrimSpace(s.cfg.BrevoAPIKey) != "" && strings.TrimSpace(s.cfg.BrevoFromEmail) != "" {
-			return s.sendViaBrevo(toEmail, siteName, code, textContent, htmlContent)
-		}
-		return s.sendViaSMTP(toEmail, siteName, code, textContent, htmlContent)
-	default:
-		return fmt.Errorf("unsupported EMAIL_PROVIDER: %s", s.normalizeProvider())
+	providers := s.resolveProviders()
+	if len(providers) == 0 {
+		return fmt.Errorf("No usable email providers configured")
 	}
+	errors := []string{}
+	for _, provider := range providers {
+		var err error
+		switch provider {
+		case "mailtrap":
+			err = s.sendViaMailtrap(toEmail, siteName, code, textContent, htmlContent)
+		case "brevo":
+			err = s.sendViaBrevo(toEmail, siteName, code, textContent, htmlContent)
+		case "smtp":
+			err = s.sendViaSMTP(toEmail, siteName, code, textContent, htmlContent)
+		default:
+			err = fmt.Errorf("unsupported provider")
+		}
+		if err == nil {
+			return nil
+		}
+		errors = append(errors, provider+": "+err.Error())
+	}
+	return fmt.Errorf("All email providers failed (%s). Errors: %s", strings.Join(providers, ","), strings.Join(errors, " | "))
 }
 
 func (s *Service) normalizeProvider() string {
@@ -81,6 +92,8 @@ func (s *Service) normalizeProvider() string {
 		value = defaultProvider
 	}
 	switch value {
+	case "mailtrap", "mailtrap_api":
+		return "mailtrap"
 	case "brevo", "brevo_api", "api":
 		return "brevo"
 	case "smtp":
@@ -90,6 +103,92 @@ func (s *Service) normalizeProvider() string {
 	default:
 		return value
 	}
+}
+
+func normalizeProviderList(raw string) []string {
+	out := []string{}
+	seen := map[string]struct{}{}
+	for _, token := range strings.Split(raw, ",") {
+		value := strings.ToLower(strings.TrimSpace(token))
+		if value == "" {
+			continue
+		}
+		switch value {
+		case "mailtrap", "mailtrap_api":
+			value = "mailtrap"
+		case "brevo", "brevo_api", "api":
+			value = "brevo"
+		case "smtp":
+			value = "smtp"
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func (s *Service) resolveProviders() []string {
+	if list := normalizeProviderList(s.cfg.EmailProviders); len(list) > 0 {
+		return list
+	}
+	provider := s.normalizeProvider()
+	if provider != "auto" {
+		return []string{provider}
+	}
+	out := []string{}
+	if strings.TrimSpace(s.cfg.MailtrapAPIToken) != "" && strings.TrimSpace(s.cfg.MailtrapFromEmail) != "" {
+		out = append(out, "mailtrap")
+	}
+	if strings.TrimSpace(s.cfg.BrevoAPIKey) != "" && strings.TrimSpace(s.cfg.BrevoFromEmail) != "" {
+		out = append(out, "brevo")
+	}
+	if strings.TrimSpace(s.cfg.SMTPHost) != "" && (strings.TrimSpace(s.cfg.SMTPFrom) != "" || strings.TrimSpace(s.cfg.SMTPUser) != "") {
+		out = append(out, "smtp")
+	}
+	if len(out) == 0 {
+		return []string{"smtp"}
+	}
+	return out
+}
+
+func (s *Service) sendViaMailtrap(toEmail, siteName, code, textContent, htmlContent string) error {
+	if strings.TrimSpace(s.cfg.MailtrapAPIToken) == "" || strings.TrimSpace(s.cfg.MailtrapFromEmail) == "" {
+		return fmt.Errorf("Mailtrap API is not configured")
+	}
+	endpoint := defaultMailtrap
+	if s.cfg.MailtrapUseSandbox && strings.TrimSpace(s.cfg.MailtrapInboxID) != "" {
+		endpoint = "https://sandbox.api.mailtrap.io/api/send/" + strings.TrimSpace(s.cfg.MailtrapInboxID)
+	}
+	body := map[string]any{
+		"from": map[string]any{
+			"email": s.cfg.MailtrapFromEmail,
+			"name":  firstNonEmpty(s.cfg.MailtrapFromName, siteName),
+		},
+		"to":      []map[string]any{{"email": toEmail}},
+		"subject": siteName + " verification code: " + code,
+		"text":    textContent,
+		"html":    htmlContent,
+	}
+	rawBody, _ := json.Marshal(body)
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(rawBody))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+s.cfg.MailtrapAPIToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("Mailtrap API email send failed: %T", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusBadRequest {
+		bodyText, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+		return fmt.Errorf("Mailtrap API email send failed: status=%d body=%s", resp.StatusCode, string(bodyText))
+	}
+	return nil
 }
 
 func (s *Service) sendViaBrevo(toEmail, siteName, code, textContent, htmlContent string) error {

@@ -23,6 +23,12 @@ type Config struct {
 	AuthEnableGoogleLogin         bool
 	EmployerPostingFeeUSD         int
 	EmailProvider                 string
+	EmailProviders                string
+	MailtrapAPIToken              string
+	MailtrapFromEmail             string
+	MailtrapFromName              string
+	MailtrapUseSandbox            bool
+	MailtrapInboxID               string
 	BrevoAPIKey                   string
 	BrevoFromEmail                string
 	BrevoFromName                 string
@@ -81,6 +87,12 @@ func Load() Config {
 		AuthEnableGoogleLogin:         getenvBool("AUTH_ENABLE_GOOGLE_LOGIN", false),
 		EmployerPostingFeeUSD:         getenvInt("EMPLOYER_POSTING_FEE_USD", 10),
 		EmailProvider:                 getenv("EMAIL_PROVIDER", "brevo"),
+		EmailProviders:                getenv("EMAIL_PROVIDERS", ""),
+		MailtrapAPIToken:              getenv("MAILTRAP_API_TOKEN", ""),
+		MailtrapFromEmail:             getenv("MAILTRAP_FROM_EMAIL", ""),
+		MailtrapFromName:              getenv("MAILTRAP_FROM_NAME", "GoApplyJob"),
+		MailtrapUseSandbox:            getenvBool("MAILTRAP_USE_SANDBOX", false),
+		MailtrapInboxID:               getenv("MAILTRAP_INBOX_ID", ""),
 		BrevoAPIKey:                   getenv("BREVO_API_KEY", ""),
 		BrevoFromEmail:                getenv("BREVO_FROM_EMAIL", ""),
 		BrevoFromName:                 getenv("BREVO_FROM_NAME", "GoApplyJob"),
