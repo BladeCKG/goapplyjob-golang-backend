@@ -33,6 +33,13 @@ func TestNormalizeJobsBuildsRawPayloadRows(t *testing.T) {
 	if rawPayload["roleTitle"] != "Backend Engineer" {
 		t.Fatalf("unexpected raw payload %#v", rawPayload)
 	}
+	if rawPayload["slug"] != "a" {
+		t.Fatalf("expected workable job slug from url path, got %#v", rawPayload["slug"])
+	}
+	company, _ := rawPayload["company"].(map[string]any)
+	if company == nil || company["slug"] != "acme" {
+		t.Fatalf("expected workable company slug, got %#v", rawPayload["company"])
+	}
 }
 
 func TestNormalizeJobsDetectsSeniorFromSrWithPeriod(t *testing.T) {

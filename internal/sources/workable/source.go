@@ -170,6 +170,21 @@ func buildRawPayload(item map[string]any, urlValue string, postDate time.Time) m
 		}
 	}
 	isEntry, isJunior, isMid, isSenior, isLead := inferSeniority(title)
+	companySlug := firstNonEmpty(
+		slugify(stringValue(company["title"])),
+		slugFromCompanyURL(stringValue(company["website"])),
+		slugFromCompanyURL(stringValue(company["url"])),
+	)
+	if companySlug == "" {
+		companySlug = "workable-company"
+	}
+	jobSlug := firstNonEmpty(
+		slugFromURLPath(urlValue),
+		slugify(title),
+	)
+	if jobSlug == "" {
+		jobSlug = "workable-job"
+	}
 	return map[string]any{
 		"id":                           stringOrNil(item["id"]),
 		"created_at":                   postDate.UTC().Format(time.RFC3339Nano),
@@ -183,7 +198,7 @@ func buildRawPayload(item map[string]any, urlValue string, postDate time.Time) m
 		"jobDescriptionSummary":        stringOrNil(item["socialSharingDescription"]),
 		"twoLineJobDescriptionSummary": stringOrNil(item["socialSharingDescription"]),
 		"url":                          urlValue,
-		"slug":                         nil,
+		"slug":                         jobSlug,
 		"employmentType":               stringOrNil(item["employmentType"]),
 		"location":                     strings.Join(locationParts, ", "),
 		"locationType":                 stringOrNil(item["workplace"]),
@@ -208,7 +223,7 @@ func buildRawPayload(item map[string]any, urlValue string, postDate time.Time) m
 		"company": map[string]any{
 			"id":                   stringOrNil(company["id"]),
 			"name":                 stringOrNil(company["title"]),
-			"slug":                 nil,
+			"slug":                 companySlug,
 			"tagline":              nil,
 			"foundedYear":          nil,
 			"homePageURL":          stringOrNil(company["website"]),
@@ -273,6 +288,41 @@ func buildCompanyMatchKeys(websiteURL, companyURL, companyName string) []string 
 	return keys
 }
 
+func slugify(value string) string {
+	normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(strings.TrimSpace(value)), "-")
+	return strings.Trim(normalized, "-")
+}
+
+func slugFromURLPath(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	parts := []string{}
+	for _, part := range strings.Split(parsed.Path, "/") {
+		if strings.TrimSpace(part) != "" {
+			parts = append(parts, strings.TrimSpace(part))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return slugify(parts[len(parts)-1])
+}
+
+func slugFromCompanyURL(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	host := strings.Trim(strings.ToLower(parsed.Hostname()), ".")
+	host = strings.TrimPrefix(host, "www.")
+	if host == "" {
+		return ""
+	}
+	return slugify(strings.Split(host, ".")[0])
+}
+
 func parseISO(value string) (time.Time, error) {
 	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
 		return parsed.UTC(), nil
@@ -319,4 +369,13 @@ func timeValue(value any) time.Time {
 
 func strconvItoa(value int) string {
 	return strconv.Itoa(value)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

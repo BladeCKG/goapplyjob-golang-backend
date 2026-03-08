@@ -43,6 +43,9 @@ func TestParseRawHTMLExtractsSectionsAndSalaryHandling(t *testing.T) {
 </script>
 </head><body data-publication-date="2026-02-27 08:00:00"></body></html>`
 	payload := ParseRawHTML(htmlText, "https://remotive.com/remote/jobs/software/senior-backend-engineer-9990001")
+	if payload["slug"] != "senior-backend-engineer" {
+		t.Fatalf("expected remotive slug from role title, got %#v", payload["slug"])
+	}
 	if payload["roleDescription"] == nil || payload["roleRequirements"] == nil || payload["benefits"] == nil {
 		t.Fatalf("expected extracted sections, got %#v", payload)
 	}

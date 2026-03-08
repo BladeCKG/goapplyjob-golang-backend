@@ -60,9 +60,12 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 	benefitsText := nilIfEmpty(descriptionSections["benefits"])
 	companyTagline := nilIfEmpty(descriptionSections["company_description"])
 	externalID := stringValue(extractExternalID(stringValue(jobPosting["url"]), sourceURL, jobPosting["identifier"]))
+	roleTitleText := stringValue(normalizeTitle(stringValue(jobPosting["title"])))
+	jobSlug := buildJobSlug(roleTitleText, stringValue(jobPosting["url"]), externalID)
 	return map[string]any{
 		"id":                           nilIfEmpty(externalID),
 		"url":                          firstNonEmpty(stringValue(jobPosting["url"]), sourceURL),
+		"slug":                         jobSlug,
 		"created_at":                   postedAt,
 		"validUntilDate":               nilIfEmpty(parseISO(stringValue(jobPosting["validThrough"]))),
 		"roleTitle":                    normalizeTitle(stringValue(jobPosting["title"])),
@@ -373,6 +376,38 @@ func trimDescriptionSummary(value string) string {
 		return trimmed
 	}
 	return trimmed[:280] + "..."
+}
+
+func buildJobSlug(roleTitle, canonicalURL, externalJobID string) string {
+	if value := slugFromText(roleTitle); value != "" && value != "unknown" {
+		return value
+	}
+	if strings.TrimSpace(canonicalURL) != "" {
+		parsed, err := url.Parse(strings.TrimSpace(canonicalURL))
+		if err == nil {
+			segments := []string{}
+			for _, part := range strings.Split(parsed.Path, "/") {
+				if strings.TrimSpace(part) != "" {
+					segments = append(segments, strings.TrimSpace(part))
+				}
+			}
+			if len(segments) > 0 {
+				last := regexp.MustCompile(`-\d+$`).ReplaceAllString(segments[len(segments)-1], "")
+				if value := slugFromText(last); value != "" && value != "unknown" {
+					return value
+				}
+			}
+		}
+	}
+	if strings.TrimSpace(externalJobID) != "" {
+		return "remotive-job-" + strings.TrimSpace(externalJobID)
+	}
+	return "remotive-job"
+}
+
+func slugFromText(value string) string {
+	normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(strings.TrimSpace(value)), "-")
+	return strings.Trim(normalized, "-")
 }
 
 func extractExternalID(jobURL, sourceURL string, identifier any) any {
