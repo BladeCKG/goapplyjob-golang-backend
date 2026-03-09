@@ -179,7 +179,7 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, ro
 	categorizedTitle := ""
 	categorizedFunction := ""
 
-	if len(normalizedTechStack) == 0 {
+	if len(normalizedTechStack) == 0 && shouldUseGroqClassification(roleTitle) {
 		allowedCategories, _ := s.loadAllowedJobCategoriesForGroq(ctx)
 		category, groqRequiredSkills := classifyJobTitleWithGroqSync(roleTitle, roleDescription, allowedCategories)
 		categorizedTitle = strings.TrimSpace(category)
@@ -217,6 +217,31 @@ func parseDT(value any) *time.Time {
 		return &parsed
 	}
 	return nil
+}
+
+func shouldUseGroqClassification(roleTitle string) bool {
+	normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(strings.TrimSpace(roleTitle)), " ")
+	normalized = strings.TrimSpace(normalized)
+	if normalized == "" {
+		return false
+	}
+	for _, token := range strings.Fields(normalized) {
+		switch token {
+		case "engineer", "engineers",
+			"developer", "developers",
+			"scientist", "scientists",
+			"analyst", "analysts",
+			"administrator", "administrators",
+			"designer", "designers",
+			"architect", "architects",
+			"technician", "technicians",
+			"technologist", "technologists",
+			"machinist", "machinists",
+			"manager", "managers":
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeDT(value *time.Time) *time.Time {
@@ -1426,7 +1451,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			}
 		}
 		if inferCategories && categorizedTitle == nil {
-			if len(normalizedTechStack) == 0 {
+			if len(normalizedTechStack) == 0 && shouldUseGroqClassification(stringValue(payload["roleTitle"])) {
 				allowedCategories, _ := s.loadAllowedJobCategoriesForGroq(ctx)
 				groqCategory, groqRequiredSkills := classifyJobTitleWithGroqSync(
 					stringValue(payload["roleTitle"]),
