@@ -2161,7 +2161,7 @@ func (s *Service) findDuplicateCrossSourceParsedJob(ctx context.Context, rawJobI
 	if ok && !plugin.RunDuplicateCheck {
 		return 0, false, nil
 	}
-	sourceCreatedAt := parseDT(payload["created_at"])
+	// sourceCreatedAt := parseDT(payload["created_at"])
 	sourceURLNorm := normalizeJobURLForMatch(stringValue(payload["url"]))
 	if sourceURLNorm == "" {
 		return 0, false, nil
@@ -2175,12 +2175,12 @@ func (s *Service) findDuplicateCrossSourceParsedJob(ctx context.Context, rawJobI
 	if companyIDOK {
 		companyIDFilter = companyIDInt
 	}
-	var lowerBound any
-	var upperBound any
-	if sourceCreatedAt != nil {
-		lowerBound = sourceCreatedAt.UTC().Add(-maxDuplicatePostDateDiff)
-		upperBound = sourceCreatedAt.UTC().Add(maxDuplicatePostDateDiff)
-	}
+	// var lowerBound any
+	// var upperBound any
+	// if sourceCreatedAt != nil {
+	// 	lowerBound = sourceCreatedAt.UTC().Add(-maxDuplicatePostDateDiff)
+	// 	upperBound = sourceCreatedAt.UTC().Add(maxDuplicatePostDateDiff)
+	// }
 	query := `SELECT p.id, p.url
 	   FROM parsed_jobs p
 	   JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
@@ -2189,25 +2189,27 @@ func (s *Service) findDuplicateCrossSourceParsedJob(ctx context.Context, rawJobI
 	    AND LOWER(p.url) LIKE ?
 	    AND p.raw_us_job_id <> ?
 		AND (?::bigint IS NULL OR p.company_id = ?::bigint)
-		AND (
-			?::timestamptz IS NULL
-			OR (
-				p.created_at_source IS NOT NULL
-				AND p.created_at_source >= ?::timestamptz
-				AND p.created_at_source <= ?::timestamptz
-			)
-		)
 	  ORDER BY p.updated_at DESC, p.id DESC
 	  LIMIT 1000`
+
+		// AND (
+		// 	?::timestamptz IS NULL
+		// 	OR (
+		// 		p.created_at_source IS NOT NULL
+		// 		AND p.created_at_source >= ?::timestamptz
+		// 		AND p.created_at_source <= ?::timestamptz
+		// 	)
+		// )
+
 	args := []any{
 		source,
 		"%" + strings.ToLower(urlHost) + "%",
 		rawJobID,
 		companyIDFilter,
 		companyIDFilter,
-		lowerBound,
-		lowerBound,
-		upperBound,
+		// lowerBound,
+		// lowerBound,
+		// upperBound,
 	}
 	rows, err := s.DB.SQL.QueryContext(ctx, query, args...)
 	if err != nil {
