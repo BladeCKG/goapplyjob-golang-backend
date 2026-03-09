@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/sources/dailyremote"
 	"goapplyjob-golang-backend/internal/sources/remotive"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -304,7 +305,9 @@ func TestBuiltinKeepsNextPageAtOneAfterFullScan(t *testing.T) {
 func TestRemotiveWatcherUsesJobIDCutoffAndNewestFirst(t *testing.T) {
 	service := buildService(t)
 	service.Config.URL = ""
-	service.Config.RemotiveSitemapURL = "https://remotive.com/sitemap-job-postings-8.xml"
+	service.Config.RemotiveSitemapURLTemplate = "https://remotive.com/sitemap-job-postings-{partition}.xml"
+	service.Config.RemotiveSitemapMaxIndex = 8
+	service.Config.RemotiveSitemapMinIndex = 1
 	service.Config.EnabledSources = map[string]struct{}{sourceRemotive: {}}
 	sitemap := `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -316,7 +319,7 @@ func TestRemotiveWatcherUsesJobIDCutoffAndNewestFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	service.FetchText = func(rawURL string) (string, error) {
-		if rawURL != service.Config.RemotiveSitemapURL {
+		if rawURL != "https://remotive.com/sitemap-job-postings-8.xml" {
 			return "", errors.New("unexpected URL: " + rawURL)
 		}
 		return sitemap, nil
@@ -352,10 +355,19 @@ func TestRemotiveWatcherUsesJobIDCutoffAndNewestFirst(t *testing.T) {
 	}
 }
 
+func TestExtractRemotiveJobIDFromCurrentSlugFormat(t *testing.T) {
+	got := extractRemotiveJobIDFromURL("https://remotive.com/remote/jobs/all-others/video-editor-3888494")
+	if got != 3888494 {
+		t.Fatalf("expected id 3888494, got %d", got)
+	}
+}
+
 func TestRemotiveWatcherScansBackwardPartitionsUntilCrossingWatermark(t *testing.T) {
 	service := buildService(t)
 	service.Config.URL = ""
-	service.Config.RemotiveSitemapURL = "https://remotive.com/sitemap-job-postings-9.xml"
+	service.Config.RemotiveSitemapURLTemplate = "https://remotive.com/sitemap-job-postings-{partition}.xml"
+	service.Config.RemotiveSitemapMaxIndex = 9
+	service.Config.RemotiveSitemapMinIndex = 1
 	service.Config.EnabledSources = map[string]struct{}{sourceRemotive: {}}
 	if err := service.saveStatePayload(sourceRemotive, map[string]any{"latest_job_id": 105}); err != nil {
 		t.Fatal(err)
@@ -420,7 +432,9 @@ func TestRemotiveWatcherScansBackwardPartitionsUntilCrossingWatermark(t *testing
 func TestRemotiveWatcherUsesNowForDateOnlyLastmodWhenToday(t *testing.T) {
 	service := buildService(t)
 	service.Config.URL = ""
-	service.Config.RemotiveSitemapURL = "https://remotive.com/sitemap-job-postings-10.xml"
+	service.Config.RemotiveSitemapURLTemplate = "https://remotive.com/sitemap-job-postings-{partition}.xml"
+	service.Config.RemotiveSitemapMaxIndex = 10
+	service.Config.RemotiveSitemapMinIndex = 1
 	service.Config.EnabledSources = map[string]struct{}{sourceRemotive: {}}
 	if err := service.saveStatePayload(sourceRemotive, map[string]any{"latest_job_id": 4_999_999}); err != nil {
 		t.Fatal(err)
@@ -434,7 +448,7 @@ func TestRemotiveWatcherUsesNowForDateOnlyLastmodWhenToday(t *testing.T) {
   <url><loc>https://remotive.com/remote-jobs/software-dev/job-5000000</loc><lastmod>` + yesterday + `</lastmod></url>
 </urlset>`
 	service.FetchText = func(rawURL string) (string, error) {
-		if rawURL != service.Config.RemotiveSitemapURL {
+		if rawURL != "https://remotive.com/sitemap-job-postings-10.xml" {
 			return "", errors.New("unexpected URL: " + rawURL)
 		}
 		return sitemap, nil
@@ -573,5 +587,64 @@ func TestDailyremoteWatcherCreatesDeltaPayload(t *testing.T) {
 	}
 	if payloadType != "delta_dailyremote_json" {
 		t.Fatalf("expected delta_dailyremote_json payload type, got %s", payloadType)
+	}
+}
+
+func TestDailyremoteWatcherUsesExternalIDWatermark(t *testing.T) {
+	service := buildService(t)
+	service.Config.URL = ""
+	service.Config.DailyRemoteBaseURL = "https://dailyremote.com/?location_country=United+States&sort_by=time&page={page}"
+	service.Config.DailyRemoteMaxPage = 10
+	service.Config.DailyRemotePagesPerCycle = 3
+	service.Config.EnabledSources = map[string]struct{}{sourceDailyremote: {}}
+	service.FetchText = func(rawURL string) (string, error) {
+		switch rawURL {
+		case "https://dailyremote.com/?location_country=United+States&sort_by=time&page=1":
+			return `<article class="card js-card"><h2 class="job-position"><a href="/remote-job/c-c-role-4683161">Role A</a></h2><span>1 hour ago</span></article>`, nil
+		case "https://dailyremote.com/?location_country=United+States&sort_by=time&page=2":
+			return `<article class="card js-card"><h2 class="job-position"><a href="/remote-job/role-4683157">Role B</a></h2><span>2 hours ago</span></article>`, nil
+		case "https://dailyremote.com/?location_country=United+States&sort_by=time&page=3":
+			return `<article class="card js-card"><h2 class="job-position"><a href="/remote-job/role-4683000">Role C</a></h2><span>3 hours ago</span></article>`, nil
+		default:
+			return "", nil
+		}
+	}
+	if err := service.saveStatePayload(sourceDailyremote, map[string]any{"latest_external_id": 4_683_150}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := service.RunOnce(); err != nil {
+		t.Fatal(err)
+	}
+
+	var body string
+	if err := service.DB.SQL.QueryRowContext(context.Background(), `SELECT body_text FROM watcher_payloads WHERE source = ? ORDER BY id DESC LIMIT 1`, sourceDailyremote).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	rows, skipped := dailyremote.ParseImportRows(body)
+	if skipped != 0 {
+		t.Fatalf("unexpected skipped rows: %d", skipped)
+	}
+	urls := map[string]struct{}{}
+	for _, row := range rows {
+		rowURL, _ := row["url"].(string)
+		urls[strings.TrimSpace(rowURL)] = struct{}{}
+	}
+	if _, ok := urls["https://dailyremote.com/remote-job/c-c-role-4683161"]; !ok {
+		t.Fatalf("expected newest dailyremote URL to be included, urls=%v", urls)
+	}
+	if _, ok := urls["https://dailyremote.com/remote-job/role-4683157"]; !ok {
+		t.Fatalf("expected second dailyremote URL to be included, urls=%v", urls)
+	}
+	if _, ok := urls["https://dailyremote.com/remote-job/role-4683000"]; ok {
+		t.Fatalf("expected old URL to be excluded by watermark, urls=%v", urls)
+	}
+
+	state, err := service.loadStatePayload(sourceDailyremote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := intFromAny(state["latest_external_id"], 0); got != 4_683_161 {
+		t.Fatalf("expected latest_external_id=4683161 got %d", got)
 	}
 }

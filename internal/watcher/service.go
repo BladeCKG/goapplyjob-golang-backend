@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -42,7 +43,7 @@ var (
 	urlOpenPattern     = regexp.MustCompile(`(?is)<url(?:\s|>)`)
 	urlBlockPattern    = regexp.MustCompile(`(?is)<url(?:\s[^>]*)?>.*?</url>`)
 	urlSetClosePattern = regexp.MustCompile(`(?is)</urlset\s*>`)
-	remotiveJobIDRE    = regexp.MustCompile(`(?i)job-(\d+)`)
+	remotiveJobIDRE    = regexp.MustCompile(`(?i)(?:job-)?(\d+)(?:[/?#]|$)`)
 	remotiveIndexRE    = regexp.MustCompile(`(?i)sitemap-job-postings-(\d+)\.xml`)
 )
 
@@ -56,9 +57,14 @@ type Config struct {
 	BuiltinMaxPage           int
 	BuiltinPagesPerCycle     int
 	BuiltinCheckpointPages   int
+	BuiltinFetchIntervalSeconds float64
+	Builtin429RetryCount        int
+	Builtin429BackoffSeconds    float64
 	WorkableAPIURL           string
 	WorkablePageLimit        int
-	RemotiveSitemapURL       string
+	RemotiveSitemapURLTemplate string
+	RemotiveSitemapMaxIndex    int
+	RemotiveSitemapMinIndex    int
 	DailyRemoteBaseURL       string
 	DailyRemoteMaxPage       int
 	DailyRemotePagesPerCycle int
@@ -89,7 +95,9 @@ func New(config Config, db *database.DB) *Service {
 		"sample_kb":                   config.SampleKB,
 		"enabled_sources":             sortedSourceNames(config.EnabledSources),
 		"workable_api_url":            config.WorkableAPIURL,
-		"remotive_sitemap_url":        config.RemotiveSitemapURL,
+		"remotive_sitemap_url_template": config.RemotiveSitemapURLTemplate,
+		"remotive_sitemap_max_index":    config.RemotiveSitemapMaxIndex,
+		"remotive_sitemap_min_index":    config.RemotiveSitemapMinIndex,
 		"dailyremote_base_url":        config.DailyRemoteBaseURL,
 		"dailyremote_max_page":        config.DailyRemoteMaxPage,
 		"dailyremote_pages_per_cycle": config.DailyRemotePagesPerCycle,
@@ -222,7 +230,7 @@ func (s *Service) RunOnce() error {
 			log.Printf("watcher source_done source=%s runner=runOnceRemoteRocketship", sourceRemoterocketship)
 		}
 	}
-	if strings.TrimSpace(s.Config.RemotiveSitemapURL) != "" && s.isSourceEnabled(sourceRemotive) {
+	if s.isRemotiveConfigured() && s.isSourceEnabled(sourceRemotive) {
 		log.Printf("watcher source_start source=%s runner=runOnceRemotive", sourceRemotive)
 		if err := s.runOnceRemotive(); err != nil {
 			log.Printf("watcher source_failed source=%s runner=runOnceRemotive error=%v", sourceRemotive, err)
@@ -490,12 +498,14 @@ func (s *Service) runOnceBuiltin() error {
 		for probePage <= s.Config.BuiltinMaxPage && pagesScanned < s.Config.BuiltinPagesPerCycle {
 			pageURL := strings.ReplaceAll(s.Config.BuiltinBaseURL, "{page}", strconv.Itoa(probePage))
 			log.Printf("Builtin phase1 fetch_start page=%d url=%s", probePage, pageURL)
-			htmlText, err := s.FetchText(pageURL)
-			if err != nil {
-				return err
-			}
+			htmlText := s.fetchBuiltinPageText(pageURL, probePage, "next-page")
 			pagesScanned++
+			if strings.TrimSpace(htmlText) == "" {
+				probePage++
+				continue
+			}
 			if strings.Contains(htmlText, "No job results") {
+				pagesScanned = max(pagesScanned-1, 0)
 				break
 			}
 			listings := builtin.ExtractJobListings(htmlText)
@@ -523,12 +533,14 @@ func (s *Service) runOnceBuiltin() error {
 	for currentPage >= 1 && pagesScanned < s.Config.BuiltinPagesPerCycle {
 		pageURL := strings.ReplaceAll(s.Config.BuiltinBaseURL, "{page}", strconv.Itoa(currentPage))
 		log.Printf("Builtin phase2 fetch_start page=%d url=%s", currentPage, pageURL)
-		htmlText, err := s.FetchText(pageURL)
-		if err != nil {
-			return err
-		}
+		htmlText := s.fetchBuiltinPageText(pageURL, currentPage, "upper-page")
 		pagesScanned++
+		if strings.TrimSpace(htmlText) == "" {
+			currentPage--
+			continue
+		}
 		if strings.Contains(htmlText, "No job results") {
+			pagesScanned = max(pagesScanned-1, 0)
 			currentPage--
 			continue
 		}
@@ -564,13 +576,46 @@ func (s *Service) runOnceBuiltin() error {
 	return saveCheckpoint(currentPage)
 }
 
+func (s *Service) fetchBuiltinPageText(pageURL string, pageNo int, phase string) string {
+	maxRetries := max(s.Config.Builtin429RetryCount, 0)
+	backoff := s.Config.Builtin429BackoffSeconds
+	if backoff < 0 {
+		backoff = 0
+	}
+	pauseSeconds := s.Config.BuiltinFetchIntervalSeconds
+	if pauseSeconds < 0 {
+		pauseSeconds = 0
+	}
+	attempt := 0
+	for {
+		htmlText, err := s.FetchText(pageURL)
+		if pauseSeconds > 0 {
+			time.Sleep(time.Duration(pauseSeconds * float64(time.Second)))
+		}
+		if err == nil {
+			return htmlText
+		}
+		errText := strings.ToLower(err.Error())
+		if strings.Contains(errText, "429") && attempt < maxRetries {
+			waitSeconds := backoff * math.Pow(2, float64(attempt))
+			log.Printf("Builtin %s fetch rate-limited page=%d url=%s attempt=%d/%d wait_seconds=%.1f", phase, pageNo, pageURL, attempt+1, maxRetries+1, waitSeconds)
+			if waitSeconds > 0 {
+				time.Sleep(time.Duration(waitSeconds * float64(time.Second)))
+			}
+			attempt++
+			continue
+		}
+		log.Printf("Builtin %s fetch failed page=%d url=%s error=%T: %v", phase, pageNo, pageURL, err, err)
+		return ""
+	}
+}
+
 func (s *Service) runOnceWorkable() error {
 	statePayload, err := s.loadStatePayload(sourceWorkable)
 	if err != nil {
 		return err
 	}
 	previousFirstJobPostDate, _ := statePayload["first_job_post_date"].(string)
-	previousFirstJobURL, _ := statePayload["first_job_url"].(string)
 	previousFirstDT := parseISOTime(previousFirstJobPostDate)
 	isBootstrap := previousFirstDT == nil
 
@@ -578,7 +623,7 @@ func (s *Service) runOnceWorkable() error {
 	insertedRows := 0
 	updatedRows := 0
 	var firstPageLatestPostDate *time.Time
-	firstPageFirstURL := previousFirstJobURL
+	firstPageFirstURL := ""
 	nextToken := ""
 
 	log.Printf("Workable watcher cycle_start previous_first_job_post_date=%s page_limit=%d", previousFirstJobPostDate, s.Config.WorkablePageLimit)
@@ -686,15 +731,11 @@ func (s *Service) runOnceWorkable() error {
 	return s.saveStatePayload(sourceWorkable, map[string]any{
 		"first_job_post_date": firstJobPostDate,
 		"first_job_url":       valueOrNil(firstPageFirstURL),
-		"last_scan_at":        utcNowISO(),
-		"pages_scanned":       pagesScanned,
-		"inserted_rows":       insertedRows,
-		"updated_rows":        updatedRows,
 	})
 }
 
 func (s *Service) runOnceRemotive() error {
-	if strings.TrimSpace(s.Config.RemotiveSitemapURL) == "" {
+	if !s.isRemotiveConfigured() {
 		return nil
 	}
 	statePayload, err := s.loadStatePayload(sourceRemotive)
@@ -706,10 +747,12 @@ func (s *Service) runOnceRemotive() error {
 		previousLatestJobID = 0
 	}
 
-	latestURL := strings.TrimSpace(s.Config.RemotiveSitemapURL)
-	xmlText, err := s.FetchText(latestURL)
-	if err != nil {
-		return err
+	latestIndex, latestURL, xmlText := s.fetchRemotiveLatestSitemapXML()
+	if strings.TrimSpace(xmlText) == "" || strings.TrimSpace(latestURL) == "" {
+		return s.saveStatePayload(sourceRemotive, map[string]any{
+			"latest_job_id": previousLatestJobID,
+			"last_scan_at":  utcNowISO(),
+		})
 	}
 
 	now := time.Now().UTC()
@@ -719,10 +762,10 @@ func (s *Service) runOnceRemotive() error {
 	newLatestJobID := previousLatestJobID
 	scannedIndexes := make([]int, 0)
 
-	latestIndex, hasLatestIndex := extractRemotiveSitemapIndex(latestURL)
+	hasLatestIndex := latestIndex > 0
 	partitionsToScan := []int{}
 	if hasLatestIndex && previousLatestJobID > 0 {
-		for partition := latestIndex; partition >= 1; partition-- {
+		for partition := latestIndex; partition >= s.Config.RemotiveSitemapMinIndex; partition-- {
 			partitionsToScan = append(partitionsToScan, partition)
 		}
 	} else if hasLatestIndex {
@@ -771,18 +814,12 @@ func (s *Service) runOnceRemotive() error {
 		_ = processRows(rows)
 	} else {
 		for _, partition := range partitionsToScan {
-			var partitionURL string
 			var partitionXML string
 			if partition == latestIndex {
-				partitionURL = latestURL
 				partitionXML = xmlText
 			} else {
-				partitionURL = buildRemotiveSitemapURL(latestURL, partition)
-				if strings.TrimSpace(partitionURL) == "" {
-					continue
-				}
-				fetchedXML, fetchErr := s.FetchText(partitionURL)
-				if fetchErr != nil || !strings.Contains(strings.ToLower(fetchedXML), "<urlset") {
+				fetchedPartition, fetchedURL, fetchedXML := s.fetchRemotiveSitemapXMLByPartition(partition)
+				if fetchedPartition <= 0 || strings.TrimSpace(fetchedURL) == "" || strings.TrimSpace(fetchedXML) == "" {
 					continue
 				}
 				partitionXML = fetchedXML
@@ -822,6 +859,8 @@ func (s *Service) runOnceRemotive() error {
 
 	return s.saveStatePayload(sourceRemotive, map[string]any{
 		"sitemap_url":                    latestURL,
+		"latest_sitemap_index":           latestIndex,
+		"latest_sitemap_url":             latestURL,
 		"last_scan_at":                   utcNowISO(),
 		"rows_seen_last_cycle":           len(deltaRows),
 		"rows_skipped_last_cycle":        0,
@@ -832,6 +871,41 @@ func (s *Service) runOnceRemotive() error {
 		"latest_delta_payload_id":        payloadID,
 		"latest_scanned_sitemap_indexes": scannedIndexes,
 	})
+}
+
+func (s *Service) isRemotiveConfigured() bool {
+	if !strings.Contains(s.Config.RemotiveSitemapURLTemplate, "{partition}") {
+		return false
+	}
+	if s.Config.RemotiveSitemapMaxIndex <= 0 || s.Config.RemotiveSitemapMinIndex <= 0 {
+		return false
+	}
+	return s.Config.RemotiveSitemapMaxIndex >= s.Config.RemotiveSitemapMinIndex
+}
+
+func (s *Service) fetchRemotiveLatestSitemapXML() (int, string, string) {
+	for partition := s.Config.RemotiveSitemapMaxIndex; partition >= s.Config.RemotiveSitemapMinIndex; partition-- {
+		fetchedPartition, sitemapURL, xmlText := s.fetchRemotiveSitemapXMLByPartition(partition)
+		if fetchedPartition > 0 && strings.TrimSpace(sitemapURL) != "" && strings.TrimSpace(xmlText) != "" {
+			return fetchedPartition, sitemapURL, xmlText
+		}
+	}
+	return 0, "", ""
+}
+
+func (s *Service) fetchRemotiveSitemapXMLByPartition(partition int) (int, string, string) {
+	sitemapURL := buildRemotiveSitemapURL(s.Config.RemotiveSitemapURLTemplate, partition)
+	if strings.TrimSpace(sitemapURL) == "" {
+		return 0, sitemapURL, ""
+	}
+	xmlText, err := s.FetchText(sitemapURL)
+	if err != nil {
+		return 0, sitemapURL, ""
+	}
+	if !strings.Contains(strings.ToLower(xmlText), "<urlset") {
+		return 0, sitemapURL, ""
+	}
+	return partition, sitemapURL, xmlText
 }
 
 func extractRemotiveJobIDFromURL(rawURL string) int {
@@ -856,16 +930,10 @@ func extractRemotiveSitemapIndex(rawURL string) (int, bool) {
 }
 
 func buildRemotiveSitemapURL(currentURL string, partition int) string {
-	if partition <= 0 {
+	if partition <= 0 || strings.TrimSpace(currentURL) == "" {
 		return ""
 	}
-	match := remotiveIndexRE.FindStringSubmatchIndex(currentURL)
-	if len(match) != 4 {
-		return ""
-	}
-	start := match[2]
-	end := match[3]
-	return currentURL[:start] + strconv.Itoa(partition) + currentURL[end:]
+	return strings.ReplaceAll(currentURL, "{partition}", strconv.Itoa(partition))
 }
 
 func (s *Service) runOnceHiringCafe() error {
