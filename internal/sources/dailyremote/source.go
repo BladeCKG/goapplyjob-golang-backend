@@ -158,23 +158,31 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 	}
 	targetURL := resolveRedirectURLDailyRemote(ToTargetJobURL(firstNonEmpty(stringValue(jobPosting["url"]), sourceURL)))
 	salaryPayload := parseSalaryRangeFromText(headSalaryText)
-	return map[string]any{
+	payload := map[string]any{
 		"id":                           nilIfEmpty(strconv.Itoa(externalID)),
 		"url":                          targetURL,
 		"slug":                         buildJobSlug(sourceURL, roleTitle),
 		"created_at":                   createdAt,
 		"validUntilDate":               nilIfEmpty(validUntil),
 		"roleTitle":                    nilIfEmpty(roleTitle),
+		"occupationalCategory":         nilIfEmpty(normalizeText(jobPosting["occupationalCategory"])),
 		"roleDescription":              nilIfEmpty(roleDescription),
+		"roleRequirements":             nil,
+		"benefits":                     nilIfEmpty(decodeHTMLText(stringValue(jobPosting["jobBenefits"]))),
 		"descriptionLanguage":          "en",
 		"employmentType":               normalizeEmploymentType(jobPosting["employmentType"]),
 		"locationType":                 locationType,
 		"locationCountries":            locationCountries,
-		"jobDescriptionSummary":        nilIfEmpty(aiSummary),
-		"twoLineJobDescriptionSummary": nilIfEmpty(aiSummary),
-		"salaryRange":                  salaryPayload,
 		"company":                      company,
 	}
+	if strings.TrimSpace(aiSummary) != "" {
+		payload["jobDescriptionSummary"] = aiSummary
+		payload["twoLineJobDescriptionSummary"] = aiSummary
+	}
+	if salaryPayload != nil {
+		payload["salaryRange"] = salaryPayload
+	}
+	return payload
 }
 
 func extractJobPostingLD(htmlText string) map[string]any {

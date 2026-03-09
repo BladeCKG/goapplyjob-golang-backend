@@ -75,6 +75,7 @@ func ParseRawHTML(htmlText, _ string) map[string]any {
 	if jobData == nil {
 		return map[string]any{}
 	}
+	jobData["locationCountries"] = []string{}
 	if country := normalizeCountryToken(stringValue(jobData["location"])); country != "" {
 		jobData["locationCountries"] = []string{country}
 	}

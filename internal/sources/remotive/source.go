@@ -22,6 +22,7 @@ var (
 	scriptLDPattern = regexp.MustCompile(`(?is)<script[^>]*type=['"]application/ld\+json['"][^>]*>(.*?)</script>`)
 	tagPattern      = regexp.MustCompile(`(?is)<[^>]+>`)
 	descItemPattern = regexp.MustCompile(`(?is)<(p|li)([^>]*)>(.*?)</(?:p|li)>`)
+	anchorHrefRE    = regexp.MustCompile(`(?is)<a\b[^>]*\bhref\s*=\s*['"]([^'"]+)['"][^>]*>(.*?)</a>`)
 )
 
 type sitemapURL struct {
@@ -45,13 +46,14 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 		return map[string]any{}
 	}
 	locationCountries := extractLocationCountries(jobPosting["applicantLocationRequirements"])
-	if len(locationCountries) > 0 && !containsIgnoreCase(locationCountries, "United States") {
+	if !containsIgnoreCase(locationCountries, "United States") {
 		return map[string]any{"_skip_for_non_us": true, "locationCountries": locationCountries}
 	}
 	postedAt := extractPublicationDate(htmlText)
 	if postedAt == "" {
 		postedAt = parseISO(stringValue(jobPosting["datePosted"]))
 	}
+	applyURL := extractApplyURL(htmlText, sourceURL)
 	descriptionHTML := stringValue(jobPosting["description"])
 	descriptionSections := extractDescriptionSections(descriptionHTML)
 	roleDescription := descriptionHTML
@@ -63,18 +65,19 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 	jobSlug := buildJobSlug(stringValue(jobPosting["url"]))
 	return map[string]any{
 		"id":                           nilIfEmpty(externalID),
-		"url":                          firstNonEmpty(stringValue(jobPosting["url"]), sourceURL),
+		"url":                          firstNonEmpty(applyURL, stringValue(jobPosting["url"]), sourceURL),
 		"slug":                         jobSlug,
 		"created_at":                   postedAt,
 		"validUntilDate":               nilIfEmpty(parseISO(stringValue(jobPosting["validThrough"]))),
 		"roleTitle":                    normalizeTitle(stringValue(jobPosting["title"])),
+		"occupationalCategory":         nilIfEmpty(normalizeOccupationalCategory(stringValue(jobPosting["occupationalCategory"]))),
 		"roleDescription":              nilIfEmpty(roleDescription),
 		"roleRequirements":             roleRequirements,
 		"benefits":                     benefitsText,
 		"jobDescriptionSummary":        nilIfEmpty(trimDescriptionSummary(roleDescriptionText)),
 		"twoLineJobDescriptionSummary": nilIfEmpty(trimDescriptionSummary(roleDescriptionText)),
 		"descriptionLanguage":          "en",
-		"employmentType":               normalizeEmploymentType(stringValue(jobPosting["employmentType"])),
+		"employmentType":               normalizeEmploymentType(jobPosting["employmentType"]),
 		"locationType":                 "remote",
 		"locationCountries":            locationCountries,
 		"salaryRange":                  parseSalaryRange(jobPosting["baseSalary"]),
@@ -196,9 +199,15 @@ func extractLocationCountries(value any) []string {
 		appendCountry(stringValue(item["name"]))
 	case []any:
 		for _, entry := range item {
+			if raw, ok := entry.(string); ok {
+				appendCountry(raw)
+				continue
+			}
 			obj, _ := entry.(map[string]any)
 			appendCountry(stringValue(obj["name"]))
 		}
+	case string:
+		appendCountry(item)
 	}
 	return out
 }
@@ -229,11 +238,7 @@ func parseCompany(value any, remotiveJobID string, tagline any) map[string]any {
 }
 
 func parseSalaryRange(value any) any {
-	out := map[string]any{
-		"min":        nil,
-		"max":        nil,
-		"salaryType": nil,
-	}
+	out := map[string]any{"min": nil, "max": nil, "salaryType": nil, "currencyCode": nil}
 	base, _ := value.(map[string]any)
 	valMap, _ := base["value"].(map[string]any)
 	minValue, minOK := parseFloat(valMap["minValue"])
@@ -250,8 +255,24 @@ func parseSalaryRange(value any) any {
 	if maxValue == 0 {
 		out["max"] = nil
 	}
-	if strings.TrimSpace(stringValue(valMap["unitText"])) != "" {
-		out["salaryType"] = strings.TrimSpace(stringValue(valMap["unitText"]))
+	salaryType := "per year"
+	if unitText := strings.ToLower(strings.TrimSpace(stringValue(valMap["unitText"]))); unitText != "" {
+		switch unitText {
+		case "month":
+			salaryType = "per month"
+		case "hour":
+			salaryType = "per hour"
+		case "week":
+			salaryType = "per week"
+		case "day":
+			salaryType = "per day"
+		default:
+			salaryType = "per " + unitText
+		}
+	}
+	out["salaryType"] = salaryType
+	if currency := strings.TrimSpace(stringValue(base["currency"])); currency != "" {
+		out["currencyCode"] = currency
 	}
 	if out["min"] == nil && out["max"] == nil {
 		return nil
@@ -259,13 +280,26 @@ func parseSalaryRange(value any) any {
 	return out
 }
 
-func normalizeEmploymentType(value string) any {
-	normalized := strings.ToLower(strings.TrimSpace(value))
-	normalized = strings.ReplaceAll(normalized, "_", "-")
-	if normalized == "" {
-		return nil
+func normalizeEmploymentType(value any) any {
+	switch item := value.(type) {
+	case string:
+		normalized := strings.ToLower(strings.TrimSpace(item))
+		if normalized == "" {
+			return nil
+		}
+		return normalized
+	case []any:
+		for _, entry := range item {
+			if text, ok := normalizeEmploymentType(entry).(string); ok && strings.TrimSpace(text) != "" {
+				return text
+			}
+		}
 	}
-	return normalized
+	return nil
+}
+
+func normalizeOccupationalCategory(value string) string {
+	return strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(html.UnescapeString(strings.TrimSpace(value)), " "))
 }
 
 func toPlainText(value string) any {
@@ -336,7 +370,7 @@ func mapDescriptionHeading(value string) string {
 	normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(value), " ")
 	normalized = strings.TrimSpace(normalized)
 	switch normalized {
-	case "role description", "job description", "role responsibilities", "responsibilities":
+	case "role description", "job description", "role responsibilities", "responsibilities", "key responsibilities":
 		return "role_description"
 	case "qualifications", "qualification", "requirements", "requirement":
 		return "requirements"
@@ -425,6 +459,32 @@ func extractPublicationDate(htmlText string) string {
 		return ""
 	}
 	return parseISO(match[1])
+}
+
+func extractApplyURL(htmlText, sourceURL string) string {
+	for _, match := range anchorHrefRE.FindAllStringSubmatch(htmlText, -1) {
+		if len(match) < 3 {
+			continue
+		}
+		href := strings.TrimSpace(html.UnescapeString(match[1]))
+		innerText := strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(tagPattern.ReplaceAllString(html.UnescapeString(match[2]), " "), " "))
+		if !strings.EqualFold(innerText, "Apply for this position") || href == "" {
+			continue
+		}
+		if strings.TrimSpace(sourceURL) == "" {
+			return href
+		}
+		base, err := url.Parse(sourceURL)
+		if err != nil {
+			return href
+		}
+		target, err := url.Parse(href)
+		if err != nil {
+			return href
+		}
+		return base.ResolveReference(target).String()
+	}
+	return ""
 }
 
 func parseISO(value string) string {
