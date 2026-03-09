@@ -882,6 +882,9 @@ func extractUSStates(jobPosting map[string]any) any {
 		address, _ := entry["address"].(map[string]any)
 		region := stringValue(address["addressRegion"])
 		country := strings.ToUpper(stringValue(address["addressCountry"]))
+		if isNullLikeToken(region) {
+			continue
+		}
 		if region == "" || (country != "USA" && country != "US" && country != "UNITED STATES") {
 			continue
 		}
@@ -892,6 +895,17 @@ func extractUSStates(jobPosting map[string]any) any {
 		states = append(states, region)
 	}
 	return states
+}
+
+func isNullLikeToken(value string) bool {
+	normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(strings.TrimSpace(value)), " ")
+	normalized = strings.TrimSpace(normalized)
+	switch normalized {
+	case "null", "none", "na", "n a", "unknown":
+		return true
+	default:
+		return false
+	}
 }
 
 func extractLocationCountries(jobPosting map[string]any) []string {

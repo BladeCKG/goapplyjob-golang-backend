@@ -123,6 +123,48 @@ func TestExtractJobBuildsBuiltInRawJobShape(t *testing.T) {
 	}
 }
 
+func TestExtractJobSkipsNullLikeUSState(t *testing.T) {
+	htmlText := `
+<html>
+  <head>
+    <link rel="canonical" href="https://builtin.com/job/platform-engineer/12345">
+    <script type="application/ld+json">
+      {
+        "@type": "JobPosting",
+        "title": "Platform Engineer",
+        "datePosted": "2026-02-12T10:00:00Z",
+        "description": "<p>Build internal systems.</p>",
+        "jobLocationType": "TELECOMMUTE",
+        "jobLocation": [
+          {
+            "address": {
+              "addressLocality": "Austin",
+              "addressRegion": "null",
+              "addressCountry": "USA"
+            }
+          },
+          {
+            "address": {
+              "addressLocality": "New York",
+              "addressRegion": "NY",
+              "addressCountry": "USA"
+            }
+          }
+        ],
+        "identifier": {"value": "12345"},
+        "hiringOrganization": {"sameAs": "https://builtin.com/company/acme"}
+      }
+    </script>
+  </head>
+  <body></body>
+</html>`
+	payload := ExtractJob(htmlText, "")
+	states, _ := payload["locationUSStates"].([]string)
+	if len(states) != 1 || states[0] != "NY" {
+		t.Fatalf("unexpected state list %#v", payload["locationUSStates"])
+	}
+}
+
 func TestExtractRoleRequirementsAndCleanDescription(t *testing.T) {
 	requirements, cleaned := extractRoleRequirementsAndCleanDescription("What You'll Do\nBuild systems\nRequirements\n5+ years of Python\nStrong SQL skills\nBenefits\nRemote-first")
 	if requirements == nil || !strings.Contains(requirements.(string), "5+ years of Python") {

@@ -194,11 +194,11 @@ func buildRawPayload(item map[string]any, urlValue string, postDate time.Time) m
 		jobSlug = "workable-job"
 	}
 	requiredLanguages := []string{}
-	if strings.TrimSpace(language) != "" {
+	if strings.TrimSpace(language) != "" && !isNullLikeToken(language) {
 		requiredLanguages = []string{strings.TrimSpace(language)}
 	}
 	locationUSStates := []string{}
-	if strings.TrimSpace(locationState) != "" {
+	if strings.TrimSpace(locationState) != "" && !isNullLikeToken(locationState) {
 		locationUSStates = []string{strings.TrimSpace(locationState)}
 	}
 	locationCountries := []string{}
@@ -262,6 +262,17 @@ func isRemoteToken(value string) bool {
 	return normalized == "remote" || strings.HasPrefix(normalized, "remote ")
 }
 
+func isNullLikeToken(value string) bool {
+	normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(strings.TrimSpace(value)), " ")
+	normalized = strings.TrimSpace(normalized)
+	switch normalized {
+	case "null", "none", "na", "n a", "unknown":
+		return true
+	default:
+		return false
+	}
+}
+
 func stripRemotePrefix(value string) string {
 	if strings.TrimSpace(value) == "" {
 		return ""
@@ -270,7 +281,7 @@ func stripRemotePrefix(value string) string {
 	filtered := make([]string, 0, len(parts))
 	for _, part := range parts {
 		part = strings.TrimSpace(part)
-		if part == "" || isRemoteToken(part) {
+		if part == "" || isRemoteToken(part) || isNullLikeToken(part) {
 			continue
 		}
 		filtered = append(filtered, part)
