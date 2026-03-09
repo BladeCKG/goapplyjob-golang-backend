@@ -78,6 +78,7 @@ func TestProcessPendingKeepsParsingWhenSourceCreatedAtIsOlderThanPostDate(t *tes
 	}
 
 	svc := New(db)
+	svc.EnabledSources = map[string]struct{}{"remoterocketship": {}}
 	processed, err := svc.ProcessPending(context.Background(), 10)
 	if err != nil {
 		t.Fatal(err)
@@ -183,6 +184,7 @@ func TestBuiltinBackfillsCategoriesFromSimilarRemoteJob(t *testing.T) {
 	}
 
 	svc := New(db)
+	svc.EnabledSources = map[string]struct{}{"builtin": {}}
 	if _, err := svc.ProcessPending(context.Background(), 10); err != nil {
 		t.Fatal(err)
 	}
@@ -503,7 +505,7 @@ func TestFindDuplicateCrossSourceParsedJobByURL(t *testing.T) {
 	}
 }
 
-func TestFindDuplicateCrossSourceParsedJobByExternalID(t *testing.T) {
+func TestFindDuplicateCrossSourceParsedJobByNormalizedURLWithinDateWindow(t *testing.T) {
 	db, err := database.Open(testDatabaseURL(t, "test_parsed_duplicate_by_external_id"))
 	if err != nil {
 		t.Fatal(err)
@@ -521,7 +523,9 @@ func TestFindDuplicateCrossSourceParsedJobByExternalID(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = db.SQL.ExecContext(context.Background(),
-		`INSERT INTO parsed_jobs (raw_us_job_id, external_job_id, role_title, updated_at) VALUES (1, 'ext-123', 'Backend Engineer', ?)`,
+		`INSERT INTO parsed_jobs (raw_us_job_id, url, role_title, created_at_source, updated_at)
+		 VALUES (1, 'https://example.com/job/shared', 'Backend Engineer', ?, ?)`,
+		time.Now().UTC().Add(-12*time.Hour).Format(time.RFC3339Nano),
 		time.Now().UTC().Format(time.RFC3339Nano),
 	)
 	if err != nil {
@@ -530,15 +534,15 @@ func TestFindDuplicateCrossSourceParsedJobByExternalID(t *testing.T) {
 
 	svc := New(db)
 	payload := map[string]any{
-		"id":        "ext-123",
-		"roleTitle": "Backend Engineer",
+		"url":        "https://www.example.com/job/shared/",
+		"created_at": time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	duplicateID, isDuplicate, err := svc.findDuplicateCrossSourceParsedJob(context.Background(), 2, "dailyremote", payload, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !isDuplicate || duplicateID <= 0 {
-		t.Fatalf("expected duplicate by external id, got duplicate=%v id=%d", isDuplicate, duplicateID)
+		t.Fatalf("expected duplicate by normalized url, got duplicate=%v id=%d", isDuplicate, duplicateID)
 	}
 }
 
@@ -596,6 +600,7 @@ func TestProcessPendingRemoterocketshipDuplicateReplacementKeepsCreatedAtSource(
 	}
 
 	svc := New(db)
+	svc.EnabledSources = map[string]struct{}{"remoterocketship": {}}
 	if _, err := svc.ProcessPending(context.Background(), 10); err != nil {
 		t.Fatal(err)
 	}

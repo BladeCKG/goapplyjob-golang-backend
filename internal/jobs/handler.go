@@ -17,6 +17,7 @@ import (
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/locationnorm"
+	"goapplyjob-golang-backend/internal/parsed"
 	gensqlc "goapplyjob-golang-backend/pkg/generated/sqlc"
 
 	"github.com/gin-gonic/gin"
@@ -577,6 +578,7 @@ func (h *Handler) refreshFilterCache(ctx context.Context) error {
 	}
 
 	categoryRows := [][2]string{}
+	categoryTitles := []string{}
 	techRows := [][]string{}
 	for _, row := range rows {
 		if row == nil {
@@ -584,6 +586,9 @@ func (h *Handler) refreshFilterCache(ctx context.Context) error {
 		}
 		if row.CategorizedJobTitle.Valid || row.CategorizedJobFunction.Valid {
 			categoryRows = append(categoryRows, [2]string{row.CategorizedJobTitle.String, row.CategorizedJobFunction.String})
+			if row.CategorizedJobTitle.Valid && strings.TrimSpace(row.CategorizedJobTitle.String) != "" {
+				categoryTitles = append(categoryTitles, strings.TrimSpace(row.CategorizedJobTitle.String))
+			}
 		}
 	}
 
@@ -612,6 +617,7 @@ func (h *Handler) refreshFilterCache(ctx context.Context) error {
 	}
 
 	h.filterCache.jobCategoryParents = buildJobCategoryParentsMap(categoryRows)
+	parsed.SetCachedGroqCategorizedJobTitles(categoryTitles)
 	locationParents := map[string][]string{}
 	for _, state := range locationnorm.USStateNames() {
 		locationParents[state] = []string{unitedStatesCountry}

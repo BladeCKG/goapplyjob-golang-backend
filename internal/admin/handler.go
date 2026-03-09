@@ -408,9 +408,9 @@ func (h *Handler) listRawUSJobs(c *gin.Context) {
 			sourceVal   string
 			url         string
 			postDate    string
-			isReady     int
-			isSkippable int
-			isParsed    int
+			isReady     bool
+			isSkippable bool
+			isParsed    bool
 			retryCount  int
 			rawJSON     sql.NullString
 		)
@@ -422,9 +422,9 @@ func (h *Handler) listRawUSJobs(c *gin.Context) {
 			"source":       sourceVal,
 			"url":          url,
 			"post_date":    postDate,
-			"is_ready":     isReady == 1,
-			"is_skippable": isSkippable == 1,
-			"is_parsed":    isParsed == 1,
+			"is_ready":     isReady,
+			"is_skippable": isSkippable,
+			"is_parsed":    isParsed,
 			"retry_count":  retryCount,
 			"raw_json":     nil,
 		}
@@ -454,9 +454,9 @@ func (h *Handler) updateRawUSJob(c *gin.Context) {
 		"source":       jsonPatchString,
 		"url":          jsonPatchString,
 		"post_date":    jsonPatchString,
-		"is_ready":     jsonPatchBoolAsInt,
-		"is_skippable": jsonPatchBoolAsInt,
-		"is_parsed":    jsonPatchBoolAsInt,
+		"is_ready":     jsonPatchBool,
+		"is_skippable": jsonPatchBool,
+		"is_parsed":    jsonPatchBool,
 		"retry_count":  jsonPatchInt,
 		"raw_json":     jsonPatchStringOrNull,
 	})
@@ -591,7 +591,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 	}
 	if q != "" {
 		needle := "%" + q + "%"
-		filters = append(filters, `(p.role_title LIKE ? OR p.external_job_id LIKE ? OR p.url LIKE ? OR p.categorized_job_title LIKE ? OR p.categorized_job_function LIKE ? OR p.location_us_states LIKE ? OR p.location_countries LIKE ? OR p.tech_stack LIKE ?)`)
+		filters = append(filters, `(p.role_title LIKE ? OR p.external_job_id LIKE ? OR p.url LIKE ? OR p.categorized_job_title LIKE ? OR p.categorized_job_function LIKE ? OR p.location_us_states::text LIKE ? OR p.location_countries::text LIKE ? OR p.tech_stack::text LIKE ?)`)
 		for i := 0; i < 8; i++ {
 			args = append(args, needle)
 		}
@@ -605,15 +605,18 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 		"role_title":               {columnExpr: "p.role_title", valueType: "text"},
 		"role_description":         {columnExpr: "p.role_description", valueType: "text"},
 		"url":                      {columnExpr: "p.url", valueType: "text"},
+		"slug":                     {columnExpr: "p.slug", valueType: "text"},
 		"employment_type":          {columnExpr: "p.employment_type", valueType: "text"},
 		"location_type":            {columnExpr: "p.location_type", valueType: "text"},
 		"location_city":            {columnExpr: "p.location_city", valueType: "text"},
-		"location_us_states":       {columnExpr: "p.location_us_states", valueType: "text"},
-		"location_countries":       {columnExpr: "p.location_countries", valueType: "text"},
+		"location_us_states":       {columnExpr: "p.location_us_states::text", valueType: "text"},
+		"location_countries":       {columnExpr: "p.location_countries::text", valueType: "text"},
 		"categorized_job_title":    {columnExpr: "p.categorized_job_title", valueType: "text"},
 		"categorized_job_function": {columnExpr: "p.categorized_job_function", valueType: "text"},
-		"tech_stack":               {columnExpr: "p.tech_stack", valueType: "text"},
+		"tech_stack":               {columnExpr: "p.tech_stack::text", valueType: "text"},
 		"salary_type":              {columnExpr: "p.salary_type", valueType: "text"},
+		"salary_currency_code":     {columnExpr: "p.salary_currency_code", valueType: "text"},
+		"salary_currency_symbol":   {columnExpr: "p.salary_currency_symbol", valueType: "text"},
 		"salary_min_usd":           {columnExpr: "p.salary_min_usd", valueType: "float"},
 		"salary_max_usd":           {columnExpr: "p.salary_max_usd", valueType: "float"},
 		"is_entry_level":           {columnExpr: "p.is_entry_level", valueType: "bool"},
@@ -649,7 +652,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list parsed jobs"})
 		return
 	}
-	query := `SELECT p.id, p.raw_us_job_id, r.source, p.company_id, p.external_job_id, p.role_title, p.role_description, p.url, p.employment_type, p.location_type, p.location_city, p.location_us_states, p.location_countries, p.categorized_job_title, p.categorized_job_function, p.tech_stack, p.salary_type, p.salary_min_usd, p.salary_max_usd, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.created_at_source, p.updated_at` +
+	query := `SELECT p.id, p.raw_us_job_id, r.source, p.company_id, p.external_job_id, p.role_title, p.role_description, p.url, p.slug, p.employment_type, p.location_type, p.location_city, p.location_us_states::text, p.location_countries::text, p.categorized_job_title, p.categorized_job_function, p.tech_stack::text, p.salary_type, p.salary_currency_code, p.salary_currency_symbol, p.salary_min_usd, p.salary_max_usd, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.created_at_source, p.updated_at` +
 		baseFrom + where + ` ORDER BY p.id DESC LIMIT ? OFFSET ?`
 	queryArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, queryArgs...)
@@ -668,6 +671,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 			roleTitle         sql.NullString
 			roleDesc          sql.NullString
 			url               sql.NullString
+			slug              sql.NullString
 			employmentType    sql.NullString
 			locationType      sql.NullString
 			locationCity      sql.NullString
@@ -677,6 +681,8 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 			categoryFunc      sql.NullString
 			techStack         sql.NullString
 			salaryType        sql.NullString
+			salaryCurrency    sql.NullString
+			salarySymbol      sql.NullString
 			salaryMinUSD      sql.NullFloat64
 			salaryMaxUSD      sql.NullFloat64
 			isEntry           sql.NullBool
@@ -687,7 +693,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 			createdAt         sql.NullString
 			updatedAt         sql.NullString
 		)
-		if err := rows.Scan(&id, &rawUSJobID, &sourceVal, &companyID, &externalJobID, &roleTitle, &roleDesc, &url, &employmentType, &locationType, &locationCity, &locationStates, &locationCountries, &categoryTitle, &categoryFunc, &techStack, &salaryType, &salaryMinUSD, &salaryMaxUSD, &isEntry, &isJunior, &isMid, &isSenior, &isLead, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&id, &rawUSJobID, &sourceVal, &companyID, &externalJobID, &roleTitle, &roleDesc, &url, &slug, &employmentType, &locationType, &locationCity, &locationStates, &locationCountries, &categoryTitle, &categoryFunc, &techStack, &salaryType, &salaryCurrency, &salarySymbol, &salaryMinUSD, &salaryMaxUSD, &isEntry, &isJunior, &isMid, &isSenior, &isLead, &createdAt, &updatedAt); err != nil {
 			continue
 		}
 		items = append(items, gin.H{
@@ -699,6 +705,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 			"role_title":               nullableString(roleTitle),
 			"role_description":         nullableString(roleDesc),
 			"url":                      nullableString(url),
+			"slug":                     nullableString(slug),
 			"employment_type":          nullableString(employmentType),
 			"location_type":            nullableString(locationType),
 			"location_city":            nullableString(locationCity),
@@ -708,6 +715,8 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 			"categorized_job_function": nullableString(categoryFunc),
 			"tech_stack":               parseJSONStringArray(techStack),
 			"salary_type":              nullableString(salaryType),
+			"salary_currency_code":     nullableString(salaryCurrency),
+			"salary_currency_symbol":   nullableString(salarySymbol),
 			"salary_min_usd":           nullableFloatPtr(salaryMinUSD),
 			"salary_max_usd":           nullableFloatPtr(salaryMaxUSD),
 			"is_entry_level":           nullableBool(isEntry),
@@ -742,6 +751,7 @@ func (h *Handler) updateParsedJob(c *gin.Context) {
 		"role_title":               jsonPatchStringOrNull,
 		"role_description":         jsonPatchStringOrNull,
 		"url":                      jsonPatchStringOrNull,
+		"slug":                     jsonPatchStringOrNull,
 		"employment_type":          jsonPatchStringOrNull,
 		"location_type":            jsonPatchStringOrNull,
 		"location_city":            jsonPatchStringOrNull,
@@ -751,13 +761,15 @@ func (h *Handler) updateParsedJob(c *gin.Context) {
 		"categorized_job_function": jsonPatchStringOrNull,
 		"tech_stack":               jsonPatchStringArrayOrNull,
 		"salary_type":              jsonPatchStringOrNull,
+		"salary_currency_code":     jsonPatchStringOrNull,
+		"salary_currency_symbol":   jsonPatchStringOrNull,
 		"salary_min_usd":           jsonPatchFloatOrNull,
 		"salary_max_usd":           jsonPatchFloatOrNull,
-		"is_entry_level":           jsonPatchBoolAsIntOrNull,
-		"is_junior":                jsonPatchBoolAsIntOrNull,
-		"is_mid_level":             jsonPatchBoolAsIntOrNull,
-		"is_senior":                jsonPatchBoolAsIntOrNull,
-		"is_lead":                  jsonPatchBoolAsIntOrNull,
+		"is_entry_level":           jsonPatchBoolOrNull,
+		"is_junior":                jsonPatchBoolOrNull,
+		"is_mid_level":             jsonPatchBoolOrNull,
+		"is_senior":                jsonPatchBoolOrNull,
+		"is_lead":                  jsonPatchBoolOrNull,
 		"created_at_source":        jsonPatchStringOrNull,
 	})
 	if !ok {
@@ -817,7 +829,7 @@ func (h *Handler) autoCategorizeParsedJob(c *gin.Context) {
 	}
 
 	parsedSvc := parsed.New(h.db)
-	nextTitle, nextFunction, err := parsedSvc.SuggestCategory(
+	nextTitle, nextFunction, nextTechStack, err := parsedSvc.SuggestCategoryWithTechStack(
 		c.Request.Context(),
 		source,
 		roleTitle.String,
@@ -831,6 +843,7 @@ func (h *Handler) autoCategorizeParsedJob(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"categorized_job_title":    nilIfBlank(nextTitle),
 		"categorized_job_function": nilIfBlank(nextFunction),
+		"tech_stack":               nextTechStack,
 	})
 }
 
@@ -947,7 +960,7 @@ func (h *Handler) updateParsedCompany(c *gin.Context) {
 		"founded_year":        jsonPatchStringOrNull,
 		"home_page_url":       jsonPatchStringOrNull,
 		"linkedin_url":        jsonPatchStringOrNull,
-		"sponsors_h1b":        jsonPatchBoolAsIntOrNull,
+		"sponsors_h1b":        jsonPatchBoolOrNull,
 		"employee_range":      jsonPatchStringOrNull,
 	})
 	if !ok {
@@ -1386,15 +1399,12 @@ func jsonPatchStringOrNull(raw *json.RawMessage) (any, bool) {
 	return jsonPatchString(raw)
 }
 
-func jsonPatchBoolAsInt(raw *json.RawMessage) (any, bool) {
+func jsonPatchBool(raw *json.RawMessage) (any, bool) {
 	var value bool
 	if err := json.Unmarshal(*raw, &value); err != nil {
 		return nil, false
 	}
-	if value {
-		return 1, true
-	}
-	return 0, true
+	return value, true
 }
 
 func jsonPatchInt(raw *json.RawMessage) (any, bool) {
@@ -1425,12 +1435,12 @@ func jsonPatchFloatOrNull(raw *json.RawMessage) (any, bool) {
 	return value, true
 }
 
-func jsonPatchBoolAsIntOrNull(raw *json.RawMessage) (any, bool) {
+func jsonPatchBoolOrNull(raw *json.RawMessage) (any, bool) {
 	trimmed := strings.TrimSpace(string(*raw))
 	if trimmed == "null" {
 		return nil, true
 	}
-	return jsonPatchBoolAsInt(raw)
+	return jsonPatchBool(raw)
 }
 
 func jsonPatchStringArrayOrNull(raw *json.RawMessage) (any, bool) {

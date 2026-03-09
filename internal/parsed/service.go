@@ -6,13 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"net/url"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"goapplyjob-golang-backend/internal/database"
@@ -20,11 +19,11 @@ import (
 )
 
 const (
-	sourceRemoteRocketship = "remoterocketship"
-	sourceBuiltin          = "builtin"
-	envGroqAPIKey          = "GROQ_API_KEY"
-	envGroqModel           = "GROQ_MODEL"
-	defaultGroqModel       = "meta-llama/llama-guard-4-12b"
+	sourceRemoteRocketship   = "remoterocketship"
+	sourceBuiltin            = "builtin"
+	envParsedDBLockRetries   = "PARSED_JOB_DB_LOCK_RETRIES"
+	envParsedDBLockDelay     = "PARSED_JOB_DB_LOCK_RETRY_DELAY_SECONDS"
+	maxDuplicatePostDateDiff = 48 * time.Hour
 )
 
 var seniorityTokens = map[string]struct{}{
@@ -153,13 +152,6 @@ var normalizationReplacements = []struct {
 	{pattern: regexp.MustCompile(`\bcpg\b`), replacement: "consumer packaged goods"},
 }
 
-var (
-	jobTitlePromptOnce    sync.Once
-	jobTitlePromptText    string
-	jobTitlePromptLoaded  bool
-	jobTitlePromptLoadErr error
-)
-
 type Service struct {
 	DB             *database.DB
 	EnabledSources map[string]struct{}
@@ -168,17 +160,27 @@ type Service struct {
 func New(db *database.DB) *Service { return &Service{DB: db} }
 
 func (s *Service) SuggestCategory(ctx context.Context, source, roleTitle, roleDescription string, techStack any) (string, string, error) {
+	categorizedTitle, categorizedFunction, _, err := s.SuggestCategoryWithTechStack(ctx, source, roleTitle, roleDescription, techStack)
+	return categorizedTitle, categorizedFunction, err
+}
+
+func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, source, roleTitle, roleDescription string, techStack any) (string, string, []string, error) {
 	normalizedTechStack := normalizeTechStack(techStack)
 	categorizedTitle := ""
 	categorizedFunction := ""
 
 	if strings.TrimSpace(source) == sourceBuiltin && len(normalizedTechStack) == 0 {
-		categorizedTitle = strings.TrimSpace(classifyJobTitleWithGroqSync(roleTitle, roleDescription))
+		allowedCategories, _ := s.loadAllowedJobCategoriesForGroq(ctx)
+		category, groqRequiredSkills := classifyJobTitleWithGroqSync(roleTitle, roleDescription, allowedCategories)
+		categorizedTitle = strings.TrimSpace(category)
+		if len(groqRequiredSkills) > 0 {
+			normalizedTechStack = normalizeTechStack(groqRequiredSkills)
+		}
 	}
 	if categorizedTitle == "" {
-		inferredTitle, inferredFunction, err := s.findSimilarRemoteCategories(ctx, roleTitle, nil)
+		inferredTitle, inferredFunction, err := s.findSimilarRemoteCategories(ctx, roleTitle, normalizedTechStack)
 		if err != nil {
-			return "", "", err
+			return "", "", nil, err
 		}
 		categorizedTitle = strings.TrimSpace(inferredTitle)
 		categorizedFunction = strings.TrimSpace(inferredFunction)
@@ -186,11 +188,11 @@ func (s *Service) SuggestCategory(ctx context.Context, source, roleTitle, roleDe
 	if categorizedTitle != "" && categorizedFunction == "" {
 		resolvedFunction, err := s.resolveJobFunctionForCategory(ctx, categorizedTitle)
 		if err != nil {
-			return "", "", err
+			return "", "", nil, err
 		}
 		categorizedFunction = strings.TrimSpace(resolvedFunction)
 	}
-	return categorizedTitle, categorizedFunction, nil
+	return categorizedTitle, categorizedFunction, normalizedTechStack, nil
 }
 
 func parseDT(value any) *time.Time {
@@ -235,6 +237,25 @@ func parseDBDatetime(value string) (*time.Time, error) {
 		return &parsed, nil
 	}
 	return nil, errors.New("invalid datetime")
+}
+
+func parsedLockRetryConfig() (int, time.Duration) {
+	attempts := 8
+	if raw := strings.TrimSpace(os.Getenv(envParsedDBLockRetries)); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 0 {
+			attempts = parsed
+		}
+	}
+	delay := 50 * time.Millisecond
+	if raw := strings.TrimSpace(os.Getenv(envParsedDBLockDelay)); raw != "" {
+		if parsed, err := strconv.ParseFloat(raw, 64); err == nil {
+			if parsed < 0.05 {
+				parsed = 0.05
+			}
+			delay = time.Duration(parsed * float64(time.Second))
+		}
+	}
+	return attempts, delay
 }
 
 func normalizeTextForMatching(value string) string {
@@ -490,80 +511,6 @@ func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle str
 	}
 	log.Printf("parsed-job-worker category_match_candidate role_title=%q category=%q function=%q score=0.000 skill_filter=false", strings.TrimSpace(roleTitle), "", "")
 	return "", "", nil
-}
-
-func loadJobTitleClassificationPrompt() (string, error) {
-	jobTitlePromptOnce.Do(func() {
-		path := filepath.Join("internal", "sources", "prompts", "job_title_classification.txt")
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			jobTitlePromptLoadErr = err
-			jobTitlePromptLoaded = true
-			return
-		}
-		jobTitlePromptText = string(raw)
-		jobTitlePromptLoaded = true
-	})
-	if !jobTitlePromptLoaded {
-		return "", errors.New("classification prompt not loaded")
-	}
-	if jobTitlePromptLoadErr != nil {
-		return "", jobTitlePromptLoadErr
-	}
-	return jobTitlePromptText, nil
-}
-
-func buildJobTitleClassificationPrompt(jobTitle, jobDescription string) string {
-	template, err := loadJobTitleClassificationPrompt()
-	if err != nil || strings.TrimSpace(template) == "" {
-		return ""
-	}
-	prompt := strings.ReplaceAll(template, "{{JOB_TITLE}}", strings.TrimSpace(jobTitle))
-	return strings.ReplaceAll(prompt, "{{JOB_DESCRIPTION}}", strings.TrimSpace(jobDescription))
-}
-
-func extractJSONPayload(rawContent string) map[string]any {
-	content := strings.TrimSpace(rawContent)
-	if content == "" {
-		return nil
-	}
-	if strings.Contains(content, "```") {
-		re := regexp.MustCompile("(?is)```(?:json)?\\s*(\\{.*\\})\\s*```")
-		if match := re.FindStringSubmatch(content); len(match) == 2 {
-			content = strings.TrimSpace(match[1])
-		}
-	}
-	if !(strings.HasPrefix(content, "{") && strings.HasSuffix(content, "}")) {
-		start := strings.Index(content, "{")
-		end := strings.LastIndex(content, "}")
-		if start < 0 || end <= start {
-			return nil
-		}
-		content = content[start : end+1]
-	}
-	payload := map[string]any{}
-	if err := json.Unmarshal([]byte(content), &payload); err != nil {
-		return nil
-	}
-	return payload
-}
-
-func classifyJobTitleWithGroqSync(jobTitle, jobDescription string) string {
-	normalizedTitle := strings.TrimSpace(jobTitle)
-	if normalizedTitle == "" {
-		return ""
-	}
-	// Prompt and env are loaded for scaffolding; invocation intentionally disabled for now.
-	if strings.TrimSpace(os.Getenv(envGroqAPIKey)) == "" {
-		return ""
-	}
-	model := strings.TrimSpace(os.Getenv(envGroqModel))
-	if model == "" {
-		model = defaultGroqModel
-	}
-	_ = model
-	_ = buildJobTitleClassificationPrompt(normalizedTitle, jobDescription)
-	return ""
 }
 
 func (s *Service) resolveJobFunctionForCategory(ctx context.Context, category string) (string, error) {
@@ -914,21 +861,23 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	if batchSize <= 0 {
 		batchSize = 100
 	}
-	query := `SELECT id, raw_json, COALESCE(source, '') FROM raw_us_jobs WHERE is_ready = true AND is_parsed = false`
-	args := make([]any, 0, len(s.EnabledSources)+1)
-	if len(s.EnabledSources) > 0 {
-		sources := make([]string, 0, len(s.EnabledSources))
-		for source := range s.EnabledSources {
-			sources = append(sources, source)
-		}
-		sort.Strings(sources)
-		placeholders := make([]string, 0, len(sources))
-		for _, source := range sources {
-			placeholders = append(placeholders, "?")
-			args = append(args, source)
-		}
-		query += ` AND source IN (` + strings.Join(placeholders, ", ") + `)`
+	if len(s.EnabledSources) == 0 {
+		log.Printf("parsed-job-worker picked_pending_rows=0")
+		return 0, nil
 	}
+	query := `SELECT id, raw_json, COALESCE(source, '') FROM raw_us_jobs WHERE is_ready = true AND is_skippable = false AND is_parsed = false AND raw_json IS NOT NULL`
+	args := make([]any, 0, len(s.EnabledSources)+1)
+	sources := make([]string, 0, len(s.EnabledSources))
+	for source := range s.EnabledSources {
+		sources = append(sources, source)
+	}
+	sort.Strings(sources)
+	placeholders := make([]string, 0, len(sources))
+	for _, source := range sources {
+		placeholders = append(placeholders, "?")
+		args = append(args, source)
+	}
+	query += ` AND source IN (` + strings.Join(placeholders, ", ") + `)`
 	query += ` ORDER BY post_date DESC, id DESC LIMIT ?`
 	args = append(args, batchSize)
 	rows, err := s.DB.SQL.QueryContext(ctx, query, args...)
@@ -988,7 +937,9 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		if title, ok := categorizedTitle.(string); ok && strings.TrimSpace(title) != "" && categorizedFunction == nil {
 			resolvedFunction, err := s.resolveJobFunctionForCategory(ctx, title)
 			if err != nil {
-				return processed, err
+				log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
+				skipped++
+				continue
 			}
 			if strings.TrimSpace(resolvedFunction) != "" {
 				categorizedFunction = resolvedFunction
@@ -996,15 +947,25 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		}
 		if inferCategories && categorizedTitle == nil {
 			if len(normalizedTechStack) == 0 {
-				groqCategory := classifyJobTitleWithGroqSync(stringValue(payload["roleTitle"]), stringValue(payload["roleDescription"]))
+				allowedCategories, _ := s.loadAllowedJobCategoriesForGroq(ctx)
+				groqCategory, groqRequiredSkills := classifyJobTitleWithGroqSync(
+					stringValue(payload["roleTitle"]),
+					stringValue(payload["roleDescription"]),
+					allowedCategories,
+				)
 				if strings.TrimSpace(groqCategory) != "" {
 					categorizedTitle = stringFromPayload(groqCategory)
+				}
+				if len(normalizedTechStack) == 0 && len(groqRequiredSkills) > 0 {
+					normalizedTechStack = normalizeTechStack(groqRequiredSkills)
 				}
 			}
 			if categorizedTitle == nil {
 				inferredTitle, inferredFunction, err := s.findSimilarRemoteCategories(ctx, stringValue(payload["roleTitle"]), normalizedTechStack)
 				if err != nil {
-					return processed, err
+					log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
+					skipped++
+					continue
 				}
 				categorizedTitle = stringFromPayload(inferredTitle)
 				categorizedFunction = stringFromPayload(inferredFunction)
@@ -1013,7 +974,9 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		if title, ok := categorizedTitle.(string); ok && strings.TrimSpace(title) != "" && categorizedFunction == nil {
 			resolvedFunction, err := s.resolveJobFunctionForCategory(ctx, title)
 			if err != nil {
-				return processed, err
+				log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
+				skipped++
+				continue
 			}
 			if strings.TrimSpace(resolvedFunction) != "" {
 				categorizedFunction = resolvedFunction
@@ -1028,21 +991,28 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		normalizedTechStackJSON := jsonStringOrNil(normalizedTechStack)
 		companyID, companyErr := s.upsertCompanyFromPayload(ctx, payload, plugin, pluginOK)
 		if companyErr != nil {
-			return processed, companyErr
+			log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, companyErr)
+			skipped++
+			continue
 		}
 		createdAtSourceValue := formatNullableTime(sourceCreatedAt)
 		if duplicateID, isDuplicate, duplicateErr := s.findDuplicateCrossSourceParsedJob(ctx, row.id, row.source, payload, companyID); duplicateErr != nil {
-			return processed, duplicateErr
+			log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, duplicateErr)
+			skipped++
+			continue
 		} else if isDuplicate {
 			if strings.EqualFold(strings.TrimSpace(row.source), sourceRemoteRocketship) {
 				var previousCreatedAt sql.NullTime
 				if err := s.DB.SQL.QueryRowContext(ctx, `SELECT created_at_source FROM parsed_jobs WHERE id = ? LIMIT 1`, duplicateID).Scan(&previousCreatedAt); err != nil {
-					return processed, err
+					log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
+					skipped++
+					continue
 				}
 				if previousCreatedAt.Valid {
 					createdAtSourceValue = formatNullableTime(&previousCreatedAt.Time)
 				}
-				if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+				retries, retryDelay := parsedLockRetryConfig()
+				if err := database.RetryLocked(retries, retryDelay, func() error {
 					_, execErr := s.DB.SQL.ExecContext(
 						ctx,
 						`UPDATE parsed_jobs
@@ -1054,67 +1024,202 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 					)
 					return execErr
 				}); err != nil {
-					return processed, err
+					log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
+					skipped++
+					continue
 				}
 				log.Printf("parsed-job-worker duplicate_replaced existing_parsed_id=%d raw_job_id=%d source=%s", duplicateID, row.id, row.source)
 			} else {
 				log.Printf("parsed-job-worker duplicate_cross_source_skip raw_job_id=%d source=%s duplicate_parsed_job_id=%d", row.id, row.source, duplicateID)
-				if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
-					_, execErr := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true WHERE id = ?`, row.id)
+				retries, retryDelay := parsedLockRetryConfig()
+				if err := database.RetryLocked(retries, retryDelay, func() error {
+					_, execErr := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true, is_skippable = true WHERE id = ?`, row.id)
 					return execErr
 				}); err != nil {
-					return processed, err
+					log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
+					skipped++
+					continue
 				}
 				processed++
 				continue
 			}
 		}
-		err = database.RetryLocked(8, 50*time.Millisecond, func() error {
+		retries, retryDelay := parsedLockRetryConfig()
+		err = database.RetryLocked(retries, retryDelay, func() error {
 			_, execErr := s.DB.SQL.ExecContext(
 				ctx,
-				`INSERT INTO parsed_jobs (raw_us_job_id, company_id, external_job_id, created_at_source, url, categorized_job_title, categorized_job_function, role_title, employment_type, location_city, location_us_states, location_countries, education_requirements_credential_category, tech_stack, updated_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				`INSERT INTO parsed_jobs (
+					raw_us_job_id, company_id, external_job_id, created_at_source, valid_until_date, date_deleted, description_language,
+					role_title, role_description, role_requirements, benefits, job_description_summary, two_line_job_description_summary,
+					role_title_brazil, role_description_brazil, role_requirements_brazil, benefits_brazil, slug_brazil, job_description_summary_brazil, two_line_job_description_summary_brazil,
+					role_title_france, role_description_france, role_requirements_france, benefits_france, slug_france, job_description_summary_france, two_line_job_description_summary_france,
+					role_title_germany, role_description_germany, role_requirements_germany, benefits_germany, slug_germany, job_description_summary_germany, two_line_job_description_summary_germany,
+					url, slug, employment_type, location_type, location_city,
+					categorized_job_title, categorized_job_function, education_requirements_credential_category,
+					experience_in_place_of_education, experience_requirements_months,
+					is_on_linkedin, is_promoted, is_entry_level, is_junior, is_mid_level, is_senior, is_lead,
+					required_languages, location_us_states, location_countries, tech_stack,
+					salary_min, salary_max, salary_type, salary_currency_code, salary_currency_symbol, salary_min_usd, salary_max_usd, salary_human_text,
+					updated_at
+				)
+				 VALUES (
+					?, ?, ?, ?, ?, ?, ?,
+					?, ?, ?, ?, ?, ?,
+					?, ?, ?, ?, ?, ?, ?,
+					?, ?, ?, ?, ?, ?, ?,
+					?, ?, ?, ?, ?, ?, ?,
+					?, ?, ?, ?, ?,
+					?, ?, ?,
+					?, ?,
+					?, ?, ?, ?, ?, ?, ?,
+					?, ?, ?, ?,
+					?, ?, ?, ?, ?, ?, ?, ?,
+					?
+				)
 				 ON CONFLICT(raw_us_job_id) DO UPDATE SET
 				   company_id = excluded.company_id,
 				   external_job_id = excluded.external_job_id,
 				   created_at_source = excluded.created_at_source,
+				   valid_until_date = excluded.valid_until_date,
+				   date_deleted = excluded.date_deleted,
+				   description_language = excluded.description_language,
+				   role_title = excluded.role_title,
+				   role_description = excluded.role_description,
+				   role_requirements = excluded.role_requirements,
+				   benefits = excluded.benefits,
+				   job_description_summary = excluded.job_description_summary,
+				   two_line_job_description_summary = excluded.two_line_job_description_summary,
+				   role_title_brazil = excluded.role_title_brazil,
+				   role_description_brazil = excluded.role_description_brazil,
+				   role_requirements_brazil = excluded.role_requirements_brazil,
+				   benefits_brazil = excluded.benefits_brazil,
+				   slug_brazil = excluded.slug_brazil,
+				   job_description_summary_brazil = excluded.job_description_summary_brazil,
+				   two_line_job_description_summary_brazil = excluded.two_line_job_description_summary_brazil,
+				   role_title_france = excluded.role_title_france,
+				   role_description_france = excluded.role_description_france,
+				   role_requirements_france = excluded.role_requirements_france,
+				   benefits_france = excluded.benefits_france,
+				   slug_france = excluded.slug_france,
+				   job_description_summary_france = excluded.job_description_summary_france,
+				   two_line_job_description_summary_france = excluded.two_line_job_description_summary_france,
+				   role_title_germany = excluded.role_title_germany,
+				   role_description_germany = excluded.role_description_germany,
+				   role_requirements_germany = excluded.role_requirements_germany,
+				   benefits_germany = excluded.benefits_germany,
+				   slug_germany = excluded.slug_germany,
+				   job_description_summary_germany = excluded.job_description_summary_germany,
+				   two_line_job_description_summary_germany = excluded.two_line_job_description_summary_germany,
 				   url = excluded.url,
+				   slug = excluded.slug,
 				   categorized_job_title = excluded.categorized_job_title,
 				   categorized_job_function = excluded.categorized_job_function,
 				   employment_type = excluded.employment_type,
+				   location_type = excluded.location_type,
 				   location_city = excluded.location_city,
 				   location_us_states = excluded.location_us_states,
 				   location_countries = excluded.location_countries,
 				   education_requirements_credential_category = excluded.education_requirements_credential_category,
+				   experience_in_place_of_education = excluded.experience_in_place_of_education,
+				   experience_requirements_months = excluded.experience_requirements_months,
+				   is_on_linkedin = excluded.is_on_linkedin,
+				   is_promoted = excluded.is_promoted,
+				   is_entry_level = excluded.is_entry_level,
+				   is_junior = excluded.is_junior,
+				   is_mid_level = excluded.is_mid_level,
+				   is_senior = excluded.is_senior,
+				   is_lead = excluded.is_lead,
+				   required_languages = excluded.required_languages,
 				   tech_stack = excluded.tech_stack,
-				   role_title = excluded.role_title,
+				   salary_min = excluded.salary_min,
+				   salary_max = excluded.salary_max,
+				   salary_type = excluded.salary_type,
+				   salary_currency_code = excluded.salary_currency_code,
+				   salary_currency_symbol = excluded.salary_currency_symbol,
+				   salary_min_usd = excluded.salary_min_usd,
+				   salary_max_usd = excluded.salary_max_usd,
+				   salary_human_text = excluded.salary_human_text,
 				   updated_at = excluded.updated_at`,
 				row.id,
 				companyID,
 				stringFromPayload(payload["id"]),
 				createdAtSourceValue,
+				formatNullableTime(parseDT(payload["validUntilDate"])),
+				formatNullableTime(parseDT(payload["dateDeleted"])),
+				stringFromPayload(payload["descriptionLanguage"]),
+				stringFromPayload(payload["roleTitle"]),
+				stringFromPayload(payload["roleDescription"]),
+				stringFromPayload(payload["roleRequirements"]),
+				stringFromPayload(payload["benefits"]),
+				stringFromPayload(payload["jobDescriptionSummary"]),
+				stringFromPayload(payload["twoLineJobDescriptionSummary"]),
+				stringFromPayload(payload["roleTitleBrazil"]),
+				stringFromPayload(payload["roleDescriptionBrazil"]),
+				stringFromPayload(payload["roleRequirementsBrazil"]),
+				stringFromPayload(payload["benefitsBrazil"]),
+				stringFromPayload(payload["slugBrazil"]),
+				stringFromPayload(payload["jobDescriptionSummaryBrazil"]),
+				stringFromPayload(payload["twoLineJobDescriptionSummaryBrazil"]),
+				stringFromPayload(payload["roleTitleFrance"]),
+				stringFromPayload(payload["roleDescriptionFrance"]),
+				stringFromPayload(payload["roleRequirementsFrance"]),
+				stringFromPayload(payload["benefitsFrance"]),
+				stringFromPayload(payload["slugFrance"]),
+				stringFromPayload(payload["jobDescriptionSummaryFrance"]),
+				stringFromPayload(payload["twoLineJobDescriptionSummaryFrance"]),
+				stringFromPayload(payload["roleTitleGermany"]),
+				stringFromPayload(payload["roleDescriptionGermany"]),
+				stringFromPayload(payload["roleRequirementsGermany"]),
+				stringFromPayload(payload["benefitsGermany"]),
+				stringFromPayload(payload["slugGermany"]),
+				stringFromPayload(payload["jobDescriptionSummaryGermany"]),
+				stringFromPayload(payload["twoLineJobDescriptionSummaryGermany"]),
 				stringFromPayload(payload["url"]),
+				stringFromPayload(payload["slug"]),
+				normalizeEmploymentTypeValue(payload["employmentType"]),
+				stringFromPayload(payload["locationType"]),
+				normalizedLocationCity,
 				categorizedTitle,
 				categorizedFunction,
-				stringFromPayload(payload["roleTitle"]),
-				normalizeEmploymentTypeValue(payload["employmentType"]),
-				normalizedLocationCity,
+				normalizeEducationCredentialCategory(payload["educationRequirementsCredentialCategory"]),
+				_normalizeNullStringToNone(payload["experienceInPlaceOfEducation"]),
+				_normalizeNullStringToNone(payload["experienceRequirementsMonthsOfExperience"]),
+				_normalizeNullStringToNone(payload["isOnLinkedIn"]),
+				_normalizeNullStringToNone(payload["isPromoted"]),
+				_normalizeNullStringToNone(payload["isEntryLevel"]),
+				_normalizeNullStringToNone(payload["isJunior"]),
+				_normalizeNullStringToNone(payload["isMidLevel"]),
+				_normalizeNullStringToNone(payload["isSenior"]),
+				_normalizeNullStringToNone(payload["isLead"]),
+				normalizedJSONText(_normalizeNullStringToNone(payload["requiredLanguages"])),
 				normalizedUSStates,
 				normalizedLocationCountries,
-				normalizeEducationCredentialCategory(payload["educationRequirementsCredentialCategory"]),
 				normalizedTechStackJSON,
+				_normalizeNullStringToNone(mapValue(payload, "salaryRange", "min")),
+				_normalizeNullStringToNone(mapValue(payload, "salaryRange", "max")),
+				_normalizeNullStringToNone(mapValue(payload, "salaryRange", "salaryType")),
+				_normalizeNullStringToNone(mapValue(payload, "salaryRange", "currencyCode")),
+				_normalizeNullStringToNone(mapValue(payload, "salaryRange", "currencySymbol")),
+				_normalizeNullStringToNone(mapValue(payload, "salaryRange", "minSalaryAsUSD")),
+				_normalizeNullStringToNone(mapValue(payload, "salaryRange", "maxSalaryAsUSD")),
+				_normalizeNullStringToNone(mapValue(payload, "salaryRange", "salaryHumanReadableText")),
 				time.Now().UTC().Format(time.RFC3339Nano),
 			)
 			return execErr
 		})
 		if err != nil {
-			return processed, err
+			log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
+			skipped++
+			continue
 		}
-		if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+		retries, retryDelay = parsedLockRetryConfig()
+		if err := database.RetryLocked(retries, retryDelay, func() error {
 			_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true WHERE id = ?`, row.id)
 			return err
 		}); err != nil {
-			return processed, err
+			log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
+			skipped++
+			continue
 		}
 		log.Printf("parsed-job-worker upsert_done raw_job_id=%d source=%s", row.id, row.source)
 		processed++
@@ -1123,76 +1228,379 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	return processed, nil
 }
 
+func normalizeNameForKey(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return ""
+	}
+	normalized = strings.ReplaceAll(normalized, "&", " and ")
+	normalized = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(normalized, "-")
+	normalized = regexp.MustCompile(`-+`).ReplaceAllString(normalized, "-")
+	return strings.Trim(normalized, "-")
+}
+
+func hostFromURL(rawURL string) string {
+	if strings.TrimSpace(rawURL) == "" {
+		return ""
+	}
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	host = strings.Trim(host, ".")
+	host = strings.TrimPrefix(host, "www.")
+	return host
+}
+
+func domainFromURL(rawURL string) string {
+	host := hostFromURL(rawURL)
+	if host == "" {
+		return ""
+	}
+	parts := strings.Split(host, ".")
+	if len(parts) <= 2 {
+		return host
+	}
+	secondLevelCC := map[string]struct{}{"co": {}, "com": {}, "org": {}, "net": {}, "gov": {}, "edu": {}, "ac": {}}
+	if len(parts[len(parts)-1]) == 2 {
+		if _, ok := secondLevelCC[parts[len(parts)-2]]; ok && len(parts) >= 3 {
+			return strings.Join(parts[len(parts)-3:], ".")
+		}
+	}
+	return strings.Join(parts[len(parts)-2:], ".")
+}
+
+func linkedinIdentityFromURL(rawURL string) string {
+	if strings.TrimSpace(rawURL) == "" {
+		return ""
+	}
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(parsed.Hostname()), "www."))
+	if !strings.Contains(host, "linkedin.com") {
+		return ""
+	}
+	path := regexp.MustCompile(`/+`).ReplaceAllString(parsed.Path, "/")
+	path = strings.Trim(strings.ToLower(path), "/")
+	if path == "" {
+		return host
+	}
+	return host + "/" + path
+}
+
+func buildCompanyMatchKeysFromPayload(companyPayload map[string]any) map[string]struct{} {
+	keys := map[string]struct{}{}
+	linkedinURL := stringValue(companyPayload["linkedInURL"])
+	if linkedinURL != "" {
+		dom := domainFromURL(linkedinURL)
+		if dom != "" {
+			path := ""
+			if parsed, err := url.Parse(linkedinURL); err == nil {
+				path = strings.Trim(strings.ToLower(parsed.Path), "/")
+			}
+			if path != "" {
+				keys["linkedin:"+dom+"/"+path] = struct{}{}
+			} else {
+				keys["linkedin:"+dom] = struct{}{}
+			}
+		}
+	}
+	homePageURL := stringValue(companyPayload["homePageURL"])
+	if homePageURL != "" {
+		dom := domainFromURL(homePageURL)
+		host := hostFromURL(homePageURL)
+		if dom != "" {
+			keys["domain:"+dom] = struct{}{}
+		}
+		if host != "" && host != dom {
+			keys["subdomain:"+host] = struct{}{}
+		}
+	}
+	if normalizedName := normalizeNameForKey(stringValue(companyPayload["name"])); normalizedName != "" {
+		keys["name:"+normalizedName] = struct{}{}
+	}
+	if normalizedSlug := normalizeNameForKey(stringValue(companyPayload["slug"])); normalizedSlug != "" {
+		keys["slug:"+normalizedSlug] = struct{}{}
+	}
+	return keys
+}
+
+func buildCompanyMatchKeysFromRow(name, slug, linkedinURL, homePageURL string) map[string]struct{} {
+	return buildCompanyMatchKeysFromPayload(map[string]any{
+		"name":        name,
+		"slug":        slug,
+		"linkedInURL": linkedinURL,
+		"homePageURL": homePageURL,
+	})
+}
+
+func (s *Service) findExistingCompanyByMatchKeys(ctx context.Context, companyPayload map[string]any) (sql.NullInt64, error) {
+	incomingKeys := buildCompanyMatchKeysFromPayload(companyPayload)
+	if len(incomingKeys) == 0 {
+		return sql.NullInt64{}, nil
+	}
+	incomingSlug := strings.TrimSpace(stringValue(companyPayload["slug"]))
+	incomingName := strings.TrimSpace(stringValue(companyPayload["name"]))
+	homePageURL := strings.TrimSpace(stringValue(companyPayload["homePageURL"]))
+	linkedinURL := strings.TrimSpace(stringValue(companyPayload["linkedInURL"]))
+	incomingLinkedinIdentity := linkedinIdentityFromURL(linkedinURL)
+	homeDomain := domainFromURL(homePageURL)
+	linkedinDomain := domainFromURL(linkedinURL)
+
+	rows, err := s.DB.SQL.QueryContext(
+		ctx,
+		`SELECT id, COALESCE(name, ''), COALESCE(slug, ''), COALESCE(linkedin_url, ''), COALESCE(home_page_url, '')
+		   FROM parsed_companies
+		  WHERE
+		        (? <> '' AND slug = ?)
+		     OR (? <> '' AND name = ?)
+		     OR (? <> '' AND home_page_url ILIKE ?)
+		     OR (? <> '' AND linkedin_url ILIKE ?)
+		  LIMIT 200`,
+		incomingSlug, incomingSlug,
+		incomingName, incomingName,
+		homeDomain, "%"+homeDomain+"%",
+		linkedinDomain, "%"+linkedinDomain+"%",
+	)
+	if err != nil {
+		return sql.NullInt64{}, err
+	}
+	defer rows.Close()
+	best := sql.NullInt64{}
+	bestOverlap := 0
+	bestLinkedinMatch := false
+	for rows.Next() {
+		var id int64
+		var name, slug, candidateLinkedinURL, candidateHomePageURL string
+		if scanErr := rows.Scan(&id, &name, &slug, &candidateLinkedinURL, &candidateHomePageURL); scanErr != nil {
+			return sql.NullInt64{}, scanErr
+		}
+		candidateLinkedinIdentity := linkedinIdentityFromURL(candidateLinkedinURL)
+		if incomingLinkedinIdentity != "" && candidateLinkedinIdentity != "" && incomingLinkedinIdentity != candidateLinkedinIdentity {
+			continue
+		}
+		linkedinExactMatch := incomingLinkedinIdentity != "" && candidateLinkedinIdentity != "" && incomingLinkedinIdentity == candidateLinkedinIdentity
+		candidateKeys := buildCompanyMatchKeysFromRow(name, slug, candidateLinkedinURL, candidateHomePageURL)
+		overlap := 0
+		for key := range incomingKeys {
+			if _, ok := candidateKeys[key]; ok {
+				overlap++
+			}
+		}
+		if linkedinExactMatch && !bestLinkedinMatch {
+			best = sql.NullInt64{Int64: id, Valid: true}
+			bestOverlap = overlap
+			bestLinkedinMatch = true
+			continue
+		}
+		if linkedinExactMatch && bestLinkedinMatch && overlap > bestOverlap {
+			best = sql.NullInt64{Int64: id, Valid: true}
+			bestOverlap = overlap
+			continue
+		}
+		if !linkedinExactMatch && bestLinkedinMatch {
+			continue
+		}
+		if overlap > bestOverlap {
+			best = sql.NullInt64{Int64: id, Valid: true}
+			bestOverlap = overlap
+			bestLinkedinMatch = false
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return sql.NullInt64{}, err
+	}
+	if best.Valid && bestOverlap > 0 {
+		return best, nil
+	}
+	return sql.NullInt64{}, nil
+}
+
 func (s *Service) upsertCompanyFromPayload(ctx context.Context, payload map[string]any, plugin plugins.SourcePlugin, pluginOK bool) (any, error) {
 	companyPayload, _ := payload["company"].(map[string]any)
 	if len(companyPayload) == 0 {
 		return nil, nil
 	}
 
-	externalCompanyID := strings.TrimSpace(stringValue(companyPayload["id"]))
-	name := strings.TrimSpace(stringValue(companyPayload["name"]))
-	slug := strings.TrimSpace(stringValue(companyPayload["slug"]))
-	tagline := strings.TrimSpace(stringValue(companyPayload["tagline"]))
-	homePageURL := strings.TrimSpace(stringValue(companyPayload["homePageURL"]))
-	linkedInURL := strings.TrimSpace(stringValue(companyPayload["linkedInURL"]))
-	employeeRange := strings.TrimSpace(stringValue(companyPayload["employeeRange"]))
-	profilePicURL := strings.TrimSpace(stringValue(companyPayload["profilePicURL"]))
-	industrySpecialitiesJSON := normalizedJSONText(companyPayload["industrySpecialities"])
-
+	externalCompanyID := strings.TrimSpace(stringValue(_normalizeNullStringToNone(companyPayload["id"])))
 	useExternalID := pluginOK && plugin.UseExternalCompanyID
 	useMatchKeys := !pluginOK || plugin.UseCompanyMatchKeys
 	var companyID sql.NullInt64
 
-	if useExternalID && externalCompanyID != "" {
+	if externalCompanyID != "" {
 		err := s.DB.SQL.QueryRowContext(ctx, `SELECT id FROM parsed_companies WHERE external_company_id = ? LIMIT 1`, externalCompanyID).Scan(&companyID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
 	}
 	if !companyID.Valid && useMatchKeys {
-		err := s.DB.SQL.QueryRowContext(
-			ctx,
-			`SELECT id
-			   FROM parsed_companies
-			  WHERE (? <> '' AND LOWER(COALESCE(name, '')) = LOWER(?))
-			     OR (? <> '' AND LOWER(COALESCE(home_page_url, '')) = LOWER(?))
-			     OR (? <> '' AND LOWER(COALESCE(linkedin_url, '')) = LOWER(?))
-			  ORDER BY id DESC
-			  LIMIT 1`,
-			name, name,
-			homePageURL, homePageURL,
-			linkedInURL, linkedInURL,
-		).Scan(&companyID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		matchID, err := s.findExistingCompanyByMatchKeys(ctx, companyPayload)
+		if err != nil {
 			return nil, err
 		}
+		companyID = matchID
 	}
+
+	strField := func(key string) string {
+		return strings.TrimSpace(stringValue(_normalizeNullStringToNone(companyPayload[key])))
+	}
+	jsonField := func(key string) any {
+		return normalizedJSONText(_normalizeNullStringToNone(companyPayload[key]))
+	}
+
+	// Incoming values.
+	externalCompanyIDVal := strField("id")
+	nameVal := strField("name")
+	slugVal := strField("slug")
+	taglineVal := strField("tagline")
+	foundedYearVal := strField("foundedYear")
+	homePageURLVal := strField("homePageURL")
+	linkedInURLVal := strField("linkedInURL")
+	employeeRangeVal := strField("employeeRange")
+	profilePicURLVal := strField("profilePicURL")
+	sponsorsH1BVal := _normalizeNullStringToNone(companyPayload["sponsorsH1B"])
+	sponsorsUKVal := _normalizeNullStringToNone(companyPayload["sponsorsUKSkilledWorkerVisa"])
+	taglineBrazilVal := strField("taglineBrazil")
+	taglineFranceVal := strField("taglineFrance")
+	taglineGermanyVal := strField("taglineGermany")
+	chatGPTDescriptionVal := strField("chatGPTDescription")
+	linkedInDescriptionVal := strField("linkedInDescription")
+	chatGPTDescriptionBrazilVal := strField("chatGPTDescriptionBrazil")
+	chatGPTDescriptionFranceVal := strField("chatGPTDescriptionFrance")
+	chatGPTDescriptionGermanyVal := strField("chatGPTDescriptionGermany")
+	linkedInDescriptionBrazilVal := strField("linkedInDescriptionBrazil")
+	linkedInDescriptionFranceVal := strField("linkedInDescriptionFrance")
+	linkedInDescriptionGermanyVal := strField("linkedInDescriptionGermany")
+	fundingDataVal := jsonField("fundingData")
+	chatGPTIndustriesVal := jsonField("chatGPTIndustries")
+	industrySpecialitiesVal := jsonField("industrySpecialities")
+	industrySpecialitiesBrazilVal := jsonField("industrySpecialitiesBrazil")
+	industrySpecialitiesFranceVal := jsonField("industrySpecialitiesFrance")
+	industrySpecialitiesGermanyVal := jsonField("industrySpecialitiesGermany")
 
 	updatedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	if companyID.Valid {
+		var curExternalID, curName, curSlug, curTagline, curFoundedYear, curHomePageURL, curLinkedInURL, curEmployeeRange, curProfilePicURL sql.NullString
+		var curSponsorsH1B, curSponsorsUK sql.NullBool
+		var curTaglineBrazil, curTaglineFrance, curTaglineGermany, curChatGPTDescription, curLinkedInDescription sql.NullString
+		var curChatGPTDescriptionBrazil, curChatGPTDescriptionFrance, curChatGPTDescriptionGermany sql.NullString
+		var curLinkedInDescriptionBrazil, curLinkedInDescriptionFrance, curLinkedInDescriptionGermany sql.NullString
+		var curFundingData, curChatGPTIndustries, curIndustrySpecialities, curIndustrySpecialitiesBrazil, curIndustrySpecialitiesFrance, curIndustrySpecialitiesGermany sql.NullString
+		if err := s.DB.SQL.QueryRowContext(
+			ctx,
+			`SELECT external_company_id, name, slug, tagline, founded_year, home_page_url, linkedin_url, sponsors_h1b, sponsors_uk_skilled_worker_visa, employee_range, profile_pic_url,
+			        tagline_brazil, tagline_france, tagline_germany, chatgpt_description, linkedin_description,
+			        chatgpt_description_brazil, chatgpt_description_france, chatgpt_description_germany,
+			        linkedin_description_brazil, linkedin_description_france, linkedin_description_germany,
+			        funding_data::text, chatgpt_industries::text, industry_specialities::text, industry_specialities_brazil::text, industry_specialities_france::text, industry_specialities_germany::text
+			   FROM parsed_companies WHERE id = ? LIMIT 1`,
+			companyID.Int64,
+		).Scan(
+			&curExternalID, &curName, &curSlug, &curTagline, &curFoundedYear, &curHomePageURL, &curLinkedInURL, &curSponsorsH1B, &curSponsorsUK, &curEmployeeRange, &curProfilePicURL,
+			&curTaglineBrazil, &curTaglineFrance, &curTaglineGermany, &curChatGPTDescription, &curLinkedInDescription,
+			&curChatGPTDescriptionBrazil, &curChatGPTDescriptionFrance, &curChatGPTDescriptionGermany,
+			&curLinkedInDescriptionBrazil, &curLinkedInDescriptionFrance, &curLinkedInDescriptionGermany,
+			&curFundingData, &curChatGPTIndustries, &curIndustrySpecialities, &curIndustrySpecialitiesBrazil, &curIndustrySpecialitiesFrance, &curIndustrySpecialitiesGermany,
+		); err != nil {
+			return nil, err
+		}
+		chooseStr := func(current sql.NullString, incoming string) any {
+			if useExternalID {
+				if strings.TrimSpace(incoming) == "" {
+					return nil
+				}
+				return incoming
+			}
+			if !current.Valid || strings.TrimSpace(current.String) == "" {
+				if strings.TrimSpace(incoming) == "" {
+					return nil
+				}
+				return incoming
+			}
+			return current.String
+		}
+		chooseJSON := func(current sql.NullString, incoming any) any {
+			if useExternalID {
+				return incoming
+			}
+			if !current.Valid || strings.TrimSpace(current.String) == "" {
+				return incoming
+			}
+			return current.String
+		}
+		chooseBool := func(current sql.NullBool, incoming any) any {
+			if useExternalID {
+				return incoming
+			}
+			if !current.Valid {
+				return incoming
+			}
+			return current.Bool
+		}
 		_, err := s.DB.SQL.ExecContext(
 			ctx,
 			`UPDATE parsed_companies
-			    SET external_company_id = COALESCE(NULLIF(?, ''), external_company_id),
-			        name = COALESCE(NULLIF(?, ''), name),
-			        slug = COALESCE(NULLIF(?, ''), slug),
-			        tagline = COALESCE(NULLIF(?, ''), tagline),
-			        home_page_url = COALESCE(NULLIF(?, ''), home_page_url),
-			        linkedin_url = COALESCE(NULLIF(?, ''), linkedin_url),
-			        employee_range = COALESCE(NULLIF(?, ''), employee_range),
-			        profile_pic_url = COALESCE(NULLIF(?, ''), profile_pic_url),
-			        industry_specialities = COALESCE(?, industry_specialities),
+			    SET external_company_id = ?,
+			        name = ?,
+			        slug = ?,
+			        tagline = ?,
+			        founded_year = ?,
+			        home_page_url = ?,
+			        linkedin_url = ?,
+			        sponsors_h1b = ?,
+			        sponsors_uk_skilled_worker_visa = ?,
+			        employee_range = ?,
+			        profile_pic_url = ?,
+			        tagline_brazil = ?,
+			        tagline_france = ?,
+			        tagline_germany = ?,
+			        chatgpt_description = ?,
+			        linkedin_description = ?,
+			        chatgpt_description_brazil = ?,
+			        chatgpt_description_france = ?,
+			        chatgpt_description_germany = ?,
+			        linkedin_description_brazil = ?,
+			        linkedin_description_france = ?,
+			        linkedin_description_germany = ?,
+			        funding_data = ?,
+			        chatgpt_industries = ?,
+			        industry_specialities = ?,
+			        industry_specialities_brazil = ?,
+			        industry_specialities_france = ?,
+			        industry_specialities_germany = ?,
 			        updated_at = ?
 			  WHERE id = ?`,
-			externalCompanyID,
-			name,
-			slug,
-			tagline,
-			homePageURL,
-			linkedInURL,
-			employeeRange,
-			profilePicURL,
-			industrySpecialitiesJSON,
+			chooseStr(curExternalID, externalCompanyIDVal),
+			chooseStr(curName, nameVal),
+			chooseStr(curSlug, slugVal),
+			chooseStr(curTagline, taglineVal),
+			chooseStr(curFoundedYear, foundedYearVal),
+			chooseStr(curHomePageURL, homePageURLVal),
+			chooseStr(curLinkedInURL, linkedInURLVal),
+			chooseBool(curSponsorsH1B, sponsorsH1BVal),
+			chooseBool(curSponsorsUK, sponsorsUKVal),
+			chooseStr(curEmployeeRange, employeeRangeVal),
+			chooseStr(curProfilePicURL, profilePicURLVal),
+			chooseStr(curTaglineBrazil, taglineBrazilVal),
+			chooseStr(curTaglineFrance, taglineFranceVal),
+			chooseStr(curTaglineGermany, taglineGermanyVal),
+			chooseStr(curChatGPTDescription, chatGPTDescriptionVal),
+			chooseStr(curLinkedInDescription, linkedInDescriptionVal),
+			chooseStr(curChatGPTDescriptionBrazil, chatGPTDescriptionBrazilVal),
+			chooseStr(curChatGPTDescriptionFrance, chatGPTDescriptionFranceVal),
+			chooseStr(curChatGPTDescriptionGermany, chatGPTDescriptionGermanyVal),
+			chooseStr(curLinkedInDescriptionBrazil, linkedInDescriptionBrazilVal),
+			chooseStr(curLinkedInDescriptionFrance, linkedInDescriptionFranceVal),
+			chooseStr(curLinkedInDescriptionGermany, linkedInDescriptionGermanyVal),
+			chooseJSON(curFundingData, fundingDataVal),
+			chooseJSON(curChatGPTIndustries, chatGPTIndustriesVal),
+			chooseJSON(curIndustrySpecialities, industrySpecialitiesVal),
+			chooseJSON(curIndustrySpecialitiesBrazil, industrySpecialitiesBrazilVal),
+			chooseJSON(curIndustrySpecialitiesFrance, industrySpecialitiesFranceVal),
+			chooseJSON(curIndustrySpecialitiesGermany, industrySpecialitiesGermanyVal),
 			updatedAt,
 			companyID.Int64,
 		)
@@ -1205,18 +1613,42 @@ func (s *Service) upsertCompanyFromPayload(ctx context.Context, payload map[stri
 	var insertedID int64
 	err := s.DB.SQL.QueryRowContext(
 		ctx,
-		`INSERT INTO parsed_companies (external_company_id, name, slug, tagline, home_page_url, linkedin_url, employee_range, profile_pic_url, industry_specialities, updated_at)
-		 VALUES (NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?)
+		`INSERT INTO parsed_companies (
+		    external_company_id, name, slug, tagline, founded_year, home_page_url, linkedin_url, sponsors_h1b, sponsors_uk_skilled_worker_visa,
+		    employee_range, profile_pic_url, tagline_brazil, tagline_france, tagline_germany, chatgpt_description, linkedin_description,
+		    chatgpt_description_brazil, chatgpt_description_france, chatgpt_description_germany, linkedin_description_brazil, linkedin_description_france, linkedin_description_germany,
+		    funding_data, chatgpt_industries, industry_specialities, industry_specialities_brazil, industry_specialities_france, industry_specialities_germany, updated_at
+		  )
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 RETURNING id`,
-		externalCompanyID,
-		name,
-		slug,
-		tagline,
-		homePageURL,
-		linkedInURL,
-		employeeRange,
-		profilePicURL,
-		industrySpecialitiesJSON,
+		nilIfEmpty(externalCompanyIDVal),
+		nilIfEmpty(nameVal),
+		nilIfEmpty(slugVal),
+		nilIfEmpty(taglineVal),
+		nilIfEmpty(foundedYearVal),
+		nilIfEmpty(homePageURLVal),
+		nilIfEmpty(linkedInURLVal),
+		sponsorsH1BVal,
+		sponsorsUKVal,
+		nilIfEmpty(employeeRangeVal),
+		nilIfEmpty(profilePicURLVal),
+		nilIfEmpty(taglineBrazilVal),
+		nilIfEmpty(taglineFranceVal),
+		nilIfEmpty(taglineGermanyVal),
+		nilIfEmpty(chatGPTDescriptionVal),
+		nilIfEmpty(linkedInDescriptionVal),
+		nilIfEmpty(chatGPTDescriptionBrazilVal),
+		nilIfEmpty(chatGPTDescriptionFranceVal),
+		nilIfEmpty(chatGPTDescriptionGermanyVal),
+		nilIfEmpty(linkedInDescriptionBrazilVal),
+		nilIfEmpty(linkedInDescriptionFranceVal),
+		nilIfEmpty(linkedInDescriptionGermanyVal),
+		fundingDataVal,
+		chatGPTIndustriesVal,
+		industrySpecialitiesVal,
+		industrySpecialitiesBrazilVal,
+		industrySpecialitiesFranceVal,
+		industrySpecialitiesGermanyVal,
 		updatedAt,
 	).Scan(&insertedID)
 	if err != nil {
@@ -1225,56 +1657,78 @@ func (s *Service) upsertCompanyFromPayload(ctx context.Context, payload map[stri
 	return insertedID, nil
 }
 
+func normalizeJobURLForMatch(rawURL string) string {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" {
+		return ""
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	host = strings.TrimPrefix(host, "www.")
+	path := regexp.MustCompile(`/+`).ReplaceAllString(parsed.EscapedPath(), "/")
+	path = strings.TrimRight(path, "/")
+	if path == "" {
+		path = "/"
+	}
+	return strings.ToLower(host + path)
+}
+
 func (s *Service) findDuplicateCrossSourceParsedJob(ctx context.Context, rawJobID int64, source string, payload map[string]any, companyID any) (int64, bool, error) {
 	plugin, ok := plugins.Get(strings.TrimSpace(source))
 	if ok && !plugin.RunDuplicateCheck {
 		return 0, false, nil
 	}
-	rawURL := strings.TrimSpace(stringValue(payload["url"]))
-	externalID := strings.TrimSpace(stringValue(payload["id"]))
-	roleTitle := strings.TrimSpace(stringValue(payload["roleTitle"]))
+	sourceCreatedAt := parseDT(payload["created_at"])
+	sourceURLNorm := normalizeJobURLForMatch(stringValue(payload["url"]))
+	if sourceURLNorm == "" {
+		return 0, false, nil
+	}
+	urlHost := sourceURLNorm
+	if slashIdx := strings.Index(urlHost, "/"); slashIdx > 0 {
+		urlHost = urlHost[:slashIdx]
+	}
 	companyIDInt, companyIDOK := companyID.(int64)
-	if rawURL == "" && externalID == "" && (!companyIDOK || roleTitle == "") {
-		return 0, false, nil
+	query := `SELECT p.id, p.url
+	   FROM parsed_jobs p
+	   JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
+	  WHERE r.source <> ?
+	    AND p.url IS NOT NULL
+	    AND LOWER(p.url) LIKE ?
+	    AND p.raw_us_job_id <> ?`
+	args := []any{source, "%" + strings.ToLower(urlHost) + "%", rawJobID}
+	if companyIDOK {
+		query += ` AND p.company_id = ?`
+		args = append(args, companyIDInt)
 	}
-	conditions := make([]string, 0, 3)
-	args := make([]any, 0, 8)
-	args = append(args, source, rawJobID)
-	if rawURL != "" {
-		conditions = append(conditions, `p.url = ?`)
-		args = append(args, rawURL)
+	if sourceCreatedAt != nil {
+		lowerBound := sourceCreatedAt.UTC().Add(-maxDuplicatePostDateDiff).Format(time.RFC3339Nano)
+		upperBound := sourceCreatedAt.UTC().Add(maxDuplicatePostDateDiff).Format(time.RFC3339Nano)
+		query += ` AND p.created_at_source IS NOT NULL AND p.created_at_source >= ? AND p.created_at_source <= ?`
+		args = append(args, lowerBound, upperBound)
 	}
-	if externalID != "" {
-		conditions = append(conditions, `p.external_job_id = ?`)
-		args = append(args, externalID)
-	}
-	if companyIDOK && roleTitle != "" {
-		conditions = append(conditions, `(p.company_id = ? AND LOWER(COALESCE(p.role_title, '')) = LOWER(?))`)
-		args = append(args, companyIDInt, roleTitle)
-	}
-	if len(conditions) == 0 {
-		return 0, false, nil
-	}
-	var duplicateID sql.NullInt64
-	err := s.DB.SQL.QueryRowContext(
-		ctx,
-		`SELECT p.id
-		   FROM parsed_jobs p
-		   JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
-		  WHERE r.source <> ?
-		    AND p.raw_us_job_id <> ?
-		    AND (`+strings.Join(conditions, " OR ")+`)
-		  ORDER BY p.updated_at DESC, p.id DESC
-		  LIMIT 1`,
-		args...,
-	).Scan(&duplicateID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	query += ` ORDER BY p.updated_at DESC, p.id DESC LIMIT 1000`
+	rows, err := s.DB.SQL.QueryContext(ctx, query, args...)
+	if err != nil {
 		return 0, false, err
 	}
-	if !duplicateID.Valid {
-		return 0, false, nil
+	defer rows.Close()
+	for rows.Next() {
+		var duplicateID int64
+		var candidateURL sql.NullString
+		if scanErr := rows.Scan(&duplicateID, &candidateURL); scanErr != nil {
+			return 0, false, scanErr
+		}
+		if normalizeJobURLForMatch(candidateURL.String) == sourceURLNorm {
+			return duplicateID, true, nil
+		}
 	}
-	return duplicateID.Int64, true, nil
+	if err := rows.Err(); err != nil {
+		return 0, false, err
+	}
+	return 0, false, nil
 }
 
 func normalizedJSONText(value any) any {
@@ -1307,6 +1761,25 @@ func formatNullableTime(value *time.Time) any {
 		return nil
 	}
 	return value.UTC().Format(time.RFC3339Nano)
+}
+
+func _normalizeNullStringToNone(value any) any {
+	if text, ok := value.(string); ok {
+		trimmed := strings.TrimSpace(text)
+		if strings.EqualFold(trimmed, "null") {
+			return nil
+		}
+		return trimmed
+	}
+	return value
+}
+
+func mapValue(payload map[string]any, key, nestedKey string) any {
+	item, _ := payload[key].(map[string]any)
+	if item == nil {
+		return nil
+	}
+	return item[nestedKey]
 }
 
 func stringFromPayload(value any) any {
