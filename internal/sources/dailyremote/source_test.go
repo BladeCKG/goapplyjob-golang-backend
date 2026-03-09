@@ -1,6 +1,7 @@
 package dailyremote
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -44,6 +45,116 @@ func TestToTargetJobURL(t *testing.T) {
 	target := ToTargetJobURL("https://dailyremote.com/remote-job/backend-engineer-12345?ref=a#section")
 	if !strings.Contains(target, "/apply/12345") {
 		t.Fatalf("unexpected target url: %s", target)
+	}
+}
+
+func TestParseRawHTMLExtractsSalarySummaryAndCompanyEnrichment(t *testing.T) {
+	html := `
+<div class="job_head_info_container">
+  <div class="inline-flex items-center">$104K - $175K per year</div>
+</div>
+<h3>AI Summary</h3>
+<div><div class="px-3 py-3">Build systems with modern backend tooling and infrastructure.</div></div>
+<div class="detailed-job-company-profile">
+  <div class="company-profile-tags">
+    <span class="tag">Employees 10,001+ employees</span>
+    <span class="tag">Industry IT Services and IT Consulting</span>
+  </div>
+</div>
+<script type="application/ld+json">
+{
+  "@type":"JobPosting",
+  "url":"https://dailyremote.com/remote-job/c-c-senior-software-engineer-4683161",
+  "title":"Senior Platform Engineer",
+  "description":"&lt;p&gt;Role&lt;/p&gt;",
+  "datePosted":"2026-03-04T14:00:16.000Z",
+  "employmentType":"FULL_TIME",
+  "jobLocationType":"TELECOMMUTE",
+  "applicantLocationRequirements":[{"@type":"Country","name":"United States"}],
+  "hiringOrganization":{"@type":"Organization","name":"Acme","logo":"https://assets.example/logo.png"}
+}
+</script>`
+
+	payload := ParseRawHTML(html, "https://dailyremote.com/remote-job/c-c-senior-software-engineer-4683161")
+	if payload["id"] != "4683161" {
+		t.Fatalf("expected extracted id, got %#v", payload["id"])
+	}
+	if payload["jobDescriptionSummary"] == nil {
+		t.Fatalf("expected AI summary mapped into jobDescriptionSummary")
+	}
+	salary, _ := payload["salaryRange"].(map[string]any)
+	if salary != nil {
+		minValue, minOK := salary["min"].(float64)
+		maxValue, maxOK := salary["max"].(float64)
+		if !minOK || !maxOK || minValue != 104000 || maxValue != 175000 {
+			t.Fatalf("unexpected salaryRange %#v", salary)
+		}
+	}
+	company, _ := payload["company"].(map[string]any)
+	if company == nil {
+		t.Fatalf("expected company payload")
+	}
+	if company["employeeRange"] != "10001+" {
+		t.Fatalf("expected employeeRange 10001+, got %#v", company["employeeRange"])
+	}
+	switch industries := company["industrySpecialities"].(type) {
+	case []string:
+		if len(industries) == 0 || industries[0] != "IT Services and IT Consulting" {
+			t.Fatalf("unexpected company industries %#v", company["industrySpecialities"])
+		}
+	case []any:
+		if len(industries) == 0 || industries[0] != "IT Services and IT Consulting" {
+			t.Fatalf("unexpected company industries %#v", company["industrySpecialities"])
+		}
+	default:
+		t.Fatalf("unexpected company industries type %#T", company["industrySpecialities"])
+	}
+}
+
+func TestParseSalaryRangeFromTextNormalizesMojibakeGBP(t *testing.T) {
+	raw := parseSalaryRangeFromText("Â£70K - Â£90K /year")
+	payload, _ := raw.(map[string]any)
+	if payload == nil {
+		t.Fatalf("expected salary payload")
+	}
+	if payload["currencyCode"] != "GBP" || payload["salaryType"] != "per year" {
+		t.Fatalf("unexpected payload %#v", payload)
+	}
+}
+
+func TestLooksLikeSalaryTextIgnoresExperienceHints(t *testing.T) {
+	if looksLikeSalaryText("5-10 yrs exp") {
+		t.Fatal("expected experience text not to be treated as salary")
+	}
+	if !looksLikeSalaryText("$120K - $140K per year") {
+		t.Fatal("expected salary-like text to be detected")
+	}
+}
+
+func TestParseImportRowsRoundTrip(t *testing.T) {
+	rows := []map[string]any{
+		{
+			"url":       "https://dailyremote.com/remote-job/test-4683001",
+			"post_date": time.Date(2026, 3, 4, 10, 11, 12, 0, time.UTC),
+		},
+	}
+	body := SerializeImportRows(rows)
+	parsed, skipped := ParseImportRows(body)
+	if skipped != 0 || len(parsed) != 1 {
+		t.Fatalf("unexpected parsed rows len=%d skipped=%d", len(parsed), skipped)
+	}
+	got := map[string]any{
+		"url":       parsed[0]["url"],
+		"post_date": parsed[0]["post_date"].(time.Time).UTC().Format(time.RFC3339Nano),
+	}
+	want := map[string]any{
+		"url":       "https://dailyremote.com/remote-job/test-4683001",
+		"post_date": time.Date(2026, 3, 4, 10, 11, 12, 0, time.UTC).Format(time.RFC3339Nano),
+	}
+	gotJSON, _ := json.Marshal(got)
+	wantJSON, _ := json.Marshal(want)
+	if string(gotJSON) != string(wantJSON) {
+		t.Fatalf("roundtrip mismatch got=%s want=%s", gotJSON, wantJSON)
 	}
 }
 

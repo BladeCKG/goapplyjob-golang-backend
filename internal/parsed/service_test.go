@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/sources/plugins"
 )
 
 func TestSourceOlderThanPostDateReturnsTrue(t *testing.T) {
@@ -413,5 +414,130 @@ func TestStringFromPayloadTreatsStringNullAsNil(t *testing.T) {
 	}
 	if got := stringFromPayload(" NULL "); got != nil {
 		t.Fatalf("expected nil from uppercase string null payload, got %#v", got)
+	}
+}
+
+func TestUpsertCompanyFromPayloadUsesExternalCompanyIDForRemoteRocketship(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_company_external_id"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(context.Background(),
+		`INSERT INTO parsed_companies (external_company_id, name, home_page_url, updated_at) VALUES (?, ?, ?, ?)`,
+		"rr_company_1",
+		"Old Name",
+		"https://old.example",
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(db)
+	plugin, ok := plugins.Get("remoterocketship")
+	if !ok {
+		t.Fatal("missing remoterocketship plugin")
+	}
+	payload := map[string]any{
+		"company": map[string]any{
+			"id":          "rr_company_1",
+			"name":        "New Name",
+			"homePageURL": "https://new.example",
+		},
+	}
+	companyID, err := svc.upsertCompanyFromPayload(context.Background(), payload, plugin, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if companyID == nil {
+		t.Fatal("expected company id")
+	}
+
+	var name, homePage string
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT name, home_page_url FROM parsed_companies WHERE external_company_id = ?`, "rr_company_1").Scan(&name, &homePage); err != nil {
+		t.Fatal(err)
+	}
+	if name != "New Name" || homePage != "https://new.example" {
+		t.Fatalf("expected updated company fields, got name=%q home_page_url=%q", name, homePage)
+	}
+}
+
+func TestFindDuplicateCrossSourceParsedJobByURL(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_duplicate_by_url"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(context.Background(),
+		`INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
+		 VALUES (1, 'remoterocketship', 'https://example.com/job/a', ?, true, false, true, 0, '{}'),
+		        (2, 'builtin', 'https://example.com/job/b', ?, true, false, false, 0, '{}')`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(),
+		`INSERT INTO parsed_jobs (raw_us_job_id, url, role_title, updated_at) VALUES (1, 'https://example.com/job/shared', 'Backend Engineer', ?)`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(db)
+	payload := map[string]any{
+		"url":       "https://example.com/job/shared",
+		"roleTitle": "Backend Engineer",
+	}
+	duplicateID, isDuplicate, err := svc.findDuplicateCrossSourceParsedJob(context.Background(), 2, "builtin", payload, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isDuplicate || duplicateID <= 0 {
+		t.Fatalf("expected duplicate by url, got duplicate=%v id=%d", isDuplicate, duplicateID)
+	}
+}
+
+func TestFindDuplicateCrossSourceParsedJobByExternalID(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_duplicate_by_external_id"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(context.Background(),
+		`INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
+		 VALUES (1, 'remoterocketship', 'https://example.com/job/a', ?, true, false, true, 0, '{}'),
+		        (2, 'dailyremote', 'https://example.com/job/b', ?, true, false, false, 0, '{}')`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(),
+		`INSERT INTO parsed_jobs (raw_us_job_id, external_job_id, role_title, updated_at) VALUES (1, 'ext-123', 'Backend Engineer', ?)`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(db)
+	payload := map[string]any{
+		"id":        "ext-123",
+		"roleTitle": "Backend Engineer",
+	}
+	duplicateID, isDuplicate, err := svc.findDuplicateCrossSourceParsedJob(context.Background(), 2, "dailyremote", payload, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isDuplicate || duplicateID <= 0 {
+		t.Fatalf("expected duplicate by external id, got duplicate=%v id=%d", isDuplicate, duplicateID)
 	}
 }

@@ -3,6 +3,7 @@ package remotive
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseImportRowsFromRemotivePayload(t *testing.T) {
@@ -62,5 +63,72 @@ func TestParseRawHTMLExtractsSectionsAndSalaryHandling(t *testing.T) {
 	company, _ := payload["company"].(map[string]any)
 	if company == nil || company["profilePicURL"] == nil || company["tagline"] == nil {
 		t.Fatalf("expected remotive company enrichment, got %#v", payload["company"])
+	}
+}
+
+func TestParseRawHTMLNormalizesTitleAndCountryTokens(t *testing.T) {
+	htmlText := `
+<html><head>
+<script type="application/ld+json">
+{
+  "@type":"JobPosting",
+  "title":"[Hiring] Senior Backend Engineer @ExampleCo",
+  "url":"https://remotive.com/remote-jobs/software/senior-backend-engineer-9990001",
+  "description":"<p>Build systems.</p>",
+  "employmentType":"FULL_TIME",
+  "applicantLocationRequirements":[{"@type":"Country","name":"United States of America"}],
+  "hiringOrganization":{"@type":"Organization","name":"Example Co"}
+}
+</script>
+</head></html>`
+
+	payload := ParseRawHTML(htmlText, "https://remotive.com/remote-jobs/software/senior-backend-engineer-9990001")
+	if payload["roleTitle"] != "Senior Backend Engineer" {
+		t.Fatalf("expected normalized roleTitle, got %#v", payload["roleTitle"])
+	}
+	countries, _ := payload["locationCountries"].([]string)
+	if len(countries) != 1 || countries[0] != "United States" {
+		t.Fatalf("expected normalized country token, got %#v", payload["locationCountries"])
+	}
+}
+
+func TestParseRawHTMLHandlesMissingOptionalSections(t *testing.T) {
+	htmlText := `
+<html><head>
+<script type="application/ld+json">
+{
+  "@type":"JobPosting",
+  "title":"Backend Engineer",
+  "url":"https://remotive.com/remote-jobs/software/backend-engineer-111",
+  "description":"<p>Simple description only.</p>",
+  "employmentType":"CONTRACT",
+  "applicantLocationRequirements":[{"@type":"Country","name":"United States"}],
+  "hiringOrganization":{"@type":"Organization","name":"Acme"}
+}
+</script>
+</head></html>`
+	payload := ParseRawHTML(htmlText, "https://remotive.com/remote-jobs/software/backend-engineer-111")
+	if payload["roleRequirements"] != nil || payload["benefits"] != nil {
+		t.Fatalf("expected nil optional sections, got %#v", payload)
+	}
+}
+
+func TestParseSitemapRowsAndSerializeRoundTrip(t *testing.T) {
+	xmlText := `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://remotive.com/remote-jobs/software/job-100</loc><lastmod>2026-03-04T12:00:00+00:00</lastmod></url>
+</urlset>`
+	rows, skipped := ParseSitemapRows(xmlText)
+	if skipped != 0 || len(rows) != 1 {
+		t.Fatalf("unexpected rows len=%d skipped=%d", len(rows), skipped)
+	}
+	body := SerializeImportRows(rows)
+	parsedRows, parsedSkipped := ParseImportRows(body)
+	if parsedSkipped != 0 || len(parsedRows) != 1 {
+		t.Fatalf("unexpected parsed rows len=%d skipped=%d", len(parsedRows), parsedSkipped)
+	}
+	postDate, _ := parsedRows[0]["post_date"].(time.Time)
+	if postDate.IsZero() {
+		t.Fatalf("expected non-zero post_date")
 	}
 }
