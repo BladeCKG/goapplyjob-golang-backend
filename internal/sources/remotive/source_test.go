@@ -178,3 +178,21 @@ func TestParseSitemapRowsAndSerializeRoundTrip(t *testing.T) {
 		t.Fatalf("expected non-zero post_date")
 	}
 }
+
+func TestParseSitemapRowsKeepsRowWhenLastmodInvalid(t *testing.T) {
+	xmlText := `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://remotive.com/remote-jobs/software/job-100</loc><lastmod>invalid-date</lastmod></url>
+</urlset>`
+	rows, skipped := ParseSitemapRows(xmlText)
+	if skipped != 0 {
+		t.Fatalf("expected skipped=0, got %d", skipped)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	postDate, _ := rows[0]["post_date"].(time.Time)
+	if !postDate.IsZero() {
+		t.Fatalf("expected zero post_date for invalid lastmod, got %s", postDate.Format(time.RFC3339Nano))
+	}
+}

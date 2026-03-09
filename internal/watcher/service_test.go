@@ -486,6 +486,47 @@ func TestRemotiveWatcherUsesNowForDateOnlyLastmodWhenToday(t *testing.T) {
 	}
 }
 
+func TestRemotiveWatcherUsesNowFallbackWhenLastmodInvalid(t *testing.T) {
+	service := buildService(t)
+	service.Config.URL = ""
+	service.Config.RemotiveSitemapURLTemplate = "https://remotive.com/sitemap-job-postings-{partition}.xml"
+	service.Config.RemotiveSitemapMaxIndex = 10
+	service.Config.RemotiveSitemapMinIndex = 1
+	service.Config.EnabledSources = map[string]struct{}{sourceRemotive: {}}
+	if err := service.saveStatePayload(sourceRemotive, map[string]any{"latest_job_id": 5_999_999}); err != nil {
+		t.Fatal(err)
+	}
+	sitemap := `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://remotive.com/remote-jobs/software-dev/job-6000001</loc><lastmod>not-a-date</lastmod></url>
+</urlset>`
+	service.FetchText = func(rawURL string) (string, error) {
+		if rawURL != "https://remotive.com/sitemap-job-postings-10.xml" {
+			return "", errors.New("unexpected URL: " + rawURL)
+		}
+		return sitemap, nil
+	}
+
+	beforeRun := time.Now().UTC()
+	if err := service.runOnceRemotive(); err != nil {
+		t.Fatal(err)
+	}
+	afterRun := time.Now().UTC()
+
+	var body string
+	if err := service.DB.SQL.QueryRowContext(context.Background(), `SELECT body_text FROM watcher_payloads WHERE source = ? ORDER BY id DESC LIMIT 1`, sourceRemotive).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	rows, skipped := remotive.ParseImportRows(body)
+	if skipped != 0 || len(rows) != 1 {
+		t.Fatalf("unexpected rows len=%d skipped=%d", len(rows), skipped)
+	}
+	postDate, _ := rows[0]["post_date"].(time.Time)
+	if postDate.Before(beforeRun) || postDate.After(afterRun) {
+		t.Fatalf("expected invalid lastmod to fallback to now, got %s", postDate.Format(time.RFC3339Nano))
+	}
+}
+
 func builtinPageHTML(jobURL string, jobID int, publishedDate string) string {
 	return `<html><head><script type="application/ld+json">{"@graph":[{"@type":"ItemList","itemListElement":[{"@type":"ListItem","position":1,"url":"` + jobURL + `","name":"Role","description":"Desc"}]}]}</script></head><body><script>logBuiltinTrackEvent('job_board_view', {'jobs':[{'id':` + strconv.Itoa(jobID) + `,'published_date':'` + publishedDate + `'}],'filters':{}});</script></body></html>`
 }

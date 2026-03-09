@@ -144,8 +144,9 @@ func ParseSitemapRows(xmlText string) ([]map[string]any, int) {
 		}
 		postDate, err := normalizeTime(strings.TrimSpace(item.LastMod))
 		if err != nil {
-			skipped++
-			continue
+			// page-extract watcher keeps sitemap rows even when lastmod parsing fails
+			// and applies "now" fallback at watcher level.
+			postDate = time.Time{}
 		}
 		rows = append(rows, map[string]any{"url": rowURL, "post_date": postDate})
 	}
