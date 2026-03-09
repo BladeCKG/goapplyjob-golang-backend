@@ -20,7 +20,6 @@ import (
 
 const (
 	sourceRemoteRocketship   = "remoterocketship"
-	sourceBuiltin            = "builtin"
 	envParsedDBLockRetries   = "PARSED_JOB_DB_LOCK_RETRIES"
 	envParsedDBLockDelay     = "PARSED_JOB_DB_LOCK_RETRY_DELAY_SECONDS"
 	maxDuplicatePostDateDiff = 48 * time.Hour
@@ -175,12 +174,12 @@ func (s *Service) SuggestCategory(ctx context.Context, source, roleTitle, roleDe
 	return categorizedTitle, categorizedFunction, err
 }
 
-func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, source, roleTitle, roleDescription string, techStack any) (string, string, []string, error) {
+func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, roleTitle, roleDescription string, techStack any) (string, string, []string, error) {
 	normalizedTechStack := normalizeTechStack(techStack)
 	categorizedTitle := ""
 	categorizedFunction := ""
 
-	if strings.TrimSpace(source) == sourceBuiltin && len(normalizedTechStack) == 0 {
+	if len(normalizedTechStack) == 0 {
 		allowedCategories, _ := s.loadAllowedJobCategoriesForGroq(ctx)
 		category, groqRequiredSkills := classifyJobTitleWithGroqSync(roleTitle, roleDescription, allowedCategories)
 		categorizedTitle = strings.TrimSpace(category)
@@ -1409,7 +1408,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		sourceCreatedAt := parseDT(payload["created_at"])
 		normalizedTechStack := normalizeTechStack(payload["techStack"])
 		plugin, pluginOK := plugins.Get(strings.TrimSpace(row.source))
-		inferCategories := row.source == sourceBuiltin
+		inferCategories := false
 		if pluginOK {
 			inferCategories = plugin.InferCategories
 		}
