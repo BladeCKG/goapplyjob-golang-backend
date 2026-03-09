@@ -131,8 +131,8 @@ func TestDefaultHTTPClient_Do(t *testing.T) {
 		},
 	}
 
-	//nolint // Loop variable is reference by value in recent Go versions
-	for _, tt := range tests {
+	for i := range tests {
+		tt := &tests[i]
 		t.Run(tt.name, func(t *testing.T) {
 			// Set env var DEBUG to "true" to see retry attemps
 			t.Cleanup(func() {

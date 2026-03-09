@@ -27,14 +27,14 @@ import (
 )
 
 const (
-	sourceRemoterocketship        = "remoterocketship"
-	sourceBuiltin     = "builtin"
-	sourceRemotive    = "remotive"
-	sourceHiringCafe  = "hiringcafe"
-	sourceWorkable    = "workable"
-	sourceDailyremote = "dailyremote"
-	payloadTypeDelta  = "delta"
-	payloadTypeXML    = "delta_xml"
+	sourceRemoterocketship = "remoterocketship"
+	sourceBuiltin          = "builtin"
+	sourceRemotive         = "remotive"
+	sourceHiringCafe       = "hiringcafe"
+	sourceWorkable         = "workable"
+	sourceDailyremote      = "dailyremote"
+	payloadTypeDelta       = "delta"
+	payloadTypeXML         = "delta_xml"
 )
 
 var (
@@ -1171,17 +1171,14 @@ func (s *Service) findExistingSourceURLs(source string, urls []string) (map[stri
 	if len(urls) == 0 {
 		return map[string]struct{}{}, nil
 	}
-	placeholders := make([]string, 0, len(urls))
-	args := make([]any, 0, len(urls)+1)
-	args = append(args, source)
-	for _, rowURL := range urls {
-		placeholders = append(placeholders, "?")
-		args = append(args, rowURL)
-	}
 	rows, err := s.DB.SQL.QueryContext(
 		context.Background(),
-		`SELECT url FROM raw_us_jobs WHERE source = ? AND url IN (`+strings.Join(placeholders, ",")+`)`,
-		args...,
+		`SELECT url
+		   FROM raw_us_jobs
+		  WHERE source = ?
+		    AND url = ANY(?::text[])`,
+		source,
+		urls,
 	)
 	if err != nil {
 		return nil, err

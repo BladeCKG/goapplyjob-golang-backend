@@ -358,13 +358,11 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 
 		parsedByRawID := map[int64]struct{}{}
 		if len(pendingUpdates) > 0 {
-			placeholders := make([]string, 0, len(pendingUpdates))
-			args := make([]any, 0, len(pendingUpdates))
+			rawIDs := make([]int64, 0, len(pendingUpdates))
 			for _, candidate := range pendingUpdates {
-				placeholders = append(placeholders, "?")
-				args = append(args, candidate.existingID)
+				rawIDs = append(rawIDs, candidate.existingID)
 			}
-			parsedRows, err := tx.Query(`SELECT raw_us_job_id FROM parsed_jobs WHERE raw_us_job_id IN (`+strings.Join(placeholders, ", ")+`)`, args...)
+			parsedRows, err := tx.Query(`SELECT raw_us_job_id FROM parsed_jobs WHERE raw_us_job_id = ANY(?::bigint[])`, rawIDs)
 			if err != nil {
 				return err
 			}
@@ -405,7 +403,6 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 				     raw_json = ?
 				 WHERE id = ?`,
 				source,
-				candidate.url,
 				candidate.row.PostDate.Format(time.RFC3339),
 				candidate.isReady,
 				candidate.rawJSONText,
@@ -525,15 +522,11 @@ func (s *Service) PickUnconsumedPayloads(limit int, enabledSources map[string]st
 		limit = 1
 	}
 	query := `SELECT id, source, payload_type, body_text FROM watcher_payloads WHERE consumed_at IS NULL`
-	args := make([]any, 0, len(enabledSources)+1)
+	args := make([]any, 0, 2)
 	if len(enabledSources) > 0 {
-		placeholders := make([]string, 0, len(enabledSources))
 		sources := sortedSourceNames(enabledSources)
-		for _, source := range sources {
-			placeholders = append(placeholders, "?")
-			args = append(args, source)
-		}
-		query += ` AND source IN (` + strings.Join(placeholders, ", ") + `)`
+		query += ` AND source = ANY(?::text[])`
+		args = append(args, sources)
 	}
 	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
 	args = append(args, limit)

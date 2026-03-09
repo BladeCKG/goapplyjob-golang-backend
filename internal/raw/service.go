@@ -123,23 +123,19 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	}
 	var rows *sql.Rows
 	var err error
-	query := `SELECT id, url, COALESCE(source, ''), post_date, COALESCE(extra_json, '') FROM raw_us_jobs WHERE is_ready = false AND is_skippable = false`
-	args := make([]any, 0, len(s.EnabledSources)+1)
+	query := `SELECT id, url, COALESCE(source, ''), post_date, COALESCE(extra_json, '')
+	            FROM raw_us_jobs
+	           WHERE is_ready = false
+	             AND is_skippable = false
+	             AND source = ANY(?::text[])`
 	names := make([]string, 0, len(s.EnabledSources))
 	for name := range s.EnabledSources {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	ph := make([]string, 0, len(names))
-	for _, name := range names {
-		ph = append(ph, "?")
-		args = append(args, name)
-	}
-	query += ` AND source IN (` + strings.Join(ph, ", ") + `)`
 	query += ` ORDER BY post_date DESC, id DESC LIMIT ?`
-	args = append(args, batchSize)
 	for attempt := 0; attempt < 3; attempt++ {
-		rows, err = s.DB.SQL.QueryContext(ctx, query, args...)
+		rows, err = s.DB.SQL.QueryContext(ctx, query, names, batchSize)
 		if err == nil {
 			break
 		}
@@ -364,17 +360,11 @@ func (s *Service) CleanupOldRawJobs(ctx context.Context, retentionDays, cleanupB
 		if len(rawIDs) == 0 {
 			return tx.Commit()
 		}
-		ph := make([]string, 0, len(rawIDs))
-		args := make([]any, 0, len(rawIDs))
-		for _, id := range rawIDs {
-			ph = append(ph, "?")
-			args = append(args, id)
-		}
-		parsedResult, err := tx.ExecContext(ctx, `DELETE FROM parsed_jobs WHERE raw_us_job_id IN (`+strings.Join(ph, ", ")+`)`, args...)
+		parsedResult, err := tx.ExecContext(ctx, `DELETE FROM parsed_jobs WHERE raw_us_job_id = ANY(?::bigint[])`, rawIDs)
 		if err != nil {
 			return err
 		}
-		rawResult, err := tx.ExecContext(ctx, `DELETE FROM raw_us_jobs WHERE id IN (`+strings.Join(ph, ", ")+`)`, args...)
+		rawResult, err := tx.ExecContext(ctx, `DELETE FROM raw_us_jobs WHERE id = ANY(?::bigint[])`, rawIDs)
 		if err != nil {
 			return err
 		}
