@@ -179,7 +179,7 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, ro
 	categorizedTitle := ""
 	categorizedFunction := ""
 
-	if len(normalizedTechStack) == 0 && shouldUseGroqClassification(roleTitle) {
+	if len(normalizedTechStack) == 0 {
 		allowedCategories, _ := s.loadAllowedJobCategoriesForGroq(ctx)
 		category, groqRequiredSkills := classifyJobTitleWithGroqSync(roleTitle, roleDescription, allowedCategories)
 		categorizedTitle = strings.TrimSpace(category)
