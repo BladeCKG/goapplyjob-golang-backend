@@ -631,3 +631,219 @@ func TestProcessPendingRemoterocketshipDuplicateReplacementKeepsCreatedAtSource(
 		t.Fatalf("expected created_at_source=%s, got %s", originalCreatedAtSource.Format(time.RFC3339Nano), createdAtSource.Time.UTC().Format(time.RFC3339Nano))
 	}
 }
+
+func TestProcessPendingReturnsZeroWhenNoEnabledSources(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_no_enabled_sources"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	payload, err := json.Marshal(map[string]any{
+		"url":       "https://example.com/jobs/no-source",
+		"roleTitle": "Backend Engineer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
+		 VALUES (1, 'builtin', 'https://example.com/jobs/no-source', ?, true, false, false, 0, ?)`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		string(payload),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(db)
+	processed, err := svc.ProcessPending(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 0 {
+		t.Fatalf("expected processed=0 when no enabled sources, got %d", processed)
+	}
+
+	var isParsed bool
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT is_parsed FROM raw_us_jobs WHERE id = 1`).Scan(&isParsed); err != nil {
+		t.Fatal(err)
+	}
+	if isParsed {
+		t.Fatal("expected raw row to remain unparsed")
+	}
+}
+
+func TestProcessPendingCrossSourceDuplicateMarksRawRowSkippable(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_duplicate_marks_skippable"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
+		 VALUES (1, 'remoterocketship', 'https://example.com/jobs/a', ?, true, false, true, 0, '{}'),
+		        (2, 'builtin', 'https://example.com/jobs/b', ?, true, false, false, 0, '{}')`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO parsed_jobs (id, raw_us_job_id, url, role_title, updated_at)
+		 VALUES (1, 1, 'https://example.com/job/shared', 'Backend Engineer', ?)`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"url":                    "https://www.example.com/job/shared/",
+		"roleTitle":              "Backend Engineer",
+		"categorizedJobTitle":    "Backend Engineer",
+		"categorizedJobFunction": "Engineering",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `UPDATE raw_us_jobs SET raw_json = ? WHERE id = 2`, string(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(db)
+	svc.EnabledSources = map[string]struct{}{"builtin": {}}
+	processed, err := svc.ProcessPending(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected processed=1 for duplicate skip path, got %d", processed)
+	}
+
+	var isParsed, isSkippable bool
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT is_parsed, is_skippable FROM raw_us_jobs WHERE id = 2`).Scan(&isParsed, &isSkippable); err != nil {
+		t.Fatal(err)
+	}
+	if !isParsed || !isSkippable {
+		t.Fatalf("expected raw duplicate row marked parsed+skippable, got is_parsed=%t is_skippable=%t", isParsed, isSkippable)
+	}
+
+	var parsedCount int
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM parsed_jobs`).Scan(&parsedCount); err != nil {
+		t.Fatal(err)
+	}
+	if parsedCount != 1 {
+		t.Fatalf("expected no new parsed rows for duplicate skip, got count=%d", parsedCount)
+	}
+}
+
+func TestProcessPendingUpsertOverwritesExistingParsedRowColumns(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_upsert_overwrite_existing"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
+		 VALUES (1, 'builtin', 'https://example.com/jobs/overwrite', ?, true, false, false, 0, '{}')`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO parsed_jobs (
+		    raw_us_job_id, role_title, role_description, slug, salary_currency_code, role_title_brazil, location_us_states, tech_stack, updated_at
+		 )
+		 VALUES (1, 'Old Title', 'Old Description', 'old-slug', 'EUR', 'Titulo Antigo', '["CA"]', '["Ruby"]', ?)`,
+		time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"id":                     "ext-1",
+		"url":                    "https://example.com/jobs/overwrite",
+		"roleTitle":              "New Title",
+		"roleDescription":        "New Description",
+		"roleTitleBrazil":        "Novo Titulo",
+		"slug":                   "new-slug",
+		"categorizedJobTitle":    "Backend Engineer",
+		"categorizedJobFunction": "Engineering",
+		"locationUSStates":       []string{"NY"},
+		"techStack":              []string{"Go", "Postgres"},
+		"salaryRange": map[string]any{
+			"currencyCode": "USD",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `UPDATE raw_us_jobs SET raw_json = ? WHERE id = 1`, string(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(db)
+	svc.EnabledSources = map[string]struct{}{"builtin": {}}
+	processed, err := svc.ProcessPending(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected processed=1, got %d", processed)
+	}
+
+	var (
+		roleTitle          sql.NullString
+		roleDescription    sql.NullString
+		slug               sql.NullString
+		salaryCurrencyCode sql.NullString
+		roleTitleBrazil    sql.NullString
+		locationUSStates   sql.NullString
+		techStack          sql.NullString
+	)
+	if err := db.SQL.QueryRowContext(
+		context.Background(),
+		`SELECT role_title, role_description, slug, salary_currency_code, role_title_brazil, location_us_states::text, tech_stack::text
+		   FROM parsed_jobs WHERE raw_us_job_id = 1`,
+	).Scan(&roleTitle, &roleDescription, &slug, &salaryCurrencyCode, &roleTitleBrazil, &locationUSStates, &techStack); err != nil {
+		t.Fatal(err)
+	}
+	if roleTitle.String != "New Title" {
+		t.Fatalf("expected role_title to be overwritten, got %q", roleTitle.String)
+	}
+	if roleDescription.String != "New Description" {
+		t.Fatalf("expected role_description to be overwritten, got %q", roleDescription.String)
+	}
+	if slug.String != "new-slug" {
+		t.Fatalf("expected slug to be overwritten, got %q", slug.String)
+	}
+	if salaryCurrencyCode.String != "USD" {
+		t.Fatalf("expected salary_currency_code to be overwritten, got %q", salaryCurrencyCode.String)
+	}
+	if roleTitleBrazil.String != "Novo Titulo" {
+		t.Fatalf("expected role_title_brazil to be overwritten, got %q", roleTitleBrazil.String)
+	}
+	if locationUSStates.String != "[\"NY\"]" {
+		t.Fatalf("expected location_us_states to be overwritten, got %q", locationUSStates.String)
+	}
+	var techValues []string
+	if err := json.Unmarshal([]byte(techStack.String), &techValues); err != nil {
+		t.Fatalf("failed to parse tech_stack json: %v", err)
+	}
+	if len(techValues) != 2 || techValues[0] != "Go" || techValues[1] != "PostgreSQL" {
+		t.Fatalf("expected normalized tech_stack overwrite, got %#v", techValues)
+	}
+}
