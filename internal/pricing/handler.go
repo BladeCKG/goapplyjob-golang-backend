@@ -1,6 +1,7 @@
 package pricing
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
 	paymentcrypto "goapplyjob-golang-backend/internal/payments/crypto"
+	paymentdodo "goapplyjob-golang-backend/internal/payments/dodo"
 	gensqlc "goapplyjob-golang-backend/pkg/generated/sqlc"
 
 	"github.com/gin-gonic/gin"
@@ -59,11 +61,13 @@ func (h *Handler) Register(router gin.IRouter) {
 	router.GET("/pricing/payments/:paymentID", h.paymentStatus)
 	router.POST("/pricing/payments/:paymentID/confirm", h.confirmPayment)
 	router.POST("/pricing/webhooks/stripe", h.stripeWebhook)
+	router.POST("/pricing/webhooks/dodo", h.dodoWebhook)
 	router.POST("/pricing/webhooks/crypto", h.cryptoWebhook)
 }
 
 func (h *Handler) listProviders(c *gin.Context) {
 	stripeEnabled := strings.TrimSpace(os.Getenv("STRIPE_SECRET_KEY")) != ""
+	dodoEnabled, dodoReason := paymentdodo.IsConfigured()
 	cryptoEnabled := true
 	cryptoReason := any(nil)
 	if _, err := paymentcrypto.GetGateway(h.cfg); err != nil {
@@ -76,6 +80,12 @@ func (h *Handler) listProviders(c *gin.Context) {
 			"payment_methods": []string{"card"},
 			"enabled":         stripeEnabled,
 			"reason":          map[bool]any{true: nil, false: "Stripe is not configured"}[stripeEnabled],
+		},
+		{
+			"provider":        "dodo",
+			"payment_methods": []string{"card"},
+			"enabled":         dodoEnabled,
+			"reason":          map[bool]any{true: nil, false: dodoReason}[dodoEnabled],
 		},
 		{
 			"provider":        "crypto",
@@ -139,6 +149,14 @@ func (h *Handler) subscribe(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
 		return
 	}
+	effectiveProvider := payload.Provider
+	if payload.PaymentMethod == "card" {
+		effectiveProvider, err = resolveCardProvider(payload.Provider)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+			return
+		}
+	}
 	if err := h.ensurePlans(c); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load pricing plans"})
 		return
@@ -201,7 +219,7 @@ func (h *Handler) subscribe(c *gin.Context) {
 		gensqlc.CreatePendingPaymentParams{
 			UserID:        user.ID,
 			PricingPlanID: planID,
-			Provider:      payload.Provider,
+			Provider:      effectiveProvider,
 			PaymentMethod: payload.PaymentMethod,
 			AmountMinor:   int32(priceUSD * 100),
 			CreatedAt:     pgTimestamptz(now),
@@ -214,10 +232,24 @@ func (h *Handler) subscribe(c *gin.Context) {
 	successURL = appendQueryParam(successURL, "payment_id", strconv.FormatInt(int64(paymentID), 10))
 	cancelURL = appendQueryParam(cancelURL, "payment_id", strconv.FormatInt(int64(paymentID), 10))
 
-	checkoutID, checkoutURL, providerPayload, err := h.createCryptoInvoice(planName, priceUSD, payload.PayCurrency, successURL, cancelURL, paymentID, user)
-	if err != nil {
+	var checkoutID, checkoutURL string
+	var providerPayload map[string]any
+	switch strings.ToLower(strings.TrimSpace(effectiveProvider)) {
+	case "dodo":
+		checkoutID, checkoutURL, providerPayload, err = paymentdodo.CreateCheckout(paymentID, user.ID, planCode, user.Email, successURL)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create payment"})
+			return
+		}
+	case "stripe":
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create payment"})
 		return
+	default:
+		checkoutID, checkoutURL, providerPayload, err = h.createCryptoInvoice(planName, priceUSD, payload.PayCurrency, successURL, cancelURL, paymentID, user)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create payment"})
+			return
+		}
 	}
 	payloadBytes, _ := json.Marshal(providerPayload)
 	err = h.q.UpdatePaymentCheckoutInfo(
@@ -237,7 +269,7 @@ func (h *Handler) subscribe(c *gin.Context) {
 		"ok":             true,
 		"payment_id":     paymentID,
 		"plan_code":      planCode,
-		"provider":       payload.Provider,
+		"provider":       effectiveProvider,
 		"payment_method": payload.PaymentMethod,
 		"payment_status": "pending",
 		"checkout_url":   checkoutURL,
@@ -316,6 +348,16 @@ func (h *Handler) confirmOrActivatePayment(c *gin.Context, paymentID string, use
 		}
 	} else if row.Provider == "internal" {
 		resolvedStatus = "paid"
+	} else if row.Provider == "dodo" {
+		var merged map[string]any
+		resolvedStatus, merged = paymentdodo.ResolveCheckoutStatus(strings.TrimSpace(row.ProviderCheckoutID.String), row.ProviderPayload)
+		if len(merged) > 0 {
+			payloadBytes, _ := json.Marshal(merged)
+			_ = h.q.UpdatePaymentPayloadByID(c.Request.Context(), gensqlc.UpdatePaymentPayloadByIDParams{
+				ProviderPayload: payloadBytes,
+				ID:              row.ID,
+			})
+		}
 	}
 
 	switch resolvedStatus {
@@ -324,11 +366,16 @@ func (h *Handler) confirmOrActivatePayment(c *gin.Context, paymentID string, use
 	case "failed":
 		return h.q.UpdatePaymentFailedByID(c.Request.Context(), row.ID)
 	default:
-		return h.activateSubscription(c, paymentID, userID)
+		return nil
 	}
 }
 
 func (h *Handler) stripeWebhook(c *gin.Context) {
+	stripeWebhookSecret := strings.TrimSpace(os.Getenv("STRIPE_WEBHOOK_SECRET"))
+	if stripeWebhookSecret != "" && strings.TrimSpace(c.GetHeader("Stripe-Signature")) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Missing Stripe-Signature"})
+		return
+	}
 	var payload struct {
 		Type string `json:"type"`
 		Data struct {
@@ -348,6 +395,96 @@ func (h *Handler) stripeWebhook(c *gin.Context) {
 				}
 			}
 		}
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handler) dodoWebhook(c *gin.Context) {
+	rawBody, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid webhook payload"})
+		return
+	}
+	eventType, metadata, obj, err := paymentdodo.ParseWebhook(rawBody, c.Request.Header)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid webhook payload"})
+		return
+	}
+
+	var paymentID int32
+	if raw, ok := metadata["payment_id"]; ok {
+		if parsed, parseErr := strconv.ParseInt(strings.TrimSpace(fmt.Sprintf("%v", raw)), 10, 64); parseErr == nil && parsed > 0 && parsed <= int64(^uint32(0)>>1) {
+			paymentID = int32(parsed)
+		}
+	}
+	row, err := h.lookupDodoWebhookPayment(c, paymentID, eventType, obj)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+		return
+	}
+
+	update := map[string]any{}
+	if statusRaw, ok := obj["status"]; ok {
+		update[paymentdodo.PayloadPaymentStatus] = strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", statusRaw)))
+	}
+	if checkoutRaw, ok := obj["checkout_status"]; ok {
+		update[paymentdodo.PayloadCheckoutStatus] = strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", checkoutRaw)))
+	}
+	if subRaw, ok := obj["subscription_id"]; ok {
+		if subID := strings.TrimSpace(fmt.Sprintf("%v", subRaw)); subID != "" {
+			update[paymentdodo.PayloadSubscriptionID] = subID
+		}
+	} else if strings.HasPrefix(eventType, "subscription.") {
+		if subID := strings.TrimSpace(fmt.Sprintf("%v", obj["id"])); subID != "" {
+			update[paymentdodo.PayloadSubscriptionID] = subID
+		}
+	}
+	if subID := strings.TrimSpace(fmt.Sprintf("%v", update[paymentdodo.PayloadSubscriptionID])); subID != "" {
+		if refreshed := paymentdodo.RefreshSubscriptionState(subID); len(refreshed) > 0 {
+			for key, value := range refreshed {
+				update[key] = value
+			}
+		}
+	}
+	if len(update) > 0 {
+		if pay, payErr := h.q.GetPaymentForUser(c.Request.Context(), gensqlc.GetPaymentForUserParams{ID: row.ID, UserID: row.UserID}); payErr == nil {
+			merged, mergeErr := mergeProviderPayload(pay.ProviderPayload, update)
+			if mergeErr == nil {
+				body, _ := json.Marshal(merged)
+				_ = h.q.UpdatePaymentPayloadByID(c.Request.Context(), gensqlc.UpdatePaymentPayloadByIDParams{
+					ProviderPayload: body,
+					ID:              row.ID,
+				})
+			}
+		}
+	}
+
+	mappedStatus := "pending"
+	if strings.HasPrefix(eventType, "payment.") {
+		mappedStatus = paymentcrypto.ParseGenericPaymentStatus(update[paymentdodo.PayloadPaymentStatus])
+	} else if strings.HasPrefix(eventType, "subscription.") {
+		subStatus := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", update[paymentdodo.PayloadSubscriptionStatus])))
+		switch subStatus {
+		case "active", "trialing":
+			mappedStatus = "paid"
+		case "failed", "cancelled", "canceled", "expired":
+			mappedStatus = "failed"
+		}
+	}
+	switch mappedStatus {
+	case "paid":
+		_ = h.activatePlan(c, row.UserID, row.PricingPlanID, int(row.DurationDays), row.ID)
+	case "failed":
+		_ = h.q.UpdatePaymentFailedByID(c.Request.Context(), row.ID)
+	}
+	if strings.HasPrefix(eventType, "subscription.") {
+		_ = h.syncUserSubscriptionFromDodoStatus(
+			c,
+			row.UserID,
+			row.PricingPlanID,
+			strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", update[paymentdodo.PayloadSubscriptionStatus]))),
+			update[paymentdodo.PayloadCurrentPeriodEnd],
+		)
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
@@ -642,14 +779,27 @@ func (h *Handler) subscriptionStatus(c *gin.Context) {
 	cancelAtPeriodEnd := false
 	canCancel := false
 	var stripeSubscriptionID any
+	var subscriptionID any
 	if provider == "stripe" && len(providerPayload) > 0 {
 		payload := map[string]any{}
 		if json.Unmarshal(providerPayload, &payload) == nil {
 			if rawID, ok := payload["stripe_subscription_id"].(string); ok && strings.TrimSpace(rawID) != "" {
 				stripeSubscriptionID = strings.TrimSpace(rawID)
+				subscriptionID = stripeSubscriptionID
 			}
 			cancelAtPeriodEnd = payload["stripe_cancel_at_period_end"] == true
 			canCancel = !cancelAtPeriodEnd && stripeSubscriptionID != nil
+		}
+	} else if provider == "dodo" && len(providerPayload) > 0 {
+		dodoSubID := paymentdodo.ExtractSubscriptionID(providerPayload)
+		if dodoSubID != "" {
+			subscriptionID = dodoSubID
+		}
+		payload := map[string]any{}
+		if json.Unmarshal(providerPayload, &payload) == nil {
+			cancelAtPeriodEnd = payload[paymentdodo.PayloadCancelAtPeriodEnd] == true
+			status := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", payload[paymentdodo.PayloadSubscriptionStatus])))
+			canCancel = !cancelAtPeriodEnd && dodoSubID != "" && status != "cancelled" && status != "canceled" && status != "expired" && status != "failed"
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -664,6 +814,7 @@ func (h *Handler) subscriptionStatus(c *gin.Context) {
 		"payment_method":         emptyStringToNil(paymentMethod),
 		"can_cancel":             canCancel,
 		"cancel_at_period_end":   cancelAtPeriodEnd,
+		"subscription_id":        subscriptionID,
 		"stripe_subscription_id": stripeSubscriptionID,
 	})
 }
@@ -674,37 +825,77 @@ func (h *Handler) cancelSubscription(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Not authenticated"})
 		return
 	}
-	row, err := h.q.GetStripeCancelablePaymentByUser(c.Request.Context(), gensqlc.GetStripeCancelablePaymentByUserParams{
+	row, err := h.q.GetCancelableCardPaymentByUser(c.Request.Context(), gensqlc.GetCancelableCardPaymentByUserParams{
 		UserID:   user.ID,
 		UserID_2: user.ID,
 	})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "No active Stripe subscription to cancel"})
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "No active subscription to cancel"})
 		return
 	}
 	payload := map[string]any{}
 	if len(row.ProviderPayload) > 0 {
 		_ = json.Unmarshal(row.ProviderPayload, &payload)
 	}
-	stripeSubscriptionID, _ := payload["stripe_subscription_id"].(string)
-	if strings.TrimSpace(stripeSubscriptionID) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"detail": "No Stripe subscription id found"})
+	subscriptionID := ""
+	updated := map[string]any{}
+	if row.Provider == "stripe" {
+		stripeSubscriptionID, _ := payload["stripe_subscription_id"].(string)
+		if strings.TrimSpace(stripeSubscriptionID) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": "Stripe subscription id not found"})
+			return
+		}
+		var err error
+		updated, err = cancelStripeSubscriptionAtPeriodEnd(stripeSubscriptionID)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"detail": "Failed to cancel Stripe subscription: " + err.Error()})
+			return
+		}
+		payload["stripe_subscription_id"] = stripeSubscriptionID
+		payload["stripe_subscription_status"] = strings.TrimSpace(fmt.Sprintf("%v", updated["status"]))
+		payload["stripe_cancel_at_period_end"] = updated["cancel_at_period_end"] == true
+		payload["stripe_current_period_end"] = updated["current_period_end"]
+		payload["stripe_canceled_at"] = updated["canceled_at"]
+		subscriptionID = stripeSubscriptionID
+	} else if row.Provider == "dodo" {
+		dodoSubscriptionID := paymentdodo.ExtractSubscriptionID(row.ProviderPayload)
+		if strings.TrimSpace(dodoSubscriptionID) == "" {
+			if refreshed, _ := paymentdodo.ResolveCheckoutStatus("", row.ProviderPayload); refreshed != "" {
+				// no-op; keep compatibility with existing payload parsing path
+			}
+		}
+		if strings.TrimSpace(dodoSubscriptionID) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": "Dodo subscription id not found"})
+			return
+		}
+		var err error
+		updated, err = paymentdodo.CancelSubscription(dodoSubscriptionID)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"detail": "Failed to cancel Dodo subscription: " + err.Error()})
+			return
+		}
+		for key, value := range updated {
+			payload[key] = value
+		}
+		subscriptionID = dodoSubscriptionID
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Provider does not support cancellation"})
 		return
 	}
-	payload["stripe_cancel_at_period_end"] = true
+
 	payloadBytes, _ := json.Marshal(payload)
 	if err := h.q.UpdatePaymentPayloadByID(c.Request.Context(), gensqlc.UpdatePaymentPayloadByIDParams{
 		ProviderPayload: payloadBytes,
 		ID:              row.ID,
 	}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to cancel Stripe subscription"})
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to cancel subscription"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"ok":                     true,
-		"stripe_subscription_id": stripeSubscriptionID,
-		"cancel_at_period_end":   true,
-		"current_period_end":     nil,
+		"ok":                   true,
+		"subscription_id":      subscriptionID,
+		"cancel_at_period_end": updated["cancel_at_period_end"] == true || updated[paymentdodo.PayloadCancelAtPeriodEnd] == true,
+		"current_period_end":   firstNonEmpty(parseEpochOrNil(updated["current_period_end"]), parseEpochOrNil(updated[paymentdodo.PayloadCurrentPeriodEnd])),
 	})
 }
 
@@ -712,10 +903,34 @@ func validateProviderMethod(provider, paymentMethod string) error {
 	if provider == "stripe" && paymentMethod != "card" {
 		return errors.New("Stripe supports card only")
 	}
+	if provider == "card" && paymentMethod != "card" {
+		return errors.New("Card provider requires payment_method=card")
+	}
+	if provider == "dodo" && paymentMethod != "card" {
+		return errors.New("Dodo supports card only")
+	}
 	if provider == "crypto" && paymentMethod != "crypto" {
 		return errors.New("Crypto provider requires payment_method=crypto")
 	}
 	return nil
+}
+
+func resolveCardProvider(provider string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(provider))
+	if normalized == "stripe" || normalized == "dodo" {
+		return normalized, nil
+	}
+	if normalized != "card" {
+		return "", errors.New("Unsupported card provider")
+	}
+	dodoEnabled, _ := paymentdodo.IsConfigured()
+	if dodoEnabled {
+		return "dodo", nil
+	}
+	if strings.TrimSpace(os.Getenv("STRIPE_SECRET_KEY")) != "" {
+		return "stripe", nil
+	}
+	return "", errors.New("No card provider is configured")
 }
 
 func (h *Handler) createCryptoInvoice(planName string, priceUSD int, payCurrency, successURL, cancelURL string, paymentID int32, user *auth.User) (string, string, map[string]any, error) {
@@ -1004,4 +1219,149 @@ func parseUTCDateTime(raw string) (time.Time, error) {
 		return time.Date(parsed.Year(), parsed.Month(), parsed.Day(), parsed.Hour(), parsed.Minute(), parsed.Second(), parsed.Nanosecond(), time.UTC), nil
 	}
 	return time.Time{}, fmt.Errorf("invalid datetime")
+}
+
+func cancelStripeSubscriptionAtPeriodEnd(subscriptionID string) (map[string]any, error) {
+	stripeSecretKey := strings.TrimSpace(os.Getenv("STRIPE_SECRET_KEY"))
+	if stripeSecretKey == "" {
+		return nil, fmt.Errorf("Stripe is not configured")
+	}
+	apiBase := strings.TrimSpace(os.Getenv("STRIPE_API_BASE_URL"))
+	if apiBase == "" {
+		apiBase = "https://api.stripe.com/v1"
+	}
+	endpoint := strings.TrimRight(apiBase, "/") + "/subscriptions/" + url.PathEscape(strings.TrimSpace(subscriptionID))
+	form := url.Values{}
+	form.Set("cancel_at_period_end", "true")
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewBufferString(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+stripeSecretKey)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
+	if resp.StatusCode >= http.StatusBadRequest {
+		return nil, fmt.Errorf("stripe status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	parsed := map[string]any{}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, err
+	}
+	return parsed, nil
+}
+
+func parseEpochOrNil(value any) any {
+	switch raw := value.(type) {
+	case float64:
+		return time.Unix(int64(raw), 0).UTC().Format(time.RFC3339)
+	case int64:
+		return time.Unix(raw, 0).UTC().Format(time.RFC3339)
+	case int:
+		return time.Unix(int64(raw), 0).UTC().Format(time.RFC3339)
+	case json.Number:
+		parsed, err := raw.Int64()
+		if err != nil {
+			return nil
+		}
+		return time.Unix(parsed, 0).UTC().Format(time.RFC3339)
+	default:
+		return nil
+	}
+}
+
+func parseDateTimeValue(value any) (time.Time, bool) {
+	switch raw := value.(type) {
+	case string:
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			return time.Time{}, false
+		}
+		if asInt, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+			return time.Unix(asInt, 0).UTC(), true
+		}
+		if parsed, err := parseUTCDateTime(trimmed); err == nil {
+			return parsed, true
+		}
+	case float64:
+		return time.Unix(int64(raw), 0).UTC(), true
+	case int64:
+		return time.Unix(raw, 0).UTC(), true
+	case int:
+		return time.Unix(int64(raw), 0).UTC(), true
+	case json.Number:
+		asInt, err := raw.Int64()
+		if err == nil {
+			return time.Unix(asInt, 0).UTC(), true
+		}
+	}
+	return time.Time{}, false
+}
+
+func (h *Handler) syncUserSubscriptionFromDodoStatus(c *gin.Context, userID, planID int32, subscriptionStatus string, periodEndValue any) error {
+	statusValue := strings.ToLower(strings.TrimSpace(subscriptionStatus))
+	switch statusValue {
+	case "cancelled", "canceled", "expired", "failed", "on_hold":
+		return h.q.DeactivateActiveSubscriptionsByUser(c.Request.Context(), userID)
+	case "active", "trialing":
+		periodEnd, ok := parseDateTimeValue(periodEndValue)
+		if !ok || !periodEnd.After(time.Now().UTC()) {
+			return nil
+		}
+		now := time.Now().UTC()
+		tx, err := h.db.PGX.Begin(c.Request.Context())
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback(c.Request.Context())
+		qtx := h.q.WithTx(tx)
+		if err := qtx.DeactivateActiveSubscriptionsByUser(c.Request.Context(), userID); err != nil {
+			return err
+		}
+		if err := qtx.CreateUserSubscriptionActive(c.Request.Context(), gensqlc.CreateUserSubscriptionActiveParams{
+			UserID:        userID,
+			PricingPlanID: planID,
+			StartsAt:      pgTimestamptz(now),
+			EndsAt:        pgTimestamptz(periodEnd),
+			CreatedAt:     pgTimestamptz(now),
+		}); err != nil {
+			return err
+		}
+		return tx.Commit(c.Request.Context())
+	default:
+		return nil
+	}
+}
+
+func (h *Handler) lookupDodoWebhookPayment(c *gin.Context, paymentID int32, eventType string, obj map[string]any) (*gensqlc.GetPaymentForWebhookByPaymentIDRow, error) {
+	if paymentID != 0 {
+		return h.q.GetPaymentForWebhookByPaymentID(c.Request.Context(), paymentID)
+	}
+	subscriptionID := strings.TrimSpace(fmt.Sprintf("%v", obj["subscription_id"]))
+	if subscriptionID == "" && strings.HasPrefix(eventType, "subscription.") {
+		subscriptionID = strings.TrimSpace(fmt.Sprintf("%v", obj["id"]))
+	}
+	if subscriptionID == "" {
+		return nil, sql.ErrNoRows
+	}
+	rows, err := h.q.ListRecentDodoCardPayments(c.Request.Context(), 2000)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		if paymentdodo.ExtractSubscriptionID(row.ProviderPayload) == subscriptionID {
+			return &gensqlc.GetPaymentForWebhookByPaymentIDRow{
+				ID:            row.ID,
+				UserID:        row.UserID,
+				PricingPlanID: row.PricingPlanID,
+				DurationDays:  row.DurationDays,
+			}, nil
+		}
+	}
+	return nil, sql.ErrNoRows
 }

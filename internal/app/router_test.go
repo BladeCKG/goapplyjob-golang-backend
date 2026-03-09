@@ -1236,12 +1236,74 @@ func TestPricingFlow(t *testing.T) {
 	assertStatus(t, confirmRec.Code, http.StatusOK)
 }
 
+func TestConfirmPaymentDoesNotActivatePendingStripePayment(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	code := requestLoginCode(t, router, "pending-stripe@example.com")
+	cookie := verifyLoginCode(t, router, "pending-stripe@example.com", code)
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	var userID int64
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT id FROM auth_users WHERE email = ? LIMIT 1`, "pending-stripe@example.com").Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	var planID int64
+	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO pricing_plans (code, name, billing_cycle, duration_days, price_usd, is_active, created_at) VALUES (?, ?, ?, ?, ?, true, ?) RETURNING id`, "stripe-monthly", "Stripe Monthly", "monthly", 30, 10, now).Scan(&planID); err != nil {
+		t.Fatal(err)
+	}
+	var paymentID int64
+	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO pricing_payments (user_id, pricing_plan_id, provider, payment_method, currency, amount_minor, status, provider_checkout_id, provider_payload, created_at) VALUES (?, ?, 'stripe', 'card', 'USD', 1000, 'pending', ?, '{}', ?) RETURNING id`, userID, planID, "cs_test_pending", now).Scan(&paymentID); err != nil {
+		t.Fatal(err)
+	}
+
+	confirmReq := httptest.NewRequest(http.MethodPost, "/pricing/payments/"+strconv.FormatInt(paymentID, 10)+"/confirm", nil)
+	confirmReq.AddCookie(cookie)
+	confirmRec := httptest.NewRecorder()
+	router.ServeHTTP(confirmRec, confirmReq)
+	assertStatus(t, confirmRec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, confirmRec.Body.Bytes(), &body)
+	if body["payment_status"] != "pending" {
+		t.Fatalf("expected pending payment status, got %#v", body)
+	}
+
+	var status string
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT status FROM pricing_payments WHERE id = ?`, paymentID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "pending" {
+		t.Fatalf("expected DB payment status pending, got %q", status)
+	}
+
+	var subCount int
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM user_subscriptions WHERE user_id = ?`, userID).Scan(&subCount); err != nil {
+		t.Fatal(err)
+	}
+	if subCount != 1 {
+		t.Fatalf("expected only default free subscription record, got %d", subCount)
+	}
+}
+
 func TestPricingProvidersEndpointReportsEnabledMethods(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
 
 	_ = os.Setenv("STRIPE_SECRET_KEY", "sk_test_enabled")
-	t.Cleanup(func() { _ = os.Unsetenv("STRIPE_SECRET_KEY") })
+	_ = os.Setenv("DODO_API_KEY", "dodo_key")
+	_ = os.Setenv("DODO_PRODUCT_ID_WEEKLY", "prod_w")
+	_ = os.Setenv("DODO_PRODUCT_ID_MONTHLY", "prod_m")
+	_ = os.Setenv("DODO_PRODUCT_ID_QUARTERLY", "prod_q")
+	_ = os.Setenv("DODO_PRODUCT_ID_YEARLY", "prod_y")
+	t.Cleanup(func() {
+		_ = os.Unsetenv("STRIPE_SECRET_KEY")
+		_ = os.Unsetenv("DODO_API_KEY")
+		_ = os.Unsetenv("DODO_PRODUCT_ID_WEEKLY")
+		_ = os.Unsetenv("DODO_PRODUCT_ID_MONTHLY")
+		_ = os.Unsetenv("DODO_PRODUCT_ID_QUARTERLY")
+		_ = os.Unsetenv("DODO_PRODUCT_ID_YEARLY")
+	})
 
 	req := httptest.NewRequest(http.MethodGet, "/pricing/providers", nil)
 	rec := httptest.NewRecorder()
@@ -1251,14 +1313,17 @@ func TestPricingProvidersEndpointReportsEnabledMethods(t *testing.T) {
 	var body map[string]any
 	decodeBody(t, rec.Body.Bytes(), &body)
 	items := body["items"].([]any)
-	if len(items) != 2 {
+	if len(items) != 3 {
 		t.Fatalf("unexpected providers payload %#v", body)
 	}
-	var stripe, crypto map[string]any
+	var stripe, dodo, crypto map[string]any
 	for _, item := range items {
 		row := item.(map[string]any)
 		if row["provider"] == "stripe" {
 			stripe = row
+		}
+		if row["provider"] == "dodo" {
+			dodo = row
 		}
 		if row["provider"] == "crypto" {
 			crypto = row
@@ -1266,6 +1331,9 @@ func TestPricingProvidersEndpointReportsEnabledMethods(t *testing.T) {
 	}
 	if stripe["enabled"] != true || len(stripe["payment_methods"].([]any)) == 0 {
 		t.Fatalf("unexpected stripe provider %#v", stripe)
+	}
+	if dodo["enabled"] != true || len(dodo["payment_methods"].([]any)) == 0 {
+		t.Fatalf("unexpected dodo provider %#v", dodo)
 	}
 	if crypto["enabled"] != true || len(crypto["payment_methods"].([]any)) == 0 {
 		t.Fatalf("unexpected crypto provider %#v", crypto)
@@ -1524,6 +1592,223 @@ func TestPricingCryptoCurrenciesSupportsAmountFiltering(t *testing.T) {
 	first := items[0].(map[string]any)
 	if _, ok := first["min_usd"]; !ok {
 		t.Fatalf("expected min_usd field in payload %#v", first)
+	}
+}
+
+func TestStripeWebhookRequiresSignatureWhenSecretConfigured(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	_ = os.Setenv("STRIPE_WEBHOOK_SECRET", "whsec_test")
+	t.Cleanup(func() { _ = os.Unsetenv("STRIPE_WEBHOOK_SECRET") })
+
+	webhookReq := httptest.NewRequest(http.MethodPost, "/pricing/webhooks/stripe", bytes.NewReader([]byte(`{"type":"checkout.session.completed","data":{"object":{"metadata":{"payment_id":"1"}}}}`)))
+	webhookReq.Header.Set("Content-Type", "application/json")
+	webhookRec := httptest.NewRecorder()
+	router.ServeHTTP(webhookRec, webhookReq)
+	assertStatus(t, webhookRec.Code, http.StatusBadRequest)
+}
+
+func TestCancelStripeSubscriptionCallsProviderAndUpdatesPayload(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	stripeSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if !strings.HasPrefix(r.URL.Path, "/v1/subscriptions/") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		body := `{"id":"sub_test_123","status":"active","cancel_at_period_end":true,"current_period_end":1893456000,"canceled_at":null}`
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer stripeSrv.Close()
+
+	_ = os.Setenv("STRIPE_SECRET_KEY", "sk_test")
+	_ = os.Setenv("STRIPE_API_BASE_URL", stripeSrv.URL+"/v1")
+	t.Cleanup(func() {
+		_ = os.Unsetenv("STRIPE_SECRET_KEY")
+		_ = os.Unsetenv("STRIPE_API_BASE_URL")
+	})
+
+	code := requestLoginCode(t, router, "cancel-stripe@example.com")
+	cookie := verifyLoginCode(t, router, "cancel-stripe@example.com", code)
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	var userID int64
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT id FROM auth_users WHERE email = ? LIMIT 1`, "cancel-stripe@example.com").Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	var planID int64
+	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO pricing_plans (code, name, billing_cycle, duration_days, price_usd, is_active, created_at) VALUES (?, ?, ?, ?, ?, true, ?) RETURNING id`, "stripe-weekly-cancel", "Stripe Weekly Cancel", "weekly", 7, 3, now).Scan(&planID); err != nil {
+		t.Fatal(err)
+	}
+	var paymentID int64
+	payload := `{"stripe_subscription_id":"sub_test_123"}`
+	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO pricing_payments (user_id, pricing_plan_id, provider, payment_method, currency, amount_minor, status, provider_payload, created_at, paid_at) VALUES (?, ?, 'stripe', 'card', 'USD', 300, 'paid', ?, ?, ?) RETURNING id`, userID, planID, payload, now, now).Scan(&paymentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SQL.ExecContext(context.Background(), `UPDATE user_subscriptions SET is_active = false WHERE user_id = ?`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO user_subscriptions (user_id, pricing_plan_id, starts_at, ends_at, is_active, created_at) VALUES (?, ?, ?, ?, true, ?)`,
+		userID,
+		planID,
+		time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano),
+		time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano),
+		now,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	cancelReq := httptest.NewRequest(http.MethodPost, "/pricing/subscription/cancel", nil)
+	cancelReq.AddCookie(cookie)
+	cancelRec := httptest.NewRecorder()
+	router.ServeHTTP(cancelRec, cancelReq)
+	assertStatus(t, cancelRec.Code, http.StatusOK)
+
+	var providerPayload []byte
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT provider_payload FROM pricing_payments WHERE id = ?`, paymentID).Scan(&providerPayload); err != nil {
+		t.Fatal(err)
+	}
+	var stored map[string]any
+	if err := json.Unmarshal(providerPayload, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored["stripe_cancel_at_period_end"] != true {
+		t.Fatalf("expected stripe_cancel_at_period_end=true, got %#v", stored)
+	}
+}
+
+func TestDodoWebhookPaidActivatesSubscription(t *testing.T) {
+	_ = os.Setenv("DODO_API_KEY", "dodo_key")
+	t.Cleanup(func() {
+		_ = os.Unsetenv("DODO_API_KEY")
+	})
+
+	router, db := testRouter(t)
+	defer db.Close()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	var userID int64
+	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO auth_users (email, created_at) VALUES (?, ?) RETURNING id`, "dodo-user@example.com", now).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	var planID int64
+	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO pricing_plans (code, name, billing_cycle, duration_days, price_usd, is_active, created_at) VALUES (?, ?, ?, ?, ?, true, ?) RETURNING id`, "dodo-weekly", "Dodo Weekly", "weekly", 7, 3, now).Scan(&planID); err != nil {
+		t.Fatal(err)
+	}
+	var paymentID int64
+	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO pricing_payments (user_id, pricing_plan_id, provider, payment_method, currency, amount_minor, status, provider_checkout_id, provider_payload, created_at) VALUES (?, ?, 'dodo', 'card', 'USD', 300, 'pending', ?, '{}', ?) RETURNING id`, userID, planID, "dodo_session_1", now).Scan(&paymentID); err != nil {
+		t.Fatal(err)
+	}
+
+	webhookBody := map[string]any{
+		"type": "payment.succeeded",
+		"data": map[string]any{
+			"object": map[string]any{
+				"status": "succeeded",
+				"metadata": map[string]any{
+					"payment_id": strconv.FormatInt(paymentID, 10),
+				},
+			},
+		},
+	}
+	raw, _ := json.Marshal(webhookBody)
+	req := httptest.NewRequest(http.MethodPost, "/pricing/webhooks/dodo", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var status string
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT status FROM pricing_payments WHERE id = ?`, paymentID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "paid" {
+		t.Fatalf("expected paid payment status, got %q", status)
+	}
+}
+
+func TestCancelDodoSubscriptionUpdatesPayload(t *testing.T) {
+	dodoSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/subscriptions/sub_dodo_123" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"active","cancel_at_next_billing_date":true,"next_billing_date":"2026-12-31T00:00:00Z"}`))
+	}))
+	defer dodoSrv.Close()
+
+	router, db := testRouter(t)
+	defer db.Close()
+
+	_ = os.Setenv("DODO_API_KEY", "dodo_key")
+	_ = os.Setenv("DODO_PRODUCT_ID_WEEKLY", "prod_w")
+	_ = os.Setenv("DODO_PRODUCT_ID_MONTHLY", "prod_m")
+	_ = os.Setenv("DODO_PRODUCT_ID_QUARTERLY", "prod_q")
+	_ = os.Setenv("DODO_PRODUCT_ID_YEARLY", "prod_y")
+	_ = os.Setenv("DODO_API_BASE_URL", dodoSrv.URL)
+	t.Cleanup(func() {
+		_ = os.Unsetenv("DODO_API_KEY")
+		_ = os.Unsetenv("DODO_PRODUCT_ID_WEEKLY")
+		_ = os.Unsetenv("DODO_PRODUCT_ID_MONTHLY")
+		_ = os.Unsetenv("DODO_PRODUCT_ID_QUARTERLY")
+		_ = os.Unsetenv("DODO_PRODUCT_ID_YEARLY")
+		_ = os.Unsetenv("DODO_API_BASE_URL")
+	})
+
+	code := requestLoginCode(t, router, "cancel-dodo@example.com")
+	cookie := verifyLoginCode(t, router, "cancel-dodo@example.com", code)
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	var userID int64
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT id FROM auth_users WHERE email = ? LIMIT 1`, "cancel-dodo@example.com").Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	var planID int64
+	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO pricing_plans (code, name, billing_cycle, duration_days, price_usd, is_active, created_at) VALUES (?, ?, ?, ?, ?, true, ?) RETURNING id`, "dodo-cancel-weekly", "Dodo Cancel Weekly", "weekly", 7, 3, now).Scan(&planID); err != nil {
+		t.Fatal(err)
+	}
+	var paymentID int64
+	payload := `{"dodo_subscription_id":"sub_dodo_123"}`
+	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO pricing_payments (user_id, pricing_plan_id, provider, payment_method, currency, amount_minor, status, provider_payload, created_at, paid_at) VALUES (?, ?, 'dodo', 'card', 'USD', 300, 'paid', ?, ?, ?) RETURNING id`, userID, planID, payload, now, now).Scan(&paymentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SQL.ExecContext(context.Background(), `UPDATE user_subscriptions SET is_active = false WHERE user_id = ?`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO user_subscriptions (user_id, pricing_plan_id, starts_at, ends_at, is_active, created_at) VALUES (?, ?, ?, ?, true, ?)`,
+		userID,
+		planID,
+		time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano),
+		time.Now().UTC().Add(24*time.Hour).Format(time.RFC3339Nano),
+		now,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	cancelReq := httptest.NewRequest(http.MethodPost, "/pricing/subscription/cancel", nil)
+	cancelReq.AddCookie(cookie)
+	cancelRec := httptest.NewRecorder()
+	router.ServeHTTP(cancelRec, cancelReq)
+	assertStatus(t, cancelRec.Code, http.StatusOK)
+
+	var providerPayload []byte
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT provider_payload FROM pricing_payments WHERE id = ?`, paymentID).Scan(&providerPayload); err != nil {
+		t.Fatal(err)
+	}
+	var stored map[string]any
+	if err := json.Unmarshal(providerPayload, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored["dodo_cancel_at_period_end"] != true {
+		t.Fatalf("expected dodo_cancel_at_period_end=true, got %#v", stored)
 	}
 }
 

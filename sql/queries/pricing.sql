@@ -129,14 +129,15 @@ WHERE user_id = $1
 ORDER BY paid_at DESC, created_at DESC
 LIMIT 1;
 
--- name: GetStripeCancelablePaymentByUser :one
-SELECT p.id, p.provider_payload
+-- name: GetCancelableCardPaymentByUser :one
+SELECT p.id, p.provider, p.provider_payload
 FROM pricing_payments p
 JOIN user_subscriptions s ON s.pricing_plan_id = p.pricing_plan_id
 WHERE s.user_id = $1
   AND s.is_active = true
   AND p.user_id = $2
-  AND p.provider = 'stripe'
+  AND p.provider IN ('stripe', 'dodo')
+  AND p.payment_method = 'card'
   AND p.status = 'paid'
 ORDER BY p.paid_at DESC, p.created_at DESC
 LIMIT 1;
@@ -154,3 +155,16 @@ FROM pricing_payments pay
 JOIN pricing_plans plan ON plan.id = pay.pricing_plan_id
 WHERE pay.provider_checkout_id = $1
 LIMIT 1;
+
+-- name: ListRecentDodoCardPayments :many
+SELECT pay.id,
+       pay.user_id,
+       pay.pricing_plan_id,
+       plan.duration_days,
+       pay.provider_payload
+FROM pricing_payments pay
+JOIN pricing_plans plan ON plan.id = pay.pricing_plan_id
+WHERE pay.provider = 'dodo'
+  AND pay.payment_method = 'card'
+ORDER BY pay.paid_at DESC NULLS LAST, pay.created_at DESC
+LIMIT $1;

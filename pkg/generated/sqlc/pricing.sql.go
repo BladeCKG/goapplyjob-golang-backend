@@ -144,6 +144,38 @@ func (q *Queries) GetActivePricingPlanByCode(ctx context.Context, code string) (
 	return &i, err
 }
 
+const getCancelableCardPaymentByUser = `-- name: GetCancelableCardPaymentByUser :one
+SELECT p.id, p.provider, p.provider_payload
+FROM pricing_payments p
+JOIN user_subscriptions s ON s.pricing_plan_id = p.pricing_plan_id
+WHERE s.user_id = $1
+  AND s.is_active = true
+  AND p.user_id = $2
+  AND p.provider IN ('stripe', 'dodo')
+  AND p.payment_method = 'card'
+  AND p.status = 'paid'
+ORDER BY p.paid_at DESC, p.created_at DESC
+LIMIT 1
+`
+
+type GetCancelableCardPaymentByUserParams struct {
+	UserID   int32 `json:"user_id"`
+	UserID_2 int32 `json:"user_id_2"`
+}
+
+type GetCancelableCardPaymentByUserRow struct {
+	ID              int32  `json:"id"`
+	Provider        string `json:"provider"`
+	ProviderPayload []byte `json:"provider_payload"`
+}
+
+func (q *Queries) GetCancelableCardPaymentByUser(ctx context.Context, arg GetCancelableCardPaymentByUserParams) (*GetCancelableCardPaymentByUserRow, error) {
+	row := q.db.QueryRow(ctx, getCancelableCardPaymentByUser, arg.UserID, arg.UserID_2)
+	var i GetCancelableCardPaymentByUserRow
+	err := row.Scan(&i.ID, &i.Provider, &i.ProviderPayload)
+	return &i, err
+}
+
 const getLatestPaidPaymentMetaByUserAndPlan = `-- name: GetLatestPaidPaymentMetaByUserAndPlan :one
 SELECT provider, payment_method, provider_payload
 FROM pricing_payments
@@ -427,36 +459,6 @@ func (q *Queries) GetPlanDurationByID(ctx context.Context, id int32) (int32, err
 	return duration_days, err
 }
 
-const getStripeCancelablePaymentByUser = `-- name: GetStripeCancelablePaymentByUser :one
-SELECT p.id, p.provider_payload
-FROM pricing_payments p
-JOIN user_subscriptions s ON s.pricing_plan_id = p.pricing_plan_id
-WHERE s.user_id = $1
-  AND s.is_active = true
-  AND p.user_id = $2
-  AND p.provider = 'stripe'
-  AND p.status = 'paid'
-ORDER BY p.paid_at DESC, p.created_at DESC
-LIMIT 1
-`
-
-type GetStripeCancelablePaymentByUserParams struct {
-	UserID   int32 `json:"user_id"`
-	UserID_2 int32 `json:"user_id_2"`
-}
-
-type GetStripeCancelablePaymentByUserRow struct {
-	ID              int32  `json:"id"`
-	ProviderPayload []byte `json:"provider_payload"`
-}
-
-func (q *Queries) GetStripeCancelablePaymentByUser(ctx context.Context, arg GetStripeCancelablePaymentByUserParams) (*GetStripeCancelablePaymentByUserRow, error) {
-	row := q.db.QueryRow(ctx, getStripeCancelablePaymentByUser, arg.UserID, arg.UserID_2)
-	var i GetStripeCancelablePaymentByUserRow
-	err := row.Scan(&i.ID, &i.ProviderPayload)
-	return &i, err
-}
-
 const listActivePricingPlans = `-- name: ListActivePricingPlans :many
 SELECT code, name, billing_cycle, duration_days, price_usd
 FROM pricing_plans
@@ -487,6 +489,54 @@ func (q *Queries) ListActivePricingPlans(ctx context.Context) ([]*ListActivePric
 			&i.BillingCycle,
 			&i.DurationDays,
 			&i.PriceUsd,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, &i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecentDodoCardPayments = `-- name: ListRecentDodoCardPayments :many
+SELECT pay.id,
+       pay.user_id,
+       pay.pricing_plan_id,
+       plan.duration_days,
+       pay.provider_payload
+FROM pricing_payments pay
+JOIN pricing_plans plan ON plan.id = pay.pricing_plan_id
+WHERE pay.provider = 'dodo'
+  AND pay.payment_method = 'card'
+ORDER BY pay.paid_at DESC NULLS LAST, pay.created_at DESC
+LIMIT $1
+`
+
+type ListRecentDodoCardPaymentsRow struct {
+	ID              int32  `json:"id"`
+	UserID          int32  `json:"user_id"`
+	PricingPlanID   int32  `json:"pricing_plan_id"`
+	DurationDays    int32  `json:"duration_days"`
+	ProviderPayload []byte `json:"provider_payload"`
+}
+
+func (q *Queries) ListRecentDodoCardPayments(ctx context.Context, limit int32) ([]*ListRecentDodoCardPaymentsRow, error) {
+	rows, err := q.db.Query(ctx, listRecentDodoCardPayments, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*ListRecentDodoCardPaymentsRow
+	for rows.Next() {
+		var i ListRecentDodoCardPaymentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.PricingPlanID,
+			&i.DurationDays,
+			&i.ProviderPayload,
 		); err != nil {
 			return nil, err
 		}
