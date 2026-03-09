@@ -117,23 +117,25 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	if batchSize <= 0 {
 		batchSize = 100
 	}
+	if len(s.EnabledSources) == 0 {
+		log.Printf("raw-us-job-worker picked_unready_jobs=0")
+		return 0, nil
+	}
 	var rows *sql.Rows
 	var err error
 	query := `SELECT id, url, COALESCE(source, ''), post_date, COALESCE(extra_json, '') FROM raw_us_jobs WHERE is_ready = false AND is_skippable = false`
 	args := make([]any, 0, len(s.EnabledSources)+1)
-	if len(s.EnabledSources) > 0 {
-		names := make([]string, 0, len(s.EnabledSources))
-		for name := range s.EnabledSources {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		ph := make([]string, 0, len(names))
-		for _, name := range names {
-			ph = append(ph, "?")
-			args = append(args, name)
-		}
-		query += ` AND source IN (` + strings.Join(ph, ", ") + `)`
+	names := make([]string, 0, len(s.EnabledSources))
+	for name := range s.EnabledSources {
+		names = append(names, name)
 	}
+	sort.Strings(names)
+	ph := make([]string, 0, len(names))
+	for _, name := range names {
+		ph = append(ph, "?")
+		args = append(args, name)
+	}
+	query += ` AND source IN (` + strings.Join(ph, ", ") + `)`
 	query += ` ORDER BY post_date DESC, id DESC LIMIT ?`
 	args = append(args, batchSize)
 	for attempt := 0; attempt < 3; attempt++ {
@@ -192,7 +194,17 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		case statusCode == statusNotFound:
 			log.Printf("raw-us-job-worker fetch_result job_id=%d status=404", job.id)
 			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
-				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_skippable = true, retry_count = retry_count + 1 WHERE id = ?`, job.id)
+				_, err := s.DB.SQL.ExecContext(
+					ctx,
+					`UPDATE raw_us_jobs
+					 SET is_ready = true,
+					     is_skippable = true,
+					     is_parsed = false,
+					     raw_json = NULL,
+					     extra_json = NULL
+					 WHERE id = ?`,
+					job.id,
+				)
 				return err
 			}); err != nil {
 				return processed, err
@@ -206,10 +218,28 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			}); err != nil {
 				return processed, err
 			}
+		case statusCode < 200 || statusCode >= 300:
+			log.Printf("raw-us-job-worker fetch_result job_id=%d status=%d empty_html_or_error", job.id, statusCode)
+			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET retry_count = retry_count + 1 WHERE id = ?`, job.id)
+				return err
+			}); err != nil {
+				return processed, err
+			}
 		case isRemovedBuiltinJobHTML(job.source, html):
 			log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s detected_builtin_removed_job", job.id, job.source)
 			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
-				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_ready = true, is_skippable = true, raw_json = NULL, retry_count = retry_count + 1 WHERE id = ?`, job.id)
+				_, err := s.DB.SQL.ExecContext(
+					ctx,
+					`UPDATE raw_us_jobs
+					 SET is_ready = true,
+					     is_skippable = true,
+					     is_parsed = false,
+					     raw_json = NULL,
+					     extra_json = NULL
+					 WHERE id = ?`,
+					job.id,
+				)
 				return err
 			}); err != nil {
 				return processed, err

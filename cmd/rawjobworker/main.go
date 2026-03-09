@@ -94,12 +94,12 @@ func makeReadHTMLWith429Retry(max429Retries int, retryDelay time.Duration) raw.R
 			req.Header.Set("User-Agent", "goapplyjob-backend/raw-job-worker")
 			resp, err := httpClient.Do(req)
 			if err != nil {
-				return "", 0, err
+				return "", -1, nil
 			}
 			body, readErr := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
 			_ = resp.Body.Close()
 			if readErr != nil {
-				return "", resp.StatusCode, readErr
+				return "", -1, nil
 			}
 			if resp.StatusCode != 429 || attempt >= max429Retries {
 				return string(body), resp.StatusCode, nil
