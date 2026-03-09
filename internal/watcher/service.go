@@ -682,8 +682,8 @@ func (s *Service) runOnceWorkable() error {
 		if !isBootstrap && previousFirstDT != nil {
 			urls := make([]string, 0, len(rows))
 			for _, row := range rows {
-				if rowURL, ok := row["url"].(string); ok && strings.TrimSpace(rowURL) != "" {
-					urls = append(urls, strings.TrimSpace(rowURL))
+				if rowURL, _, ok := extractRowURLAndPostDate(row); ok {
+					urls = append(urls, rowURL)
 				}
 			}
 			existingURLs, err := s.findExistingSourceURLs(sourceWorkable, urls)
@@ -692,12 +692,10 @@ func (s *Service) runOnceWorkable() error {
 			}
 			filtered := make([]map[string]any, 0, len(rows))
 			for _, row := range rows {
-				rowURL, _ := row["url"].(string)
-				rowURL = strings.TrimSpace(rowURL)
-				if rowURL == "" {
+				rowURL, rowDT, ok := extractRowURLAndPostDate(row)
+				if !ok {
 					continue
 				}
-				rowDT, _ := row["post_date"].(time.Time)
 				_, seen := existingURLs[rowURL]
 				isNewer := !rowDT.IsZero() && rowDT.After(*previousFirstDT)
 				if !seen || isNewer {
@@ -776,16 +774,17 @@ func (s *Service) runOnceRemotive() error {
 		if len(rows) == 0 {
 			return false
 		}
-		lastURL, _ := rows[len(rows)-1]["url"].(string)
+		lastURL, _, ok := extractRowURLAndPostDate(rows[len(rows)-1])
+		if !ok {
+			return false
+		}
 		partitionMaxJobID := extractRemotiveJobIDFromURL(lastURL)
 		if partitionMaxJobID > newLatestJobID {
 			newLatestJobID = partitionMaxJobID
 		}
 		for idx := len(rows) - 1; idx >= 0; idx-- {
-			row := rows[idx]
-			rowURL, _ := row["url"].(string)
-			rowURL = strings.TrimSpace(rowURL)
-			if rowURL == "" {
+			rowURL, postDate, ok := extractRowURLAndPostDate(rows[idx])
+			if !ok {
 				continue
 			}
 			jobID := extractRemotiveJobIDFromURL(rowURL)
@@ -797,7 +796,6 @@ func (s *Service) runOnceRemotive() error {
 				continue
 			}
 			seenURLs[rowURL] = struct{}{}
-			postDate, _ := row["post_date"].(time.Time)
 			if postDate.IsZero() {
 				postDate = now
 			}
@@ -1275,11 +1273,8 @@ func (s *Service) upsertWorkableJobs(rows []map[string]any) (int, int, error) {
 	inserted := 0
 	updated := 0
 	for _, row := range rows {
-		rowURL, _ := row["url"].(string)
-		rowURL = strings.TrimSpace(rowURL)
-		postDate, _ := row["post_date"].(time.Time)
-		rawPayload, _ := row["raw_payload"].(map[string]any)
-		if rowURL == "" || postDate.IsZero() || rawPayload == nil {
+		rowURL, postDate, rawPayload, ok := extractWorkableRow(row)
+		if !ok {
 			continue
 		}
 
@@ -1431,6 +1426,37 @@ func containsListingURL(listings []map[string]any, targetURL string) bool {
 		}
 	}
 	return false
+}
+
+func extractRowURLAndPostDate(row map[string]any) (string, time.Time, bool) {
+	if row == nil {
+		return "", time.Time{}, false
+	}
+	rowURL, ok := row["url"].(string)
+	if !ok {
+		return "", time.Time{}, false
+	}
+	rowURL = strings.TrimSpace(rowURL)
+	if rowURL == "" {
+		return "", time.Time{}, false
+	}
+	postDate, ok := row["post_date"].(time.Time)
+	if !ok {
+		return "", time.Time{}, false
+	}
+	return rowURL, postDate, true
+}
+
+func extractWorkableRow(row map[string]any) (string, time.Time, map[string]any, bool) {
+	rowURL, postDate, ok := extractRowURLAndPostDate(row)
+	if !ok || postDate.IsZero() {
+		return "", time.Time{}, nil, false
+	}
+	rawPayload, ok := row["raw_payload"].(map[string]any)
+	if !ok || rawPayload == nil {
+		return "", time.Time{}, nil, false
+	}
+	return rowURL, postDate, rawPayload, true
 }
 
 func allListingsOlderThan(listings []map[string]any, marker *time.Time) bool {

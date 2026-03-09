@@ -141,9 +141,12 @@ func ParseRowsForWorkablePayload(payloadText string) ([]SitemapRow, int) {
 	rows, skipped := workable.ParseImportRows(payloadText)
 	out := make([]SitemapRow, 0, len(rows))
 	for _, row := range rows {
-		postDate, _ := row["post_date"].(time.Time)
-		rawPayload, _ := row["raw_payload"].(map[string]any)
-		out = append(out, SitemapRow{URL: stringValue(row["url"]), PostDate: postDate, RawJSON: rawPayload})
+		sitemapRow, ok := parseGenericImportRow(row, true)
+		if !ok {
+			skipped++
+			continue
+		}
+		out = append(out, sitemapRow)
 	}
 	return out, skipped
 }
@@ -152,8 +155,12 @@ func ParseRowsForRemotivePayload(payloadText string) ([]SitemapRow, int) {
 	rows, skipped := remotive.ParseImportRows(payloadText)
 	out := make([]SitemapRow, 0, len(rows))
 	for _, row := range rows {
-		postDate, _ := row["post_date"].(time.Time)
-		out = append(out, SitemapRow{URL: stringValue(row["url"]), PostDate: postDate})
+		sitemapRow, ok := parseGenericImportRow(row, false)
+		if !ok {
+			skipped++
+			continue
+		}
+		out = append(out, sitemapRow)
 	}
 	return out, skipped
 }
@@ -162,8 +169,12 @@ func ParseRowsForDailyremotePayload(payloadText string) ([]SitemapRow, int) {
 	rows, skipped := dailyremote.ParseImportRows(payloadText)
 	out := make([]SitemapRow, 0, len(rows))
 	for _, row := range rows {
-		postDate, _ := row["post_date"].(time.Time)
-		out = append(out, SitemapRow{URL: stringValue(row["url"]), PostDate: postDate})
+		sitemapRow, ok := parseGenericImportRow(row, false)
+		if !ok {
+			skipped++
+			continue
+		}
+		out = append(out, sitemapRow)
 	}
 	return out, skipped
 }
@@ -189,9 +200,12 @@ func ParseRowsForSourcePayload(source, payloadType, payloadText string) ([]Sitem
 	parsedRows, skipped := plugin.ParseImportRows(payloadText)
 	rows := make([]SitemapRow, 0, len(parsedRows))
 	for _, row := range parsedRows {
-		postDate, _ := row["post_date"].(time.Time)
-		rawPayload, _ := row["raw_payload"].(map[string]any)
-		rows = append(rows, SitemapRow{URL: stringValue(row["url"]), PostDate: postDate, RawJSON: rawPayload})
+		sitemapRow, ok := parseGenericImportRow(row, plugin.Source == sourceWorkable)
+		if !ok {
+			skipped++
+			continue
+		}
+		rows = append(rows, sitemapRow)
 	}
 	return rows, skipped, true
 }
@@ -729,4 +743,23 @@ func MarshalRows(rows map[string]time.Time) string {
 func stringValue(value any) string {
 	text, _ := value.(string)
 	return strings.TrimSpace(text)
+}
+
+func parseGenericImportRow(row map[string]any, requireRawPayload bool) (SitemapRow, bool) {
+	rowURL := stringValue(row["url"])
+	if rowURL == "" {
+		return SitemapRow{}, false
+	}
+	postDate, ok := row["post_date"].(time.Time)
+	if !ok || postDate.IsZero() {
+		return SitemapRow{}, false
+	}
+	if !requireRawPayload {
+		return SitemapRow{URL: rowURL, PostDate: postDate}, true
+	}
+	rawPayload, ok := row["raw_payload"].(map[string]any)
+	if !ok || rawPayload == nil {
+		return SitemapRow{}, false
+	}
+	return SitemapRow{URL: rowURL, PostDate: postDate, RawJSON: rawPayload}, true
 }
