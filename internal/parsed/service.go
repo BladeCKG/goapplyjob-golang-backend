@@ -1030,18 +1030,44 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		if companyErr != nil {
 			return processed, companyErr
 		}
+		createdAtSourceValue := formatNullableTime(sourceCreatedAt)
 		if duplicateID, isDuplicate, duplicateErr := s.findDuplicateCrossSourceParsedJob(ctx, row.id, row.source, payload, companyID); duplicateErr != nil {
 			return processed, duplicateErr
 		} else if isDuplicate {
-			log.Printf("parsed-job-worker duplicate_cross_source_skip raw_job_id=%d source=%s duplicate_parsed_job_id=%d", row.id, row.source, duplicateID)
-			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
-				_, execErr := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true WHERE id = ?`, row.id)
-				return execErr
-			}); err != nil {
-				return processed, err
+			if strings.EqualFold(strings.TrimSpace(row.source), sourceRemoteRocketship) {
+				var previousCreatedAt sql.NullTime
+				if err := s.DB.SQL.QueryRowContext(ctx, `SELECT created_at_source FROM parsed_jobs WHERE id = ? LIMIT 1`, duplicateID).Scan(&previousCreatedAt); err != nil {
+					return processed, err
+				}
+				if previousCreatedAt.Valid {
+					createdAtSourceValue = formatNullableTime(&previousCreatedAt.Time)
+				}
+				if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+					_, execErr := s.DB.SQL.ExecContext(
+						ctx,
+						`UPDATE parsed_jobs
+						 SET raw_us_job_id = ?, updated_at = ?
+						 WHERE id = ?`,
+						row.id,
+						time.Now().UTC().Format(time.RFC3339Nano),
+						duplicateID,
+					)
+					return execErr
+				}); err != nil {
+					return processed, err
+				}
+				log.Printf("parsed-job-worker duplicate_replaced existing_parsed_id=%d raw_job_id=%d source=%s", duplicateID, row.id, row.source)
+			} else {
+				log.Printf("parsed-job-worker duplicate_cross_source_skip raw_job_id=%d source=%s duplicate_parsed_job_id=%d", row.id, row.source, duplicateID)
+				if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+					_, execErr := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true WHERE id = ?`, row.id)
+					return execErr
+				}); err != nil {
+					return processed, err
+				}
+				processed++
+				continue
 			}
-			processed++
-			continue
 		}
 		err = database.RetryLocked(8, 50*time.Millisecond, func() error {
 			_, execErr := s.DB.SQL.ExecContext(
@@ -1066,7 +1092,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				row.id,
 				companyID,
 				stringFromPayload(payload["id"]),
-				formatNullableTime(sourceCreatedAt),
+				createdAtSourceValue,
 				stringFromPayload(payload["url"]),
 				categorizedTitle,
 				categorizedFunction,

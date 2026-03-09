@@ -541,3 +541,88 @@ func TestFindDuplicateCrossSourceParsedJobByExternalID(t *testing.T) {
 		t.Fatalf("expected duplicate by external id, got duplicate=%v id=%d", isDuplicate, duplicateID)
 	}
 }
+
+func TestProcessPendingRemoterocketshipDuplicateReplacementKeepsCreatedAtSource(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_remoterocketship_duplicate_keep_created_at_source"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	originalCreatedAtSource := time.Date(2026, 2, 17, 0, 0, 0, 0, time.UTC)
+	newPayloadCreatedAt := time.Date(2026, 2, 18, 0, 0, 0, 0, time.UTC)
+
+	_, err = db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
+		 VALUES (1, 'builtin', 'https://builtin.example/jobs/abc', ?, true, false, true, 0, '{}')`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO parsed_jobs (id, raw_us_job_id, url, role_title, categorized_job_title, categorized_job_function, created_at_source, updated_at)
+		 VALUES (1, 1, 'https://remote.example/jobs/abc', 'Backend Engineer', 'Backend Engineer', 'Engineering', ?, ?)`,
+		originalCreatedAtSource.Format(time.RFC3339Nano),
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"id":                     "remote-abc",
+		"url":                    "https://remote.example/jobs/abc",
+		"roleTitle":              "Backend Engineer",
+		"categorizedJobTitle":    "Backend Engineer",
+		"categorizedJobFunction": "Engineering",
+		"jobDescriptionSummary":  "Updated from remoterocketship",
+		"created_at":             newPayloadCreatedAt.Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
+		 VALUES (2, 'remoterocketship', 'https://remoterocketship.example/jobs/abc', ?, true, false, false, 0, ?)`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		string(payload),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(db)
+	if _, err := svc.ProcessPending(context.Background(), 10); err != nil {
+		t.Fatal(err)
+	}
+
+	var count int
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM parsed_jobs`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected single parsed row after duplicate replacement, got %d", count)
+	}
+
+	var rawUSJobID int64
+	var createdAtSource sql.NullTime
+	if err := db.SQL.QueryRowContext(
+		context.Background(),
+		`SELECT raw_us_job_id, created_at_source FROM parsed_jobs WHERE id = 1`,
+	).Scan(&rawUSJobID, &createdAtSource); err != nil {
+		t.Fatal(err)
+	}
+	if rawUSJobID != 2 {
+		t.Fatalf("expected parsed row to be rebound to remoterocketship raw job, got raw_us_job_id=%d", rawUSJobID)
+	}
+	if !createdAtSource.Valid {
+		t.Fatal("expected created_at_source to remain set")
+	}
+	if !createdAtSource.Time.UTC().Equal(originalCreatedAtSource) {
+		t.Fatalf("expected created_at_source=%s, got %s", originalCreatedAtSource.Format(time.RFC3339Nano), createdAtSource.Time.UTC().Format(time.RFC3339Nano))
+	}
+}
