@@ -318,7 +318,8 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 			postDate := row.PostDate
 			var existingID int64
 			var existingPostDate string
-			err := tx.QueryRow(`SELECT id, post_date FROM raw_us_jobs WHERE source = ? AND url = ? LIMIT 1`, source, url).Scan(&existingID, &existingPostDate)
+			var existingRawJSON sql.NullString
+			err := tx.QueryRow(`SELECT id, post_date, raw_json FROM raw_us_jobs WHERE url = ? LIMIT 1`, url).Scan(&existingID, &existingPostDate, &existingRawJSON)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				failedDB++
 				failedRows[url] = row
@@ -342,7 +343,8 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 			}
 
 			existingDT, err := normalizeDBDatetime(existingPostDate)
-			if err == nil && !postDate.After(existingDT) {
+			hasExistingRawJSON := existingRawJSON.Valid && strings.TrimSpace(existingRawJSON.String) != ""
+			if err == nil && !postDate.After(existingDT) && hasExistingRawJSON {
 				continue
 			}
 			pendingUpdates = append(pendingUpdates, pendingUpdate{
@@ -392,18 +394,22 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 					continue
 				}
 			}
-			if _, err := tx.Exec(`DELETE FROM raw_us_jobs WHERE id = ?`, candidate.existingID); err != nil {
-				failedDB++
-				failedRows[candidate.url] = candidate.row
-				continue
-			}
 			if _, err := tx.Exec(
-				`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, retry_count, raw_json) VALUES (?, ?, ?, ?, false, 0, ?)`,
+				`UPDATE raw_us_jobs
+				 SET source = ?,
+				     post_date = ?,
+				     is_ready = ?,
+				     is_skippable = false,
+				     is_parsed = false,
+				     retry_count = 0,
+				     raw_json = ?
+				 WHERE id = ?`,
 				source,
 				candidate.url,
 				candidate.row.PostDate.Format(time.RFC3339),
 				candidate.isReady,
 				candidate.rawJSONText,
+				candidate.existingID,
 			); err != nil {
 				failedDB++
 				failedRows[candidate.url] = candidate.row

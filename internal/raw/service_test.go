@@ -159,6 +159,65 @@ func TestProcessPendingSkipsReadyWhenParserRequestsRetry(t *testing.T) {
 	}
 }
 
+func TestProcessPendingSkipsNonUSAndMarksRowSkippable(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_raw_non_us_skip"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, extra_json, raw_json)
+		 VALUES ('remoterocketship', 'https://remote.example/job/non-us', '2026-02-12T10:00:00Z', false, false, false, 0, '{"foo":"bar"}', NULL)`,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(db)
+	svc.ReadHTML = func(targetURL string) (string, int, error) {
+		return "<html></html>", 200, nil
+	}
+	svc.ParseHTML = func(html string) (map[string]any, error) {
+		return map[string]any{
+			"_skip_for_non_us":  true,
+			"locationCountries": []string{"Canada"},
+		}, nil
+	}
+
+	processed, err := svc.ProcessPending(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected one processed job, got %d", processed)
+	}
+
+	var isReady, isSkippable, isParsed bool
+	var retryCount int
+	var rawJSON, extraJSON sql.NullString
+	if err := db.SQL.QueryRowContext(
+		context.Background(),
+		`SELECT is_ready, is_skippable, is_parsed, retry_count, raw_json, extra_json
+		 FROM raw_us_jobs WHERE url = 'https://remote.example/job/non-us'`,
+	).Scan(&isReady, &isSkippable, &isParsed, &retryCount, &rawJSON, &extraJSON); err != nil {
+		t.Fatal(err)
+	}
+	if !isReady || !isSkippable {
+		t.Fatalf("expected row ready+skippable, got is_ready=%t is_skippable=%t", isReady, isSkippable)
+	}
+	if isParsed {
+		t.Fatalf("expected row not parsed")
+	}
+	if retryCount != 0 {
+		t.Fatalf("expected retry_count unchanged, got %d", retryCount)
+	}
+	if rawJSON.Valid || extraJSON.Valid {
+		t.Fatalf("expected raw_json/extra_json cleared, got raw_json=%#v extra_json=%#v", rawJSON, extraJSON)
+	}
+}
+
 func TestProcessPendingSkipsRemainingSourceJobsAfter429(t *testing.T) {
 	db, err := database.Open(testDatabaseURL(t, "test_raw_429_throttle"))
 	if err != nil {

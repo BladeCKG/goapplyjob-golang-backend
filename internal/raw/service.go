@@ -245,6 +245,27 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				processed++
 				continue
 			}
+			if skipNonUS, _ := payload["_skip_for_non_us"].(bool); skipNonUS {
+				log.Printf("raw-us-job-worker parse_skipped_non_us job_id=%d source=%s", job.id, job.source)
+				if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+					_, err := s.DB.SQL.ExecContext(
+						ctx,
+						`UPDATE raw_us_jobs
+						 SET is_ready = true,
+						     is_skippable = true,
+						     is_parsed = false,
+						     raw_json = NULL,
+						     extra_json = NULL
+						 WHERE id = ?`,
+						job.id,
+					)
+					return err
+				}); err != nil {
+					return processed, err
+				}
+				processed++
+				continue
+			}
 			if _, ok := payload["url"]; !ok {
 				payload["url"] = job.url
 			}
