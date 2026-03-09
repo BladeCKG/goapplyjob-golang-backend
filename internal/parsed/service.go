@@ -44,7 +44,8 @@ var workModeNoiseTokens = map[string]struct{}{
 }
 
 var genericCategoryMatchTokens = map[string]struct{}{
-	"accountant": {}, "administrator": {}, "engineer": {}, "developer": {}, "manager": {}, "specialist": {}, "consultant": {}, "analyst": {}, "architect": {}, "designer": {}, "director": {}, "producer": {}, "writer": {}, "support": {}, "operations": {}, "web": {}, "remote": {}, "lead": {}, "staff": {},
+	"and": {}, "accountant": {}, "account": {}, "administrator": {}, "engineer": {}, "developer": {}, "manager": {}, "specialist": {}, "consultant": {}, "analyst": {}, "architect": {}, "designer": {}, "director": {}, "producer": {}, "writer": {}, "support": {}, "operations": {}, "web": {}, "remote": {}, "lead": {}, "staff": {},
+	"executive": {}, "sales": {}, "marketing": {}, "product": {}, "business": {}, "customer": {}, "success": {}, "representative": {}, "technical": {}, "project": {}, "program": {}, "data": {}, "software": {}, "solutions": {}, "content": {}, "security": {},
 }
 
 var countryAliases = map[string]string{
@@ -145,10 +146,15 @@ var normalizationReplacements = []struct {
 	pattern     *regexp.Regexp
 	replacement string
 }{
+	{pattern: regexp.MustCompile(`\bai\b`), replacement: "artificial intelligence"},
+	{pattern: regexp.MustCompile(`\bml\b`), replacement: "machine learning"},
 	{pattern: regexp.MustCompile(`\bdev[\s\-]*ops\b`), replacement: "devops"},
 	{pattern: regexp.MustCompile(`\bdev\b`), replacement: "developer"},
 	{pattern: regexp.MustCompile(`\bbdr\b`), replacement: "business development representative"},
 	{pattern: regexp.MustCompile(`\bsdr\b`), replacement: "sales development representative"},
+	{pattern: regexp.MustCompile(`\bae\b`), replacement: "account executive"},
+	{pattern: regexp.MustCompile(`\bcsm\b`), replacement: "customer success manager"},
+	{pattern: regexp.MustCompile(`\bqa\b`), replacement: "quality assurance"},
 	{pattern: regexp.MustCompile(`\bswe\b`), replacement: "software engineer"},
 	{pattern: regexp.MustCompile(`\bvp\b`), replacement: "vice president"},
 	{pattern: regexp.MustCompile(`\bta\b`), replacement: "talent acquisition"},
