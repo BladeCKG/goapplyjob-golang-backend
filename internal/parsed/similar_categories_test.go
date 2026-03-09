@@ -57,7 +57,7 @@ func insertSimilarCategoryCandidate(
 }
 
 func TestFindSimilarRemoteCategoriesNoSignalReturnsEmpty(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_similar_categories_no_signal"))
+	db, err := database.Open(testDatabaseURL(t, "simcat_no_signal"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestFindSimilarRemoteCategoriesNoSignalReturnsEmpty(t *testing.T) {
 }
 
 func TestFindSimilarRemoteCategoriesPrefersOrderedCategoryTokens(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_similar_categories_ordered"))
+	db, err := database.Open(testDatabaseURL(t, "simcat_ordered"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestFindSimilarRemoteCategoriesPrefersOrderedCategoryTokens(t *testing.T) {
 }
 
 func TestFindSimilarRemoteCategoriesAcceptsOutOfOrderTokens(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_similar_categories_out_of_order"))
+	db, err := database.Open(testDatabaseURL(t, "simcat_out_of_order"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestFindSimilarRemoteCategoriesAcceptsOutOfOrderTokens(t *testing.T) {
 }
 
 func TestFindSimilarRemoteCategoriesRejectsLowInformationPartialMatch(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_similar_categories_partial_reject"))
+	db, err := database.Open(testDatabaseURL(t, "simcat_partial_reject"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestFindSimilarRemoteCategoriesRejectsLowInformationPartialMatch(t *testing
 }
 
 func TestFindSimilarRemoteCategoriesIgnoresSeniorityAndEmploymentNoise(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_similar_categories_noise_tokens"))
+	db, err := database.Open(testDatabaseURL(t, "simcat_noise_tokens"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestFindSimilarRemoteCategoriesIgnoresSeniorityAndEmploymentNoise(t *testin
 }
 
 func TestFindSimilarRemoteCategoriesScansBeyondFirstThousandCandidates(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_similar_categories_scan_window"))
+	db, err := database.Open(testDatabaseURL(t, "simcat_scan_window"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestFindSimilarRemoteCategoriesScansBeyondFirstThousandCandidates(t *testin
 }
 
 func TestFindSimilarRemoteCategoriesPrefersSpecificAccountManagerOverGenericManager(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_similar_categories_specific_manager"))
+	db, err := database.Open(testDatabaseURL(t, "simcat_specific_manager"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestFindSimilarRemoteCategoriesPrefersSpecificAccountManagerOverGenericMana
 }
 
 func TestFindSimilarRemoteCategoriesUsesTechStackToBreakTie(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_similar_categories_tech_tiebreak"))
+	db, err := database.Open(testDatabaseURL(t, "simcat_tech_tiebreak"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestFindSimilarRemoteCategoriesUsesTechStackToBreakTie(t *testing.T) {
 }
 
 func TestFindSimilarRemoteCategoriesFallsBackWhenTechStackFilteredSetEmpty(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_similar_categories_tech_fallback"))
+	db, err := database.Open(testDatabaseURL(t, "simcat_tech_fallback"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestFindSimilarRemoteCategoriesFallsBackWhenTechStackFilteredSetEmpty(t *te
 }
 
 func TestFindSimilarRemoteCategoriesAvoidsGenericEngineerWhenSpecificExists(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_similar_categories_generic_vs_specific"))
+	db, err := database.Open(testDatabaseURL(t, "simcat_generic_vs_specific"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestFindSimilarRemoteCategoriesAvoidsGenericEngineerWhenSpecificExists(t *t
 }
 
 func TestFindSimilarRemoteCategoriesUsesFunctionOverlapAsTieBreaker(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_similar_categories_function_overlap"))
+	db, err := database.Open(testDatabaseURL(t, "simcat_function_overlap"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +283,7 @@ func TestFindSimilarRemoteCategoriesUsesFunctionOverlapAsTieBreaker(t *testing.T
 }
 
 func TestFindSimilarRemoteCategoriesPrefersImplementationEngineerOverEngineer(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_similar_categories_impl_over_generic"))
+	db, err := database.Open(testDatabaseURL(t, "simcat_impl_over_generic"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +304,7 @@ func TestFindSimilarRemoteCategoriesPrefersImplementationEngineerOverEngineer(t 
 }
 
 func TestFindSimilarRemoteCategoriesExactTitlePathUsesSkillOverlapTieBreaker(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_similar_categories_exact_title_skill_tie"))
+	db, err := database.Open(testDatabaseURL(t, "simcat_exact_title_skill_tie"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestFindSimilarRemoteCategoriesExactTitlePathUsesSkillOverlapTieBreaker(t *
 }
 
 func TestFindSimilarRemoteCategoriesExactTitleSkipsGenericOneWordWhenSourceHasSpecificTokens(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_similar_categories_exact_title_skip_generic_one_word"))
+	db, err := database.Open(testDatabaseURL(t, "simcat_exact_title_skip_generic"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestFindSimilarRemoteCategoriesExactTitleSkipsGenericOneWordWhenSourceHasSp
 }
 
 func TestFindSimilarRemoteCategoriesDoesNotScanBeyondMaxRows(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_similar_categories_scan_cap"))
+	db, err := database.Open(testDatabaseURL(t, "simcat_scan_cap"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +373,7 @@ func TestFindSimilarRemoteCategoriesDoesNotScanBeyondMaxRows(t *testing.T) {
 }
 
 func TestFindSimilarRemoteCategoriesConfidenceGateRejectsWeakOverlap(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_similar_categories_confidence_reject"))
+	db, err := database.Open(testDatabaseURL(t, "simcat_conf_reject"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +394,7 @@ func TestFindSimilarRemoteCategoriesConfidenceGateRejectsWeakOverlap(t *testing.
 }
 
 func TestFindSimilarRemoteCategoriesDirectMatchWinsOverHigherRecency(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_similar_categories_direct_match_precedence"))
+	db, err := database.Open(testDatabaseURL(t, "simcat_direct_match_precedence"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +417,7 @@ func TestFindSimilarRemoteCategoriesDirectMatchWinsOverHigherRecency(t *testing.
 }
 
 func TestFindSimilarRemoteCategoriesConfidenceGateAcceptsWithSpecificSignal(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_similar_categories_confidence_accept_specific"))
+	db, err := database.Open(testDatabaseURL(t, "simcat_conf_accept_specific"))
 	if err != nil {
 		t.Fatal(err)
 	}

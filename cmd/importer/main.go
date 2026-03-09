@@ -7,10 +7,16 @@ import (
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/importer"
+	"goapplyjob-golang-backend/internal/workerlog"
 )
 
 func main() {
 	_ = config.LoadDotEnvIfExists(".env")
+	closeLogFile, err := workerlog.Setup("RAW_IMPORT_LOG_FILE", "raw_import_worker.log")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() { _ = closeLogFile() }()
 	cfg := config.Load()
 	db, err := database.Open(cfg.DatabaseURL)
 	if err != nil {

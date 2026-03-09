@@ -10,3 +10,6 @@ app.db-journal
 app.db-wal
 app.db-shm
 .env
+logs/
+*_worker.log
+recheck_skippable_jobs.log
