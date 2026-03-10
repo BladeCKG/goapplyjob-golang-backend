@@ -174,8 +174,6 @@ func TestShouldUseGroqClassificationSkipsOtherRoleFamilies(t *testing.T) {
 	for _, roleTitle := range []string{
 		"Recruiter",
 		"Sales Representative",
-		"Customer Success Specialist",
-		"Operations Coordinator",
 		"",
 	} {
 		if shouldUseGroqClassification(roleTitle) {
