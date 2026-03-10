@@ -321,6 +321,58 @@ func TestProcessPendingMarks404AsTerminalSkip(t *testing.T) {
 	}
 }
 
+func TestProcessPendingMarksDailyRemote410GoneAsTerminalSkip(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_raw_dailyremote_410_terminal_skip"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, extra_json, raw_json)
+		 VALUES ('dailyremote', 'https://dailyremote.com/remote-job/test-410', '2026-02-12T10:00:00Z', false, false, true, 0, '{"foo":"bar"}', '{"old":"payload"}')`,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(db)
+	svc.EnabledSources = map[string]struct{}{"dailyremote": {}}
+	svc.ReadHTML = func(targetURL string) (string, int, error) {
+		_ = targetURL
+		return "<html><body>Job No Longer Available</body></html>", 410, nil
+	}
+
+	processed, err := svc.ProcessPending(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected one processed job, got %d", processed)
+	}
+
+	var isReady, isSkippable, isParsed bool
+	var retryCount int
+	var rawJSON, extraJSON sql.NullString
+	if err := db.SQL.QueryRowContext(
+		context.Background(),
+		`SELECT is_ready, is_skippable, is_parsed, retry_count, raw_json, extra_json
+		 FROM raw_us_jobs WHERE url = 'https://dailyremote.com/remote-job/test-410'`,
+	).Scan(&isReady, &isSkippable, &isParsed, &retryCount, &rawJSON, &extraJSON); err != nil {
+		t.Fatal(err)
+	}
+	if !isReady || !isSkippable || isParsed {
+		t.Fatalf("unexpected state is_ready=%t is_skippable=%t is_parsed=%t", isReady, isSkippable, isParsed)
+	}
+	if retryCount != 0 {
+		t.Fatalf("expected retry_count unchanged, got %d", retryCount)
+	}
+	if rawJSON.Valid || extraJSON.Valid {
+		t.Fatalf("expected raw_json/extra_json cleared, got raw_json=%#v extra_json=%#v", rawJSON, extraJSON)
+	}
+}
+
 func TestProcessPendingBuiltinRemovedIsTerminalSkipWithoutRetryIncrement(t *testing.T) {
 	db, err := database.Open(testDatabaseURL(t, "test_raw_builtin_removed_terminal_skip"))
 	if err != nil {

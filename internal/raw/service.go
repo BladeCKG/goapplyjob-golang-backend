@@ -17,11 +17,14 @@ import (
 )
 
 const statusNotFound = 404
+const statusGone = 410
 const statusTooManyRequests = 429
 const (
 	sourceRemoteRocketship = "remoterocketship"
 	sourceBuiltin          = "builtin"
+	sourceDailyRemote      = "dailyremote"
 	builtinRemovedText     = "sorry, this job was removed"
+	dailyRemoteGoneText    = "job no longer available"
 )
 
 type ReadHTMLFunc func(string) (string, int, error)
@@ -113,6 +116,13 @@ func isRemovedBuiltinJobHTML(source, html string) bool {
 	return strings.Contains(strings.ToLower(html), builtinRemovedText)
 }
 
+func isDailyRemoteGoneJobHTML(source, html string) bool {
+	if strings.ToLower(strings.TrimSpace(source)) != sourceDailyRemote {
+		return false
+	}
+	return strings.Contains(strings.ToLower(html), dailyRemoteGoneText)
+}
+
 func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error) {
 	if batchSize <= 0 {
 		batchSize = 100
@@ -189,6 +199,24 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		switch {
 		case statusCode == statusNotFound:
 			log.Printf("raw-us-job-worker fetch_result job_id=%d status=404", job.id)
+			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+				_, err := s.DB.SQL.ExecContext(
+					ctx,
+					`UPDATE raw_us_jobs
+					 SET is_ready = true,
+					     is_skippable = true,
+					     is_parsed = false,
+					     raw_json = NULL,
+					     extra_json = NULL
+					 WHERE id = ?`,
+					job.id,
+				)
+				return err
+			}); err != nil {
+				return processed, err
+			}
+		case statusCode == statusGone && isDailyRemoteGoneJobHTML(job.source, html):
+			log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s status=410 detected_no_longer_available", job.id, job.source)
 			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
 				_, err := s.DB.SQL.ExecContext(
 					ctx,
