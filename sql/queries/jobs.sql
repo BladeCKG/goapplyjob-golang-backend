@@ -130,8 +130,17 @@ WHERE
 	OR lower(trim(COALESCE(p.categorized_job_function, ''))) = ANY(sqlc.arg(title_exact_terms)::text[])
 	OR lower(trim(COALESCE(p.role_title, ''))) = ANY(sqlc.arg(title_exact_terms)::text[])
 	OR p.categorized_job_title ILIKE ANY(sqlc.arg(title_like_patterns)::text[])
-	OR p.categorized_job_function ILIKE ANY(sqlc.arg(title_like_patterns)::text[])
 	OR p.role_title ILIKE ANY(sqlc.arg(title_like_patterns)::text[])
+	OR EXISTS (
+		SELECT 1
+		FROM jsonb_array_elements(sqlc.arg(title_token_groups_json)::jsonb) AS grp(tokens)
+		WHERE jsonb_array_length(grp.tokens) > 0
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM jsonb_array_elements_text(grp.tokens) AS tok(token)
+			WHERE COALESCE(p.role_title, '') NOT ILIKE ('%%' || tok.token || '%%')
+		  )
+	)
 )
 AND (
 	sqlc.arg(company_filter)::text = ''
@@ -264,8 +273,17 @@ WHERE
 	OR lower(trim(COALESCE(p.categorized_job_function, ''))) = ANY(sqlc.arg(title_exact_terms)::text[])
 	OR lower(trim(COALESCE(p.role_title, ''))) = ANY(sqlc.arg(title_exact_terms)::text[])
 	OR p.categorized_job_title ILIKE ANY(sqlc.arg(title_like_patterns)::text[])
-	OR p.categorized_job_function ILIKE ANY(sqlc.arg(title_like_patterns)::text[])
 	OR p.role_title ILIKE ANY(sqlc.arg(title_like_patterns)::text[])
+	OR EXISTS (
+		SELECT 1
+		FROM jsonb_array_elements(sqlc.arg(title_token_groups_json)::jsonb) AS grp(tokens)
+		WHERE jsonb_array_length(grp.tokens) > 0
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM jsonb_array_elements_text(grp.tokens) AS tok(token)
+			WHERE COALESCE(p.role_title, '') NOT ILIKE ('%%' || tok.token || '%%')
+		  )
+	)
 )
 AND (
 	sqlc.arg(company_filter)::text = ''
@@ -434,13 +452,22 @@ WITH filtered AS (
 		NOT sqlc.arg(has_title_filters)::boolean
 		OR p.categorized_job_title = ANY(sqlc.arg(job_categories)::text[])
 		OR p.categorized_job_function = ANY(sqlc.arg(job_functions)::text[])
-		OR lower(trim(COALESCE(p.categorized_job_title, ''))) = ANY(sqlc.arg(title_exact_terms)::text[])
-		OR lower(trim(COALESCE(p.categorized_job_function, ''))) = ANY(sqlc.arg(title_exact_terms)::text[])
-		OR lower(trim(COALESCE(p.role_title, ''))) = ANY(sqlc.arg(title_exact_terms)::text[])
-		OR p.categorized_job_title ILIKE ANY(sqlc.arg(title_like_patterns)::text[])
-		OR p.categorized_job_function ILIKE ANY(sqlc.arg(title_like_patterns)::text[])
-		OR p.role_title ILIKE ANY(sqlc.arg(title_like_patterns)::text[])
+	OR lower(trim(COALESCE(p.categorized_job_title, ''))) = ANY(sqlc.arg(title_exact_terms)::text[])
+	OR lower(trim(COALESCE(p.categorized_job_function, ''))) = ANY(sqlc.arg(title_exact_terms)::text[])
+	OR lower(trim(COALESCE(p.role_title, ''))) = ANY(sqlc.arg(title_exact_terms)::text[])
+	OR p.categorized_job_title ILIKE ANY(sqlc.arg(title_like_patterns)::text[])
+	OR p.role_title ILIKE ANY(sqlc.arg(title_like_patterns)::text[])
+	OR EXISTS (
+		SELECT 1
+		FROM jsonb_array_elements(sqlc.arg(title_token_groups_json)::jsonb) AS grp(tokens)
+		WHERE jsonb_array_length(grp.tokens) > 0
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM jsonb_array_elements_text(grp.tokens) AS tok(token)
+			WHERE COALESCE(p.role_title, '') NOT ILIKE ('%%' || tok.token || '%%')
+		  )
 	)
+)
 	AND (
 		sqlc.arg(company_filter)::text = ''
 		OR EXISTS (

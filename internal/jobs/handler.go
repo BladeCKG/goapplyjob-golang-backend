@@ -737,6 +737,7 @@ func (h *Handler) listJobs(c *gin.Context) {
 		JobFunctions:           filterInput.JobFunctions,
 		TitleExactTerms:        filterInput.TitleExactTerms,
 		TitleLikePatterns:      filterInput.TitleLikePatterns,
+		TitleTokenGroupsJson:   filterInput.TitleTokenGroupsJSON,
 		HasStructuredLocation:  filterInput.HasStructuredLocation,
 		UsStates:               filterInput.USStates,
 		Countries:              filterInput.Countries,
@@ -784,6 +785,7 @@ func (h *Handler) listJobs(c *gin.Context) {
 		JobFunctions:           filterInput.JobFunctions,
 		TitleExactTerms:        filterInput.TitleExactTerms,
 		TitleLikePatterns:      filterInput.TitleLikePatterns,
+		TitleTokenGroupsJson:   filterInput.TitleTokenGroupsJSON,
 		CompanyFilter:          filterInput.CompanyFilter,
 		HasStructuredLocation:  filterInput.HasStructuredLocation,
 		UsStates:               filterInput.USStates,
@@ -855,6 +857,7 @@ func (h *Handler) metrics(c *gin.Context) {
 		JobFunctions:           filterInput.JobFunctions,
 		TitleExactTerms:        filterInput.TitleExactTerms,
 		TitleLikePatterns:      filterInput.TitleLikePatterns,
+		TitleTokenGroupsJson:   filterInput.TitleTokenGroupsJSON,
 		CompanyFilter:          filterInput.CompanyFilter,
 		HasStructuredLocation:  filterInput.HasStructuredLocation,
 		UsStates:               filterInput.USStates,
@@ -1102,6 +1105,7 @@ type listingFilterInput struct {
 	JobFunctions           []string
 	TitleExactTerms        []string
 	TitleLikePatterns      []string
+	TitleTokenGroupsJSON   []byte
 	CompanyFilter          string
 	HasStructuredLocation  bool
 	USStates               []string
@@ -1133,6 +1137,7 @@ func (h *Handler) buildListingFilterInput(c *gin.Context, currentUser *auth.User
 		JobFunctions:           []string{},
 		TitleExactTerms:        []string{},
 		TitleLikePatterns:      []string{},
+		TitleTokenGroupsJSON:   []byte("[]"),
 		USStates:               []string{},
 		Countries:              []string{},
 		LocationPatterns:       []string{},
@@ -1161,18 +1166,23 @@ func (h *Handler) buildListingFilterInput(c *gin.Context, currentUser *auth.User
 	if len(titleValues) == 0 {
 		titleValues = parseCSVQuery(c.Query("job_title"))
 	}
+	titleTokenGroups := make([][]string, 0, len(titleValues))
 	for _, title := range uniqueStrings(titleValues) {
 		normalizedTitle := strings.TrimSpace(title)
 		if normalizedTitle == "" {
 			continue
 		}
+		input.TitleExactTerms = append(input.TitleExactTerms, strings.ToLower(normalizedTitle))
 		input.TitleLikePatterns = append(input.TitleLikePatterns, "%"+normalizedTitle+"%")
-		for _, token := range tokenizeTitleSearchText(normalizedTitle) {
-			input.TitleLikePatterns = append(input.TitleLikePatterns, "%"+token+"%")
+		if tokens := uniqueStrings(tokenizeTitleSearchText(normalizedTitle)); len(tokens) > 0 {
+			titleTokenGroups = append(titleTokenGroups, tokens)
 		}
 	}
-	input.TitleExactTerms = []string{}
+	input.TitleExactTerms = uniqueStrings(input.TitleExactTerms)
 	input.TitleLikePatterns = uniqueStrings(input.TitleLikePatterns)
+	if payload, err := json.Marshal(titleTokenGroups); err == nil {
+		input.TitleTokenGroupsJSON = payload
+	}
 	input.HasTitleFilters = len(input.JobCategories) > 0 || len(input.JobFunctions) > 0 || len(input.TitleExactTerms) > 0 || len(input.TitleLikePatterns) > 0
 
 	for _, state := range uniqueStrings(parseCSVQuery(c.Query("us_states"))) {

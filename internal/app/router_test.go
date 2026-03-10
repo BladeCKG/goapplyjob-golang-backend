@@ -911,6 +911,62 @@ func TestJobsCategoryFunctionAndTitleFiltersCombineAsOR(t *testing.T) {
 	}
 }
 
+func TestJobsJobTitlesFilterDoesNotMatchSingleTokenOnly(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJobWithFunction(t, db, 8701, "Product Manager", "Product", "Product Manager")
+	insertJobWithFunction(t, db, 8702, "Product Designer", "Design", "Product Designer")
+	insertJobWithFunction(t, db, 8703, "Engineering Manager", "Engineering", "Engineering Manager")
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?job_titles=Product+Manager&per_page=50", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	if body["total"].(float64) != 1 {
+		t.Fatalf("expected exact title phrase filter to match only one job, got %#v", body)
+	}
+	items := body["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("expected one item, got %#v", body)
+	}
+	item := items[0].(map[string]any)
+	if item["role_title"].(string) != "Product Manager" {
+		t.Fatalf("unexpected item for job_titles filter %#v", item)
+	}
+}
+
+func TestJobsJobTitlesFilterMatchesRoleTitleWhenAllTokensExist(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJobWithFunction(t, db, 8711, "Growth Lead", "Growth", "Senior Product Growth Manager")
+	insertJobWithFunction(t, db, 8712, "Product Designer", "Design", "Senior Product Designer")
+	insertJobWithFunction(t, db, 8713, "Engineering Manager", "Engineering", "Engineering Manager")
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?job_titles=Product+Manager&per_page=50", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	if body["total"].(float64) != 1 {
+		t.Fatalf("expected token-group title filter to match one role_title row, got %#v", body)
+	}
+	items := body["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("expected one item, got %#v", body)
+	}
+	item := items[0].(map[string]any)
+	if item["role_title"].(string) != "Senior Product Growth Manager" {
+		t.Fatalf("unexpected item for token-group title filter %#v", item)
+	}
+}
+
 func TestJobsUserJobActionNotAppliedExcludesAppliedAndHidden(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
