@@ -3,6 +3,7 @@ package admin
 import (
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestBuildColumnFilterSQLParsesBoolValues(t *testing.T) {
@@ -86,8 +87,15 @@ func TestBuildColumnFilterSQLParsesDateTimeValues(t *testing.T) {
 	if sql != "post_date >= ?" {
 		t.Fatalf("unexpected sql: %q", sql)
 	}
-	if !reflect.DeepEqual(args, []any{"2026-03-01T00:00:00Z"}) {
-		t.Fatalf("unexpected args: %#v", args)
+	if len(args) != 1 {
+		t.Fatalf("expected one arg, got %d", len(args))
+	}
+	got, ok := args[0].(time.Time)
+	if !ok {
+		t.Fatalf("expected time.Time arg, got %T (%v)", args[0], args[0])
+	}
+	expected := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	if !got.Equal(expected) {
+		t.Fatalf("unexpected datetime arg: %s", got.UTC().Format(time.RFC3339))
 	}
 }
-

@@ -4,15 +4,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"strconv"
-	"strings"
-	"time"
-
 	"goapplyjob-golang-backend/internal/auth"
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/parsed"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -59,17 +58,53 @@ func (h *Handler) listUsers(c *gin.Context) {
 		return
 	}
 	limit, offset := queryLimitOffset(c, 200, 1000)
+	parsedFilters, err := parseAdminFilters(c.Query("filters"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+
+	filters := []string{}
+	args := []any{}
+	filterDefinitions := map[string]filterDef{
+		"id":                    {columnExpr: "id", valueType: "int"},
+		"email":                 {columnExpr: "email", valueType: "text"},
+		"created_at":            {columnExpr: "created_at", valueType: "datetime"},
+		"last_seen_at":          {columnExpr: "last_seen_at", valueType: "datetime"},
+		"last_job_filters_json": {columnExpr: "last_job_filters_json::text", valueType: "text"},
+	}
+	for _, item := range parsedFilters {
+		def, ok := filterDefinitions[item.Column]
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": "Unsupported user filter column: " + item.Column})
+			return
+		}
+		predicate, predicateArgs, err := buildColumnFilterSQL(def, item)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+			return
+		}
+		filters = append(filters, predicate)
+		args = append(args, predicateArgs...)
+	}
+
 	total := 0
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT COUNT(id) FROM auth_users`).Scan(&total); err != nil {
+	totalQuery := `SELECT COUNT(id) FROM auth_users`
+	query := `SELECT id, email, last_seen_at, last_job_filters_json, created_at
+		 FROM auth_users`
+	if len(filters) > 0 {
+		where := " WHERE " + strings.Join(filters, " AND ")
+		totalQuery += where
+		query += where
+	}
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), totalQuery, args...).Scan(&total); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list users"})
 		return
 	}
 
-	rows, err := h.db.SQL.QueryContext(c.Request.Context(),
-		`SELECT id, email, created_at
-		 FROM auth_users
-		 ORDER BY id DESC
-		 LIMIT ? OFFSET ?`, limit, offset)
+	query += ` ORDER BY id DESC LIMIT ? OFFSET ?`
+	queryArgs := append(append([]any{}, args...), limit, offset)
+	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, queryArgs...)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list users"})
 		return
@@ -79,17 +114,32 @@ func (h *Handler) listUsers(c *gin.Context) {
 	items := make([]gin.H, 0, limit)
 	for rows.Next() {
 		var (
-			id        int64
-			email     string
-			createdAt string
+			id             int64
+			email          string
+			lastSeen       sql.NullString
+			lastJobFilters sql.NullString
+			createdAt      string
 		)
-		if err := rows.Scan(&id, &email, &createdAt); err != nil {
+		if err := rows.Scan(&id, &email, &lastSeen, &lastJobFilters, &createdAt); err != nil {
 			continue
 		}
 		item := gin.H{
-			"id":         id,
-			"email":      email,
-			"created_at": createdAt,
+			"id":                    id,
+			"email":                 email,
+			"created_at":            createdAt,
+			"last_seen_at":          nil,
+			"last_job_filters_json": nil,
+		}
+		if lastSeen.Valid && strings.TrimSpace(lastSeen.String) != "" {
+			item["last_seen_at"] = lastSeen.String
+		}
+		if lastJobFilters.Valid && strings.TrimSpace(lastJobFilters.String) != "" {
+			var parsed any
+			if err := json.Unmarshal([]byte(lastJobFilters.String), &parsed); err == nil {
+				item["last_job_filters_json"] = parsed
+			} else {
+				item["last_job_filters_json"] = lastJobFilters.String
+			}
 		}
 		var (
 			subID       int64
@@ -1221,8 +1271,19 @@ func buildColumnFilterSQL(def filterDef, filter adminColumnFilter) (string, []an
 
 	parseOne := func(value interface{}) (interface{}, error) {
 		switch def.valueType {
-		case "text", "datetime":
+		case "text":
 			return fmt.Sprintf("%v", value), nil
+		case "datetime":
+			switch item := value.(type) {
+			case string:
+				parsed, err := parseTimestamp(item)
+				if err != nil {
+					return nil, fmt.Errorf("Invalid datetime value: %v", value)
+				}
+				return parsed, nil
+			default:
+				return nil, fmt.Errorf("Invalid datetime value: %v", value)
+			}
 		case "int":
 			switch item := value.(type) {
 			case float64:
