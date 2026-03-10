@@ -169,11 +169,6 @@ type Service struct {
 
 func New(db *database.DB) *Service { return &Service{DB: db} }
 
-func (s *Service) SuggestCategory(ctx context.Context, source, roleTitle, roleDescription string, techStack any) (string, string, error) {
-	categorizedTitle, categorizedFunction, _, err := s.SuggestCategoryWithTechStack(ctx, source, roleTitle, roleDescription, techStack)
-	return categorizedTitle, categorizedFunction, err
-}
-
 func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, roleTitle, roleDescription string, techStack any) (string, string, []string, error) {
 	normalizedTechStack := normalizeTechStack(techStack)
 	categorizedTitle := ""
@@ -181,10 +176,22 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, ro
 
 	if len(normalizedTechStack) == 0 {
 		allowedCategories, _ := s.loadAllowedJobCategoriesForGroq(ctx)
-		category, groqRequiredSkills := classifyJobTitleWithGroqSync(roleTitle, roleDescription, allowedCategories)
-		categorizedTitle = strings.TrimSpace(category)
-		if len(groqRequiredSkills) > 0 {
-			normalizedTechStack = normalizeTechStack(groqRequiredSkills)
+		if shouldUseGroqClassification(stringValue(roleTitle)) {
+			groqCategory, groqRequiredSkills := classifyJobTitleWithGroqSync(
+				stringValue(roleTitle),
+				stringValue(roleDescription),
+				allowedCategories,
+			)
+			categorizedTitle = strings.TrimSpace(groqCategory)
+			if len(groqRequiredSkills) > 0 {
+				normalizedTechStack = normalizeTechStack(groqRequiredSkills)
+			}
+		} else {
+			groqCategory := classifyJobCategoryWithGroqSync(
+				stringValue(roleTitle),
+				allowedCategories,
+			)
+			categorizedTitle = strings.TrimSpace(groqCategory)
 		}
 	}
 	if categorizedTitle == "" {
@@ -1454,18 +1461,24 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			}
 		}
 		if inferCategories && categorizedTitle == nil {
-			if len(normalizedTechStack) == 0 && shouldUseGroqClassification(stringValue(payload["roleTitle"])) {
+			if len(normalizedTechStack) == 0 {
 				allowedCategories, _ := s.loadAllowedJobCategoriesForGroq(ctx)
-				groqCategory, groqRequiredSkills := classifyJobTitleWithGroqSync(
-					stringValue(payload["roleTitle"]),
-					stringValue(payload["roleDescription"]),
-					allowedCategories,
-				)
-				if strings.TrimSpace(groqCategory) != "" {
-					categorizedTitle = stringFromPayload(groqCategory)
-				}
-				if len(normalizedTechStack) == 0 && len(groqRequiredSkills) > 0 {
-					normalizedTechStack = normalizeTechStack(groqRequiredSkills)
+				if shouldUseGroqClassification(stringValue(payload["roleTitle"])) {
+					groqCategory, groqRequiredSkills := classifyJobTitleWithGroqSync(
+						stringValue(payload["roleTitle"]),
+						stringValue(payload["roleDescription"]),
+						allowedCategories,
+					)
+					categorizedTitle = strings.TrimSpace(groqCategory)
+					if len(groqRequiredSkills) > 0 {
+						normalizedTechStack = normalizeTechStack(groqRequiredSkills)
+					}
+				} else {
+					groqCategory := classifyJobCategoryWithGroqSync(
+						stringValue(payload["roleTitle"]),
+						allowedCategories,
+					)
+					categorizedTitle = strings.TrimSpace(groqCategory)
 				}
 			}
 			if categorizedTitle == nil {
@@ -2220,14 +2233,14 @@ func (s *Service) findDuplicateCrossSourceParsedJob(ctx context.Context, rawJobI
 	  ORDER BY p.updated_at DESC, p.id DESC
 	  LIMIT 1000`
 
-		// AND (
-		// 	?::timestamptz IS NULL
-		// 	OR (
-		// 		p.created_at_source IS NOT NULL
-		// 		AND p.created_at_source >= ?::timestamptz
-		// 		AND p.created_at_source <= ?::timestamptz
-		// 	)
-		// )
+	// AND (
+	// 	?::timestamptz IS NULL
+	// 	OR (
+	// 		p.created_at_source IS NOT NULL
+	// 		AND p.created_at_source >= ?::timestamptz
+	// 		AND p.created_at_source <= ?::timestamptz
+	// 	)
+	// )
 
 	args := []any{
 		source,

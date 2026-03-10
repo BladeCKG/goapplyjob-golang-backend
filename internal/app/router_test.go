@@ -521,7 +521,7 @@ func TestJobsTitleFilterMatchesExactFunction(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
 
-	insertJobWithFunction(t, db, 61, "Platform Engineering", "backend", "Distributed Systems Lead")
+	insertJobWithFunction(t, db, 61, "Platform Engineering", "backend", "Backend Lead")
 	insertJobWithFunction(t, db, 62, "Data Science", "data", "ML Engineer")
 
 	req := httptest.NewRequest(http.MethodGet, "/jobs?job_title=backend", nil)
@@ -594,7 +594,7 @@ func TestJobsTitleFilterCombinesExactAndFreeTextMatches(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
 
-	insertJobWithFunction(t, db, 74, "Blockchain Engineer", "Web3", "Smart Contract Engineer")
+	insertJobWithFunction(t, db, 74, "Blockchain Engineer", "Web3", "Web3 Smart Contract Engineer")
 	insertJobWithFunction(t, db, 75, "Software Engineer", "Engineering", "Senior Golang Developer")
 
 	req := httptest.NewRequest(http.MethodGet, "/jobs?job_title=web3,golang+developer", nil)
@@ -612,7 +612,7 @@ func TestJobsTitleFilterCombinesExactAndFreeTextMatches(t *testing.T) {
 	for _, item := range items {
 		roles[item.(map[string]any)["role_title"].(string)] = struct{}{}
 	}
-	if _, ok := roles["Smart Contract Engineer"]; !ok {
+	if _, ok := roles["Web3 Smart Contract Engineer"]; !ok {
 		t.Fatalf("missing exact function match %#v", body)
 	}
 	if _, ok := roles["Senior Golang Developer"]; !ok {
@@ -2220,7 +2220,18 @@ func insertJob(t *testing.T, db *database.DB, rawID int, rawURL, city, state str
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, location_countries, location_city, location_us_states, salary_min_usd, salary_max_usd, is_senior, created_at_source, url) VALUES (?, 'Software Engineer', '["United States"]', ?, ?, ?, ?, ?, ?, ?)`, rawID, city, `["`+state+`"]`, salaryMin, salaryMax, boolToInt(isSenior), createdAt.Format(time.RFC3339Nano), "https://jobs.example.com/"+strconv.Itoa(rawID))
+	_, err = db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, role_title, location_countries, location_city, location_us_states, salary_min_usd, salary_max_usd, is_senior, created_at_source, url) VALUES (?, 'Software Engineer', 'Software Engineer', '["United States"]', ?, ?, ?, ?, ?, ?, ?)`,
+		rawID,
+		city,
+		`["`+state+`"]`,
+		salaryMin,
+		salaryMax,
+		boolToInt(isSenior),
+		createdAt.Format(time.RFC3339Nano),
+		"https://jobs.example.com/"+strconv.Itoa(rawID),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2273,9 +2284,9 @@ func insertCSVJob(t *testing.T, db *database.DB, rawID int, title, region string
 		t.Fatal(err)
 	}
 	if salaryType == "yearly" {
-		_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, location_countries, is_mid_level, is_senior, salary_min_usd, salary_type, url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, rawID+2000, title, `["`+region+`"]`, boolToInt(isMid), boolToInt(!isMid), salaryMin, salaryType, "https://jobs.example.com/csv-"+strconv.Itoa(rawID))
+		_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, role_title, location_countries, is_mid_level, is_senior, salary_min_usd, salary_type, url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, rawID+2000, title, title, `["`+region+`"]`, boolToInt(isMid), boolToInt(!isMid), salaryMin, salaryType, "https://jobs.example.com/csv-"+strconv.Itoa(rawID))
 	} else {
-		_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, location_countries, is_mid_level, is_senior, salary_min, salary_type, url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, rawID+2000, title, `["`+region+`"]`, boolToInt(isMid), boolToInt(!isMid), salaryMin, salaryType, "https://jobs.example.com/csv-"+strconv.Itoa(rawID))
+		_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, role_title, location_countries, is_mid_level, is_senior, salary_min, salary_type, url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, rawID+2000, title, title, `["`+region+`"]`, boolToInt(isMid), boolToInt(!isMid), salaryMin, salaryType, "https://jobs.example.com/csv-"+strconv.Itoa(rawID))
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -2316,7 +2327,7 @@ func insertDatedJob(t *testing.T, db *database.DB, rawID int, createdAt time.Tim
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, created_at_source, url) VALUES (?, 'Software Engineer', ?, ?)`, rawID+5000, createdAt.Format(time.RFC3339Nano), "https://jobs.example.com/date-"+strconv.Itoa(rawID))
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, role_title, created_at_source, url) VALUES (?, 'Software Engineer', 'Software Engineer', ?, ?)`, rawID+5000, createdAt.Format(time.RFC3339Nano), "https://jobs.example.com/date-"+strconv.Itoa(rawID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2341,8 +2352,8 @@ func insertJobWithCreatedAt(t *testing.T, db *database.DB, rawID int, category, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, location_countries, created_at_source, url) VALUES (?, ?, ?, ?, ?)`,
-		rawID+7000, category, `["`+location+`"]`, createdAt.Format(time.RFC3339Nano), "https://jobs.example.com/top-"+strconv.Itoa(rawID))
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, role_title, location_countries, created_at_source, url) VALUES (?, ?, ?, ?, ?, ?)`,
+		rawID+7000, category, category, `["`+location+`"]`, createdAt.Format(time.RFC3339Nano), "https://jobs.example.com/top-"+strconv.Itoa(rawID))
 	if err != nil {
 		t.Fatal(err)
 	}

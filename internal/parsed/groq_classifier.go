@@ -57,6 +57,10 @@ func classifyJobTitleWithGroqSync(jobTitle, jobDescription string, allowedCatego
 	return defaultGroqClassifier.classifySync(jobTitle, jobDescription, allowedCategories)
 }
 
+func classifyJobCategoryWithGroqSync(jobTitle string, allowedCategories []string) string {
+	return defaultGroqClassifier.classifyCategoryOnlySync(jobTitle, allowedCategories)
+}
+
 func extractJSONPayload(rawContent string) map[string]any {
 	content := strings.TrimSpace(rawContent)
 	if content == "" {
@@ -109,18 +113,10 @@ func dedupeCleanSkills(raw any) []string {
 	return out
 }
 
-func extractGroqClassification(rawContent string, allowedCategories []string) (string, []string) {
-	payload := extractJSONPayload(rawContent)
-	if len(payload) == 0 {
-		return "", nil
-	}
-
-	category, _ := payload["job_category"].(string)
-	skills := dedupeCleanSkills(payload["required_skills"])
-
+func normalizeGroqCategory(category string, allowedCategories []string) string {
 	normalizedCategory := strings.TrimSpace(category)
 	if normalizedCategory == "" {
-		return "", skills
+		return ""
 	}
 
 	if !containsCaseSensitive(allowedCategories, normalizedCategory) {
@@ -133,11 +129,34 @@ func extractGroqClassification(rawContent string, allowedCategories []string) (s
 			normalizedCategory = ""
 		}
 	}
+
 	if strings.EqualFold(normalizedCategory, "blank") {
-		normalizedCategory = ""
+		return ""
 	}
 
-	return normalizedCategory, skills
+	return normalizedCategory
+}
+
+func extractGroqClassification(rawContent string, allowedCategories []string) (string, []string) {
+	payload := extractJSONPayload(rawContent)
+	if len(payload) == 0 {
+		return "", nil
+	}
+
+	category, _ := payload["job_category"].(string)
+	skills := dedupeCleanSkills(payload["required_skills"])
+
+	return normalizeGroqCategory(category, allowedCategories), skills
+}
+
+func extractGroqCategoryOnly(rawContent string, allowedCategories []string) string {
+	payload := extractJSONPayload(rawContent)
+	if len(payload) == 0 {
+		return ""
+	}
+
+	category, _ := payload["job_category"].(string)
+	return normalizeGroqCategory(category, allowedCategories)
 }
 
 func collectGroqAPIKeys() []string {
@@ -168,24 +187,8 @@ func collectGroqAPIKeys() []string {
 	return keys
 }
 
-func (g *GroqJobClassifier) classifySync(jobTitle, jobDescription string, allowedCategories []string) (string, []string) {
-	normalizedTitle := strings.TrimSpace(jobTitle)
-	if normalizedTitle == "" {
-		return "", nil
-	}
-
-	keys := collectGroqAPIKeys()
-	if len(keys) == 0 || len(allowedCategories) == 0 {
-		return "", nil
-	}
-
-	model := strings.TrimSpace(os.Getenv(envGroqModel))
-	if model == "" {
-		model = defaultGroqModel
-	}
-	description := strings.TrimSpace(jobDescription)
-
-	schema := map[string]any{
+func buildGroqJobClassifierSchema(allowedCategories []string) map[string]any {
+	return map[string]any{
 		"name":   "job_classifier",
 		"strict": true,
 		"schema": map[string]any{
@@ -206,6 +209,43 @@ func (g *GroqJobClassifier) classifySync(jobTitle, jobDescription string, allowe
 			"required": []string{"job_category", "required_skills"},
 		},
 	}
+}
+
+func buildGroqJobCategoryOnlySchema(allowedCategories []string) map[string]any {
+	return map[string]any{
+		"name":   "job_category_classifier",
+		"strict": true,
+		"schema": map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"job_category": map[string]any{
+					"type": "string",
+					"enum": allowedCategories,
+				},
+			},
+			"required": []string{"job_category"},
+		},
+	}
+}
+
+func (g *GroqJobClassifier) classifySync(jobTitle, jobDescription string, allowedCategories []string) (string, []string) {
+	normalizedTitle := strings.TrimSpace(jobTitle)
+	if normalizedTitle == "" {
+		return "", nil
+	}
+
+	keys := collectGroqAPIKeys()
+	if len(keys) == 0 || len(allowedCategories) == 0 {
+		return "", nil
+	}
+
+	model := strings.TrimSpace(os.Getenv(envGroqModel))
+	if model == "" {
+		model = defaultGroqModel
+	}
+	description := strings.TrimSpace(jobDescription)
+	schema := buildGroqJobClassifierSchema(allowedCategories)
 
 	reqPayload := map[string]any{
 		"model": model,
@@ -286,6 +326,100 @@ func (g *GroqJobClassifier) classifySync(jobTitle, jobDescription string, allowe
 	}
 
 	return "", nil
+}
+
+func (g *GroqJobClassifier) classifyCategoryOnlySync(jobTitle string, allowedCategories []string) string {
+	normalizedTitle := strings.TrimSpace(jobTitle)
+	if normalizedTitle == "" {
+		return ""
+	}
+
+	keys := collectGroqAPIKeys()
+	if len(keys) == 0 || len(allowedCategories) == 0 {
+		return ""
+	}
+
+	model := strings.TrimSpace(os.Getenv(envGroqModel))
+	if model == "" {
+		model = defaultGroqModel
+	}
+	schema := buildGroqJobCategoryOnlySchema(allowedCategories)
+
+	reqPayload := map[string]any{
+		"model": model,
+		"messages": []map[string]string{
+			{
+				"role": "system",
+				"content": "You are a strict job classifier. " +
+					"Classify the given job title into exactly one job_category from the schema enum. " +
+					"Use only the job title. " +
+					"Return only schema-compliant JSON.",
+			},
+			{
+				"role":    "user",
+				"content": "Job title:\n" + normalizedTitle,
+			},
+		},
+		"temperature":           0,
+		"max_completion_tokens": 128,
+		"top_p":                 1,
+		"stream":                false,
+		"stop":                  nil,
+		"response_format": map[string]any{
+			"type":        "json_schema",
+			"json_schema": schema,
+		},
+	}
+	body, _ := json.Marshal(reqPayload)
+
+	client := g.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 20 * time.Second}
+	}
+
+	for keyIndex, apiKey := range keys {
+		req, err := http.NewRequest(http.MethodPost, "https://api.groq.com/openai/v1/chat/completions", bytes.NewReader(body))
+		if err != nil {
+			return ""
+		}
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+			continue
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s status=%d", keyIndex, model, resp.StatusCode)
+			resp.Body.Close()
+			continue
+		}
+		rawResp, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
+		resp.Body.Close()
+		if err != nil {
+			log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+			continue
+		}
+		var envelope map[string]any
+		if err := json.Unmarshal(rawResp, &envelope); err != nil {
+			log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+			continue
+		}
+		choices, _ := envelope["choices"].([]any)
+		if len(choices) == 0 {
+			continue
+		}
+		firstChoice, _ := choices[0].(map[string]any)
+		message, _ := firstChoice["message"].(map[string]any)
+		content, _ := message["content"].(string)
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		return extractGroqCategoryOnly(content, allowedCategories)
+	}
+
+	return ""
 }
 
 func containsCaseSensitive(values []string, expected string) bool {
