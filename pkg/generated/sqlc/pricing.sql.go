@@ -116,7 +116,7 @@ func (q *Queries) DeactivateSubscriptionByID(ctx context.Context, id int32) erro
 }
 
 const getActivePricingPlanByCode = `-- name: GetActivePricingPlanByCode :one
-SELECT id, code, name, duration_days, price_usd
+SELECT id, code, name, billing_cycle, duration_days, price_usd
 FROM pricing_plans
 WHERE code = $1
   AND is_active = true
@@ -127,6 +127,7 @@ type GetActivePricingPlanByCodeRow struct {
 	ID           int32  `json:"id"`
 	Code         string `json:"code"`
 	Name         string `json:"name"`
+	BillingCycle string `json:"billing_cycle"`
 	DurationDays int32  `json:"duration_days"`
 	PriceUsd     int32  `json:"price_usd"`
 }
@@ -138,6 +139,7 @@ func (q *Queries) GetActivePricingPlanByCode(ctx context.Context, code string) (
 		&i.ID,
 		&i.Code,
 		&i.Name,
+		&i.BillingCycle,
 		&i.DurationDays,
 		&i.PriceUsd,
 	)
@@ -371,7 +373,7 @@ func (q *Queries) GetPaymentForWebhookByCheckoutID(ctx context.Context, provider
 }
 
 const getPaymentForWebhookByPaymentID = `-- name: GetPaymentForWebhookByPaymentID :one
-SELECT pay.id, pay.user_id, pay.pricing_plan_id, plan.duration_days
+SELECT pay.id, pay.user_id, pay.pricing_plan_id, plan.duration_days, pay.provider_payload
 FROM pricing_payments pay
 JOIN pricing_plans plan ON plan.id = pay.pricing_plan_id
 WHERE pay.id = $1
@@ -379,10 +381,11 @@ LIMIT 1
 `
 
 type GetPaymentForWebhookByPaymentIDRow struct {
-	ID            int32 `json:"id"`
-	UserID        int32 `json:"user_id"`
-	PricingPlanID int32 `json:"pricing_plan_id"`
-	DurationDays  int32 `json:"duration_days"`
+	ID              int32  `json:"id"`
+	UserID          int32  `json:"user_id"`
+	PricingPlanID   int32  `json:"pricing_plan_id"`
+	DurationDays    int32  `json:"duration_days"`
+	ProviderPayload []byte `json:"provider_payload"`
 }
 
 func (q *Queries) GetPaymentForWebhookByPaymentID(ctx context.Context, id int32) (*GetPaymentForWebhookByPaymentIDRow, error) {
@@ -393,6 +396,7 @@ func (q *Queries) GetPaymentForWebhookByPaymentID(ctx context.Context, id int32)
 		&i.UserID,
 		&i.PricingPlanID,
 		&i.DurationDays,
+		&i.ProviderPayload,
 	)
 	return &i, err
 }

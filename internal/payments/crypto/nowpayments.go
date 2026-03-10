@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -24,7 +25,10 @@ func NewNowPaymentsGateway(cfg config.Config) *NowPaymentsGateway {
 func (g *NowPaymentsGateway) CreateInvoice(request InvoiceRequest) (InvoiceResult, error) {
 	payCode := strings.ToLower(strings.TrimSpace(request.PayCurrency))
 	if payCode == "" {
-		payCode = "usdttrc20"
+		payCode = strings.ToLower(strings.TrimSpace(g.cfg.NowPaymentsDefaultPayCurrency))
+		if payCode == "" {
+			payCode = "usdttrc20"
+		}
 	}
 	if strings.TrimSpace(g.cfg.NowPaymentsAPIKey) == "" {
 		return InvoiceResult{
@@ -40,20 +44,82 @@ func (g *NowPaymentsGateway) CreateInvoice(request InvoiceRequest) (InvoiceResul
 			},
 		}, nil
 	}
+
+	endpoint := strings.TrimRight(strings.TrimSpace(g.cfg.NowPaymentsAPIBaseURL), "/") + "/invoice"
+	payload := map[string]any{
+		"price_amount":      request.AmountUSD,
+		"price_currency":    "usd",
+		"order_id":          request.OrderID,
+		"order_description": request.Description,
+		"success_url":       request.SuccessURL,
+		"cancel_url":        request.CancelURL,
+		"is_fixed_rate":     true,
+	}
+	if payCode != "" {
+		payload["pay_currency"] = payCode
+	}
+	if strings.TrimSpace(request.CallbackURL) != "" {
+		payload["ipn_callback_url"] = request.CallbackURL
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return InvoiceResult{}, err
+	}
+	req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(string(body)))
+	if err != nil {
+		return InvoiceResult{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("x-api-key", g.cfg.NowPaymentsAPIKey)
+
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return InvoiceResult{}, fmt.Errorf("NOWPayments request failed: %T", err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return InvoiceResult{}, err
+	}
+	if resp.StatusCode >= http.StatusBadRequest {
+		return InvoiceResult{}, fmt.Errorf("NOWPayments invoice creation failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+
+	payloadResp := map[string]any{}
+	if err := json.Unmarshal(raw, &payloadResp); err != nil {
+		payloadResp = map[string]any{"raw": strings.TrimSpace(string(raw))}
+	}
+	providerID := strings.TrimSpace(fmt.Sprintf("%v", firstAny(
+		payloadResp["id"],
+		payloadResp["invoice_id"],
+		payloadResp["payment_id"],
+		"nowpayments_invoice_"+request.OrderID,
+	)))
+	invoiceURL := strings.TrimSpace(fmt.Sprintf("%v", firstAny(payloadResp["invoice_url"], payloadResp["checkout_url"], "")))
+	if invoiceURL == "" {
+		invoiceURL = request.SuccessURL
+	}
+
 	return InvoiceResult{
-		ProviderInvoiceID: "nowpayments_invoice_" + request.OrderID,
-		InvoiceURL:        request.SuccessURL,
-		ProviderPayload: map[string]any{
-			"id":                "nowpayments_invoice_" + request.OrderID,
-			"invoice_id":        "nowpayments_invoice_" + request.OrderID,
-			"invoice_url":       request.SuccessURL,
-			"order_description": request.Description,
-			"price_amount":      request.AmountUSD,
-		},
+		ProviderInvoiceID: providerID,
+		InvoiceURL:        invoiceURL,
+		ProviderPayload:   payloadResp,
 	}, nil
 }
 
 func (g *NowPaymentsGateway) ListCurrencies(amountUSD *float64) []CurrencyOption {
+	if strings.TrimSpace(g.cfg.NowPaymentsAPIKey) != "" {
+		if codes := g.fetchCurrencies(); len(codes) > 0 {
+			out := make([]CurrencyOption, 0, len(codes))
+			for _, code := range codes {
+				out = append(out, CurrencyOption{Code: code, MinUSD: nil})
+			}
+			return out
+		}
+	}
 	values := []string{}
 	raw := strings.TrimSpace(g.cfg.NowPaymentsCurrencyCandidates)
 	if raw == "" {
@@ -86,7 +152,7 @@ func (g *NowPaymentsGateway) VerifyWebhookSignature(payload map[string]any, head
 	}
 	message := rawBody
 	if len(message) == 0 {
-		message, _ = json.Marshal(payload)
+		message = canonicalJSON(payload)
 	}
 	mac := hmac.New(sha512.New, []byte(secret))
 	_, _ = mac.Write(message)
@@ -143,6 +209,102 @@ func (g *NowPaymentsGateway) VerifyPayment(providerPaymentID string, orderID str
 		Status:          PaymentStatus(ParseGenericPaymentStatus(firstAny(payload["payment_status"], payload["status"], "pending"))),
 		ProviderPayload: payload,
 	}, nil
+}
+
+func (g *NowPaymentsGateway) fetchCurrencies() []string {
+	endpoint := strings.TrimRight(strings.TrimSpace(g.cfg.NowPaymentsAPIBaseURL), "/") + "/currencies"
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("x-api-key", g.cfg.NowPaymentsAPIKey)
+
+	client := &http.Client{Timeout: 4 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusBadRequest {
+		return nil
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil
+	}
+	payload := map[string]any{}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil
+	}
+	rawItems, ok := payload["currencies"].([]any)
+	if !ok {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := []string{}
+	for _, item := range rawItems {
+		code := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", item)))
+		if code == "" {
+			continue
+		}
+		if _, ok := seen[code]; ok {
+			continue
+		}
+		seen[code] = struct{}{}
+		out = append(out, code)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func canonicalJSON(payload map[string]any) []byte {
+	if payload == nil {
+		return []byte("{}")
+	}
+	encoded := buildCanonicalJSON(payload)
+	if encoded == "" {
+		return []byte("{}")
+	}
+	return []byte(encoded)
+}
+
+func buildCanonicalJSON(value any) string {
+	switch typed := value.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		builder := strings.Builder{}
+		builder.WriteString("{")
+		for idx, key := range keys {
+			if idx > 0 {
+				builder.WriteString(",")
+			}
+			keyBytes, _ := json.Marshal(key)
+			builder.Write(keyBytes)
+			builder.WriteString(":")
+			builder.WriteString(buildCanonicalJSON(typed[key]))
+		}
+		builder.WriteString("}")
+		return builder.String()
+	case []any:
+		builder := strings.Builder{}
+		builder.WriteString("[")
+		for idx, item := range typed {
+			if idx > 0 {
+				builder.WriteString(",")
+			}
+			builder.WriteString(buildCanonicalJSON(item))
+		}
+		builder.WriteString("]")
+		return builder.String()
+	default:
+		bytes, _ := json.Marshal(typed)
+		return string(bytes)
+	}
 }
 
 func contains(values []string, target string) bool {

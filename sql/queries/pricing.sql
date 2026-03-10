@@ -5,7 +5,7 @@ WHERE is_active = true
 ORDER BY price_usd ASC;
 
 -- name: GetActivePricingPlanByCode :one
-SELECT id, code, name, duration_days, price_usd
+SELECT id, code, name, billing_cycle, duration_days, price_usd
 FROM pricing_plans
 WHERE code = $1
   AND is_active = true
@@ -143,7 +143,7 @@ ORDER BY p.paid_at DESC, p.created_at DESC
 LIMIT 1;
 
 -- name: GetPaymentForWebhookByPaymentID :one
-SELECT pay.id, pay.user_id, pay.pricing_plan_id, plan.duration_days
+SELECT pay.id, pay.user_id, pay.pricing_plan_id, plan.duration_days, pay.provider_payload
 FROM pricing_payments pay
 JOIN pricing_plans plan ON plan.id = pay.pricing_plan_id
 WHERE pay.id = $1

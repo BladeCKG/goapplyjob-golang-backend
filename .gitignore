@@ -13,3 +13,4 @@ app.db-shm
 logs/
 *_worker.log
 recheck_skippable_jobs.log
+*.exe

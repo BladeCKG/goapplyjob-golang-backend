@@ -32,14 +32,80 @@ func (g *OxaPayGateway) CreateInvoice(request InvoiceRequest) (InvoiceResult, er
 			},
 		}, nil
 	}
+
+	endpoint := strings.TrimRight(strings.TrimSpace(g.cfg.OxaPayAPIBaseURL), "/") + "/payment/invoice"
+	payload := map[string]any{
+		"amount":              request.AmountUSD,
+		"currency":            "USD",
+		"lifetime":            60,
+		"fee_paid_by_payer":   1,
+		"under_paid_coverage": 2.5,
+		"auto_withdrawal":     false,
+		"mixed_payment":       true,
+		"order_id":            request.OrderID,
+		"description":         request.Description,
+		"return_url":          request.SuccessURL,
+		"callback_url":        request.CallbackURL,
+		"email":               request.CustomerEmail,
+	}
+	if payCurrency := strings.TrimSpace(request.PayCurrency); payCurrency != "" {
+		payload["to_currency"] = strings.ToUpper(payCurrency)
+	}
+	switch strings.ToLower(strings.TrimSpace(g.cfg.OxaPayEnv)) {
+	case "sandbox":
+		payload["sandbox"] = true
+	case "prod":
+		payload["sandbox"] = false
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return InvoiceResult{}, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(string(body)))
+	if err != nil {
+		return InvoiceResult{}, err
+	}
+	req.Header.Set("merchant_api_key", g.cfg.OxaPayMerchantAPIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return InvoiceResult{}, fmt.Errorf("OxaPay request failed: %T", err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return InvoiceResult{}, err
+	}
+	if resp.StatusCode >= http.StatusBadRequest {
+		return InvoiceResult{}, fmt.Errorf("OxaPay invoice creation failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+
+	responsePayload := map[string]any{}
+	if err := json.Unmarshal(raw, &responsePayload); err != nil {
+		responsePayload = map[string]any{"raw": strings.TrimSpace(string(raw))}
+	}
+	providerID := strings.TrimSpace(fmt.Sprintf("%v", firstAny(
+		nestedValue(responsePayload, "data", "track_id"),
+		nestedValue(responsePayload, "data", "trackId"),
+		responsePayload["track_id"],
+		responsePayload["trackId"],
+		responsePayload["id"],
+		responsePayload["payment_id"],
+		"oxapay_invoice_"+request.OrderID,
+	)))
+	invoiceURL := extractOxaPayInvoiceURL(responsePayload)
+	if invoiceURL == "" {
+		invoiceURL = request.SuccessURL
+	}
+
 	return InvoiceResult{
-		ProviderInvoiceID: "oxapay_invoice_" + request.OrderID,
-		InvoiceURL:        request.SuccessURL,
-		ProviderPayload: map[string]any{
-			"track_id":    "oxapay_invoice_" + request.OrderID,
-			"invoice_url": request.SuccessURL,
-			"provider":    "oxapay",
-		},
+		ProviderInvoiceID: providerID,
+		InvoiceURL:        invoiceURL,
+		ProviderPayload:   responsePayload,
 	}, nil
 }
 
@@ -134,4 +200,46 @@ func asString(value any) string {
 		return ""
 	}
 	return fmt.Sprintf("%v", value)
+}
+
+func extractOxaPayInvoiceURL(payload map[string]any) string {
+	candidates := []any{
+		payload["payLink"],
+		payload["pay_link"],
+		payload["payment_link"],
+		payload["payment_url"],
+		payload["link"],
+		payload["invoice_url"],
+		payload["url"],
+	}
+	for _, key := range []string{"result", "data"} {
+		if nested, ok := payload[key].(map[string]any); ok {
+			candidates = append(candidates,
+				nested["payLink"],
+				nested["pay_link"],
+				nested["payment_link"],
+				nested["payment_url"],
+				nested["link"],
+				nested["invoice_url"],
+				nested["url"],
+			)
+		}
+	}
+	for _, candidate := range candidates {
+		if value := strings.TrimSpace(fmt.Sprintf("%v", candidate)); value != "" && value != "<nil>" {
+			return value
+		}
+	}
+	return ""
+}
+
+func nestedValue(payload map[string]any, parentKey, childKey string) any {
+	if payload == nil {
+		return nil
+	}
+	nested, ok := payload[parentKey].(map[string]any)
+	if !ok {
+		return nil
+	}
+	return nested[childKey]
 }

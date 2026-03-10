@@ -1,7 +1,6 @@
 package pricing
 
 import (
-	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -19,6 +18,7 @@ import (
 	"goapplyjob-golang-backend/internal/database"
 	paymentcrypto "goapplyjob-golang-backend/internal/payments/crypto"
 	paymentdodo "goapplyjob-golang-backend/internal/payments/dodo"
+	paymentstripe "goapplyjob-golang-backend/internal/payments/stripe"
 	gensqlc "goapplyjob-golang-backend/pkg/generated/sqlc"
 
 	"github.com/gin-gonic/gin"
@@ -242,8 +242,19 @@ func (h *Handler) subscribe(c *gin.Context) {
 			return
 		}
 	case "stripe":
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create payment"})
-		return
+		checkoutID, checkoutURL, providerPayload, err = paymentstripe.CreateCheckoutSession(
+			planName,
+			strings.TrimSpace(plan.BillingCycle),
+			priceUSD,
+			successURL,
+			cancelURL,
+			int64(paymentID),
+			user.Email,
+		)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to create payment"})
+			return
+		}
 	default:
 		checkoutID, checkoutURL, providerPayload, err = h.createCryptoInvoice(planName, priceUSD, payload.PayCurrency, successURL, cancelURL, paymentID, user)
 		if err != nil {
@@ -348,6 +359,19 @@ func (h *Handler) confirmOrActivatePayment(c *gin.Context, paymentID string, use
 		}
 	} else if row.Provider == "internal" {
 		resolvedStatus = "paid"
+	} else if row.Provider == "stripe" {
+		status, payload := paymentstripe.ResolveCheckoutStatus(strings.TrimSpace(row.ProviderCheckoutID.String))
+		if len(payload) > 0 {
+			mergedPayload, mergeErr := mergeProviderPayload(row.ProviderPayload, payload)
+			if mergeErr == nil {
+				payloadBytes, _ := json.Marshal(mergedPayload)
+				_ = h.q.UpdatePaymentPayloadByID(c.Request.Context(), gensqlc.UpdatePaymentPayloadByIDParams{
+					ProviderPayload: payloadBytes,
+					ID:              row.ID,
+				})
+			}
+		}
+		resolvedStatus = status
 	} else if row.Provider == "dodo" {
 		var merged map[string]any
 		resolvedStatus, merged = paymentdodo.ResolveCheckoutStatus(strings.TrimSpace(row.ProviderCheckoutID.String), row.ProviderPayload)
@@ -380,19 +404,51 @@ func (h *Handler) stripeWebhook(c *gin.Context) {
 		Type string `json:"type"`
 		Data struct {
 			Object struct {
-				Metadata map[string]any `json:"metadata"`
+				ID            string         `json:"id"`
+				Subscription  any            `json:"subscription"`
+				Status        string         `json:"status"`
+				PaymentStatus string         `json:"payment_status"`
+				Metadata      map[string]any `json:"metadata"`
 			} `json:"object"`
 		} `json:"data"`
 	}
 	if err := c.ShouldBindJSON(&payload); err == nil && payload.Data.Object.Metadata != nil {
-		if raw, ok := payload.Data.Object.Metadata["payment_id"].(string); ok {
+		var paymentID int32
+		if raw, ok := payload.Data.Object.Metadata["payment_id"]; ok {
+			if parsed, err := strconv.ParseInt(strings.TrimSpace(fmt.Sprintf("%v", raw)), 10, 64); err == nil && parsed > 0 && parsed <= int64(^uint32(0)>>1) {
+				paymentID = int32(parsed)
+			}
+		}
+		checkoutID := strings.TrimSpace(payload.Data.Object.ID)
+		providerCheckoutID := checkoutID
+		rowID, userID, planID, durationDays, lookupErr := h.lookupPaymentForWebhook(c, paymentID, providerCheckoutID)
+		if lookupErr == nil {
+			payloadUpdate := map[string]any{
+				"stripe_checkout_status": strings.TrimSpace(payload.Data.Object.Status),
+				"stripe_payment_status":  strings.TrimSpace(payload.Data.Object.PaymentStatus),
+			}
+			if rawSub := payload.Data.Object.Subscription; rawSub != nil {
+				if sub := strings.TrimSpace(fmt.Sprintf("%v", rawSub)); sub != "" {
+					payloadUpdate["stripe_subscription_id"] = sub
+				}
+			}
+			if len(payloadUpdate) > 0 {
+				if row, err := h.q.GetPaymentForWebhookByPaymentID(c.Request.Context(), rowID); err == nil {
+					merged, mergeErr := mergeProviderPayload(row.ProviderPayload, payloadUpdate)
+					if mergeErr == nil {
+						body, _ := json.Marshal(merged)
+						_ = h.q.UpdatePaymentPayloadByID(c.Request.Context(), gensqlc.UpdatePaymentPayloadByIDParams{
+							ProviderPayload: body,
+							ID:              row.ID,
+						})
+					}
+				}
+			}
 			switch payload.Type {
 			case "checkout.session.completed":
-				_ = h.activateSubscription(c, raw, 0)
+				_ = h.activatePlan(c, userID, planID, durationDays, rowID)
 			case "checkout.session.expired", "payment_intent.payment_failed":
-				if paymentID, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64); err == nil && paymentID > 0 && paymentID <= int64(^uint32(0)>>1) {
-					_ = h.q.UpdatePaymentFailedByID(c.Request.Context(), int32(paymentID))
-				}
+				_ = h.q.UpdatePaymentFailedByID(c.Request.Context(), rowID)
 			}
 		}
 	}
@@ -846,7 +902,7 @@ func (h *Handler) cancelSubscription(c *gin.Context) {
 			return
 		}
 		var err error
-		updated, err = cancelStripeSubscriptionAtPeriodEnd(stripeSubscriptionID)
+		updated, err = paymentstripe.CancelSubscriptionAtPeriodEnd(stripeSubscriptionID)
 		if err != nil {
 			c.JSON(http.StatusBadGateway, gin.H{"detail": "Failed to cancel Stripe subscription: " + err.Error()})
 			return
@@ -1219,41 +1275,6 @@ func parseUTCDateTime(raw string) (time.Time, error) {
 		return time.Date(parsed.Year(), parsed.Month(), parsed.Day(), parsed.Hour(), parsed.Minute(), parsed.Second(), parsed.Nanosecond(), time.UTC), nil
 	}
 	return time.Time{}, fmt.Errorf("invalid datetime")
-}
-
-func cancelStripeSubscriptionAtPeriodEnd(subscriptionID string) (map[string]any, error) {
-	stripeSecretKey := strings.TrimSpace(os.Getenv("STRIPE_SECRET_KEY"))
-	if stripeSecretKey == "" {
-		return nil, fmt.Errorf("Stripe is not configured")
-	}
-	apiBase := strings.TrimSpace(os.Getenv("STRIPE_API_BASE_URL"))
-	if apiBase == "" {
-		apiBase = "https://api.stripe.com/v1"
-	}
-	endpoint := strings.TrimRight(apiBase, "/") + "/subscriptions/" + url.PathEscape(strings.TrimSpace(subscriptionID))
-	form := url.Values{}
-	form.Set("cancel_at_period_end", "true")
-	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewBufferString(form.Encode()))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+stripeSecretKey)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	client := &http.Client{Timeout: 20 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
-	if resp.StatusCode >= http.StatusBadRequest {
-		return nil, fmt.Errorf("stripe status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	parsed := map[string]any{}
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return nil, err
-	}
-	return parsed, nil
 }
 
 func parseEpochOrNil(value any) any {
