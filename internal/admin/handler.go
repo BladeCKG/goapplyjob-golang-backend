@@ -1256,21 +1256,15 @@ func buildColumnFilterSQL(def filterDef, filter adminColumnFilter) (string, []an
 		case "bool":
 			switch item := value.(type) {
 			case bool:
-				if item {
-					return 1, nil
-				}
-				return 0, nil
+				return item, nil
 			case float64:
-				if item != 0 {
-					return 1, nil
-				}
-				return 0, nil
+				return item != 0, nil
 			case string:
 				switch strings.ToLower(strings.TrimSpace(item)) {
 				case "1", "true", "yes", "on":
-					return 1, nil
+					return true, nil
 				case "0", "false", "no", "off":
-					return 0, nil
+					return false, nil
 				default:
 					return nil, fmt.Errorf("Invalid boolean value: %v", value)
 				}
