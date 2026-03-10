@@ -147,7 +147,7 @@ func (h *Handler) listUsers(c *gin.Context) {
 			planName    string
 			startsAt    string
 			endsAt      string
-			subIsActive int
+			subIsActive bool
 		)
 		err := h.db.SQL.QueryRowContext(c.Request.Context(),
 			`SELECT s.id, p.code, p.name, s.starts_at, s.ends_at, s.is_active
@@ -163,7 +163,7 @@ func (h *Handler) listUsers(c *gin.Context) {
 				"plan_name": planName,
 				"starts_at": startsAt,
 				"ends_at":   endsAt,
-				"is_active": subIsActive == 1 && isFutureTimestamp(endsAt),
+				"is_active": subIsActive,
 			}
 		}
 		items = append(items, item)
@@ -205,16 +205,10 @@ func (h *Handler) upsertUserSubscription(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid ends_at"})
 		return
 	}
-	isActive := true
-	if payload.IsActive != nil {
-		isActive = *payload.IsActive
-	}
 
-	var existingUserID int64
-	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT id FROM auth_users WHERE id = ? LIMIT 1`, userID).Scan(&existingUserID); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"detail": "User not found"})
-		return
-	}
+	isActive := payload.IsActive != nil && *payload.IsActive
+	isActive = isFutureTimestamp(payload.EndsAt)
+
 	var (
 		planID   int64
 		planName string
@@ -224,42 +218,17 @@ func (h *Handler) upsertUserSubscription(c *gin.Context) {
 		return
 	}
 
-	var subscriptionID int64
-	err = h.db.SQL.QueryRowContext(c.Request.Context(),
-		`SELECT id
-		 FROM user_subscriptions
-		 WHERE user_id = ?
-		 ORDER BY ends_at DESC, created_at DESC
-		 LIMIT 1`, userID).Scan(&subscriptionID)
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	isActiveInt := 0
-	if isActive {
-		isActiveInt = 1
-	}
-	if err == sql.ErrNoRows {
-		if execErr := h.db.SQL.QueryRowContext(c.Request.Context(),
-			`INSERT INTO user_subscriptions (user_id, pricing_plan_id, starts_at, ends_at, is_active, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
-			userID, planID, payload.StartsAt, payload.EndsAt, isActiveInt, now).Scan(&subscriptionID); execErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to upsert subscription"})
-			return
-		}
-	} else if err == nil {
-		if _, execErr := h.db.SQL.ExecContext(c.Request.Context(),
-			`UPDATE user_subscriptions
+	if _, execErr := h.db.SQL.ExecContext(c.Request.Context(),
+		`UPDATE user_subscriptions
 			 SET pricing_plan_id = ?, starts_at = ?, ends_at = ?, is_active = ?
-			 WHERE id = ?`,
-			planID, payload.StartsAt, payload.EndsAt, isActiveInt, subscriptionID); execErr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to upsert subscription"})
-			return
-		}
-	} else {
+			 WHERE user_id = ?`,
+		planID, payload.StartsAt, payload.EndsAt, isActive, userID); execErr != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to upsert subscription"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"id":        subscriptionID,
+		"user_id":   userID,
 		"plan_code": payload.PlanCode,
 		"plan_name": planName,
 		"starts_at": payload.StartsAt,
