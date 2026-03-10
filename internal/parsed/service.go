@@ -182,7 +182,9 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, ro
 				stringValue(roleDescription),
 				allowedCategories,
 			)
-			categorizedTitle = strings.TrimSpace(groqCategory)
+			if strings.TrimSpace(groqCategory) != "" {
+				categorizedTitle = strings.TrimSpace(groqCategory)
+			}
 			if len(groqRequiredSkills) > 0 {
 				normalizedTechStack = normalizeTechStack(groqRequiredSkills)
 			}
@@ -191,7 +193,9 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, ro
 				stringValue(roleTitle),
 				allowedCategories,
 			)
-			categorizedTitle = strings.TrimSpace(groqCategory)
+			if strings.TrimSpace(groqCategory) != "" {
+				categorizedTitle = strings.TrimSpace(groqCategory)
+			}
 		}
 	}
 	if categorizedTitle == "" {
@@ -1469,7 +1473,9 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 						stringValue(payload["roleDescription"]),
 						allowedCategories,
 					)
-					categorizedTitle = strings.TrimSpace(groqCategory)
+					if strings.TrimSpace(groqCategory) != "" {
+						categorizedTitle = strings.TrimSpace(groqCategory)
+					}
 					if len(groqRequiredSkills) > 0 {
 						normalizedTechStack = normalizeTechStack(groqRequiredSkills)
 					}
@@ -1478,7 +1484,9 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 						stringValue(payload["roleTitle"]),
 						allowedCategories,
 					)
-					categorizedTitle = strings.TrimSpace(groqCategory)
+					if strings.TrimSpace(groqCategory) != "" {
+						categorizedTitle = strings.TrimSpace(groqCategory)
+					}
 				}
 			}
 			if categorizedTitle == nil {
