@@ -34,6 +34,12 @@ var groqCategoryCache = struct {
 	items []string
 }{}
 
+var groqAPIKeyRing = struct {
+	mu   sync.Mutex
+	keys []string
+	next int
+}{}
+
 func SetCachedGroqCategorizedJobTitles(titles []string) {
 	normalized := make([]string, 0, len(titles))
 	seen := map[string]struct{}{}
@@ -51,6 +57,54 @@ func SetCachedGroqCategorizedJobTitles(titles []string) {
 	groqCategoryCache.mu.Lock()
 	groqCategoryCache.items = normalized
 	groqCategoryCache.mu.Unlock()
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func groqKeyRingStart(keys []string) int {
+	groqAPIKeyRing.mu.Lock()
+	defer groqAPIKeyRing.mu.Unlock()
+
+	if !equalStringSlices(groqAPIKeyRing.keys, keys) {
+		groqAPIKeyRing.keys = append([]string(nil), keys...)
+		groqAPIKeyRing.next = 0
+	}
+	if len(keys) == 0 {
+		groqAPIKeyRing.next = 0
+		return 0
+	}
+	if groqAPIKeyRing.next < 0 || groqAPIKeyRing.next >= len(keys) {
+		groqAPIKeyRing.next = 0
+	}
+	return groqAPIKeyRing.next
+}
+
+func groqKeyRingSetNext(keys []string, next int) {
+	groqAPIKeyRing.mu.Lock()
+	defer groqAPIKeyRing.mu.Unlock()
+
+	// Only update when we're still talking about the same key set.
+	if !equalStringSlices(groqAPIKeyRing.keys, keys) {
+		return
+	}
+	if len(keys) == 0 {
+		groqAPIKeyRing.next = 0
+		return
+	}
+	if next < 0 {
+		next = 0
+	}
+	groqAPIKeyRing.next = next % len(keys)
 }
 
 func classifyJobTitleWithGroqSync(jobTitle, jobDescription string, allowedCategories []string) (string, []string) {
@@ -282,7 +336,10 @@ func (g *GroqJobClassifier) classifySync(jobTitle, jobDescription string, allowe
 		client = &http.Client{Timeout: 20 * time.Second}
 	}
 
-	for keyIndex, apiKey := range keys {
+	start := groqKeyRingStart(keys)
+	for attempt := 0; attempt < len(keys); attempt++ {
+		keyIndex := (start + attempt) % len(keys)
+		apiKey := keys[keyIndex]
 		req, err := http.NewRequest(http.MethodPost, "https://api.groq.com/openai/v1/chat/completions", bytes.NewReader(body))
 		if err != nil {
 			return "", nil
@@ -293,35 +350,42 @@ func (g *GroqJobClassifier) classifySync(jobTitle, jobDescription string, allowe
 		resp, err := client.Do(req)
 		if err != nil {
 			log.Printf("parsed-job-worker groq_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+			groqKeyRingSetNext(keys, keyIndex+1)
 			continue
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			log.Printf("parsed-job-worker groq_classify_failed key_index=%d model=%s status=%d", keyIndex, model, resp.StatusCode)
 			resp.Body.Close()
+			groqKeyRingSetNext(keys, keyIndex+1)
 			continue
 		}
 		rawResp, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
 		resp.Body.Close()
 		if err != nil {
 			log.Printf("parsed-job-worker groq_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+			groqKeyRingSetNext(keys, keyIndex+1)
 			continue
 		}
 		var envelope map[string]any
 		if err := json.Unmarshal(rawResp, &envelope); err != nil {
 			log.Printf("parsed-job-worker groq_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+			groqKeyRingSetNext(keys, keyIndex+1)
 			continue
 		}
 		choices, _ := envelope["choices"].([]any)
 		if len(choices) == 0 {
+			groqKeyRingSetNext(keys, keyIndex+1)
 			continue
 		}
 		firstChoice, _ := choices[0].(map[string]any)
 		message, _ := firstChoice["message"].(map[string]any)
 		content, _ := message["content"].(string)
 		if strings.TrimSpace(content) == "" {
+			groqKeyRingSetNext(keys, keyIndex+1)
 			continue
 		}
 		category, skills := extractGroqClassification(content, allowedCategories)
+		groqKeyRingSetNext(keys, keyIndex)
 		return category, skills
 	}
 
@@ -377,7 +441,10 @@ func (g *GroqJobClassifier) classifyCategoryOnlySync(jobTitle string, allowedCat
 		client = &http.Client{Timeout: 20 * time.Second}
 	}
 
-	for keyIndex, apiKey := range keys {
+	start := groqKeyRingStart(keys)
+	for attempt := 0; attempt < len(keys); attempt++ {
+		keyIndex := (start + attempt) % len(keys)
+		apiKey := keys[keyIndex]
 		req, err := http.NewRequest(http.MethodPost, "https://api.groq.com/openai/v1/chat/completions", bytes.NewReader(body))
 		if err != nil {
 			return ""
@@ -388,34 +455,41 @@ func (g *GroqJobClassifier) classifyCategoryOnlySync(jobTitle string, allowedCat
 		resp, err := client.Do(req)
 		if err != nil {
 			log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+			groqKeyRingSetNext(keys, keyIndex+1)
 			continue
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s status=%d", keyIndex, model, resp.StatusCode)
 			resp.Body.Close()
+			groqKeyRingSetNext(keys, keyIndex+1)
 			continue
 		}
 		rawResp, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
 		resp.Body.Close()
 		if err != nil {
 			log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+			groqKeyRingSetNext(keys, keyIndex+1)
 			continue
 		}
 		var envelope map[string]any
 		if err := json.Unmarshal(rawResp, &envelope); err != nil {
 			log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+			groqKeyRingSetNext(keys, keyIndex+1)
 			continue
 		}
 		choices, _ := envelope["choices"].([]any)
 		if len(choices) == 0 {
+			groqKeyRingSetNext(keys, keyIndex+1)
 			continue
 		}
 		firstChoice, _ := choices[0].(map[string]any)
 		message, _ := firstChoice["message"].(map[string]any)
 		content, _ := message["content"].(string)
 		if strings.TrimSpace(content) == "" {
+			groqKeyRingSetNext(keys, keyIndex+1)
 			continue
 		}
+		groqKeyRingSetNext(keys, keyIndex)
 		return extractGroqCategoryOnly(content, allowedCategories)
 	}
 
