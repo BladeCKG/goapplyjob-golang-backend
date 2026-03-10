@@ -160,6 +160,9 @@ func TestShouldUseGroqClassificationAllowsRequestedRoleFamilies(t *testing.T) {
 		"Radiology Technologist",
 		"CNC Machinist",
 		"Engineering Manager",
+		"Physical Therapist",
+		"Implementation Specialist",
+		"Operations Coordinator",
 	} {
 		if !shouldUseGroqClassification(roleTitle) {
 			t.Fatalf("expected Groq classification for %q", roleTitle)

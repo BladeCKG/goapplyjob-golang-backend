@@ -237,7 +237,10 @@ func shouldUseGroqClassification(roleTitle string) bool {
 			"technician", "technicians",
 			"technologist", "technologists",
 			"machinist", "machinists",
-			"manager", "managers":
+			"manager", "managers",
+			"therapist", "therapists",
+			"specialist", "specialists",
+			"coordinator", "coordinators":
 			return true
 		}
 	}
