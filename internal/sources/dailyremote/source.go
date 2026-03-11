@@ -5,6 +5,7 @@ import (
 	"errors"
 	"html"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"goapplyjob-golang-backend/internal/locationnorm"
+	nethtml "golang.org/x/net/html"
 )
 
 const (
@@ -64,26 +66,25 @@ func ToTargetJobURL(rawURL string) string {
 }
 
 func ExtractJobListings(htmlText, pageURL string, scrapedAt time.Time) []map[string]any {
-	matches := articlePattern.FindAllStringSubmatch(htmlText, -1)
-	if len(matches) == 0 {
+	doc, err := nethtml.Parse(strings.NewReader(htmlText))
+	if err != nil {
 		return []map[string]any{}
 	}
-	out := make([]map[string]any, 0, len(matches))
-	for _, match := range matches {
-		body := match[1]
-		link := ""
-		if href := hrefPattern.FindStringSubmatch(body); len(href) >= 2 {
-			link = strings.TrimSpace(href[1])
-		}
-		if link == "" {
+	articles := findDailyRemoteArticles(doc)
+	if len(articles) == 0 {
+		return []map[string]any{}
+	}
+	out := make([]map[string]any, 0, len(articles))
+	for _, article := range articles {
+		listingURL := extractListingURLFromArticle(article, pageURL)
+		if listingURL == "" {
 			continue
 		}
-		listingURL := resolveURL(pageURL, link)
-		postDate := extractRelativePostDate(body, scrapedAt)
+		postDate := extractRelativePostDateFromArticle(article, scrapedAt)
 		if postDate.IsZero() {
 			continue
 		}
-		externalID := ExtractExternalIDFromURL(listingURL)
+		externalID := extractExternalIDFromArticle(article, listingURL)
 		out = append(out, map[string]any{
 			"url":         listingURL,
 			"post_date":   postDate,
@@ -159,7 +160,7 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 	if industry, ok := companyEnrichment["industrySpecialities"]; ok {
 		company["industrySpecialities"] = industry
 	}
-	targetURL := resolveRedirectURLDailyRemoteFunc(ToTargetJobURL(firstNonEmpty(stringValue(jobPosting["url"]), sourceURL)))
+	targetURL := resolveRedirectURLDailyRemoteFunc(ToTargetJobURL(sourceURL))
 	salaryPayload := parseSalaryRangeFromText(headSalaryText)
 	payload := map[string]any{
 		"id":                   nilIfEmpty(strconv.Itoa(externalID)),
@@ -321,9 +322,23 @@ func extractExternalID(jobPosting map[string]any, sourceURL string) int {
 		return id
 	}
 	identifier, _ := jobPosting["identifier"].(map[string]any)
-	value := stringValue(identifier["value"])
-	if id := ExtractExternalIDFromURL(value); id > 0 {
-		return id
+	switch v := identifier["value"].(type) {
+	case float64:
+		if v > 0 {
+			return int(v)
+		}
+	case int:
+		if v > 0 {
+			return v
+		}
+	case int64:
+		if v > 0 {
+			return int(v)
+		}
+	case string:
+		if id := ExtractExternalIDFromURL(v); id > 0 {
+			return id
+		}
 	}
 	return 0
 }
@@ -360,16 +375,16 @@ func normalizeLocationType(value any) string {
 
 func extractHeadInfoFromHTML(htmlText string) (string, string) {
 	salaryText := ""
-	containerMatch := headContainerPattern.FindStringSubmatch(htmlText)
-	if len(containerMatch) >= 2 {
-		for _, item := range inlineHeadItemPattern.FindAllStringSubmatch(containerMatch[1], -1) {
-			if len(item) < 2 {
-				continue
-			}
-			text := normalizeText(tagPattern.ReplaceAllString(item[1], " "))
-			if looksLikeSalaryText(text) && salaryNumberPattern.MatchString(normalizeSalaryText(text)) {
-				salaryText = text
-				break
+	if doc, err := nethtml.Parse(strings.NewReader(htmlText)); err == nil {
+		container := findFirstNodeWithClass(doc, "div", "job_head_info_container")
+		if container != nil {
+			items := findNodesWithClasses(container, "div", []string{"inline-flex", "items-center"})
+			for _, item := range items {
+				text := normalizeText(textContent(item))
+				if looksLikeSalaryText(text) && salaryNumberPattern.MatchString(normalizeSalaryText(text)) {
+					salaryText = text
+					break
+				}
 			}
 		}
 	}
@@ -490,18 +505,28 @@ func parseSalaryRangeFromText(value string) any {
 		currencyCode = "GBP"
 	}
 	payload := map[string]any{
-		"min":                     minValue,
-		"max":                     maxValue,
+		"min":                     normalizeSalaryValue(minValue),
+		"max":                     normalizeSalaryValue(maxValue),
 		"salaryType":              salaryType,
 		"currencyCode":            currencyCode,
 		"currencySymbol":          currencySymbol,
 		"salaryHumanReadableText": raw,
 	}
 	if currencyCode == "USD" {
-		payload["minSalaryAsUSD"] = minValue
-		payload["maxSalaryAsUSD"] = maxValue
+		payload["minSalaryAsUSD"] = normalizeSalaryValue(minValue)
+		payload["maxSalaryAsUSD"] = normalizeSalaryValue(maxValue)
 	}
 	return payload
+}
+
+func normalizeSalaryValue(value float64) any {
+	if value == 0 {
+		return 0
+	}
+	if value == float64(int64(value)) {
+		return int64(value)
+	}
+	return math.Round(value*100) / 100
 }
 
 func parseAmount(numberText, suffix string) float64 {
@@ -564,17 +589,28 @@ func normalizeEmploymentType(value any) any {
 		}
 		return token
 	case []any:
+		seen := map[string]struct{}{}
 		for _, raw := range item {
 			token := strings.ToLower(strings.TrimSpace(stringValue(raw)))
-			if token == "full_time" || token == "full-time" {
-				return "full_time"
+			if token == "" {
+				continue
 			}
-			if token == "part_time" || token == "part-time" {
-				return "part_time"
-			}
-			if token != "" {
-				return token
-			}
+			seen[token] = struct{}{}
+		}
+		if _, ok := seen["full_time"]; ok {
+			return "full_time"
+		}
+		if _, ok := seen["full-time"]; ok {
+			return "full_time"
+		}
+		if _, ok := seen["part_time"]; ok {
+			return "part_time"
+		}
+		if _, ok := seen["part-time"]; ok {
+			return "part_time"
+		}
+		for token := range seen {
+			return token
 		}
 	}
 	return nil
@@ -632,6 +668,16 @@ func parseISO(value string) (time.Time, error) {
 	}
 	if strings.HasSuffix(value, "Z") {
 		if parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSuffix(value, "Z")+"+00:00"); err == nil {
+			return parsed.UTC(), nil
+		}
+	}
+	layouts := []string{
+		"2006-01-02",
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+	}
+	for _, layout := range layouts {
+		if parsed, err := time.ParseInLocation(layout, value, time.UTC); err == nil {
 			return parsed.UTC(), nil
 		}
 	}
@@ -707,10 +753,219 @@ func inferSeniority(title string) (bool, bool, bool, bool, bool) {
 	_, hasPrincipal := tokens["principal"]
 	_, hasStaff := tokens["staff"]
 	_, hasHead := tokens["head"]
+	_, hasManager := tokens["manager"]
+	_, hasDirector := tokens["director"]
+	_, hasChief := tokens["chief"]
 	isEntry := hasEntry || hasIntern
 	isJunior := hasJunior || hasJr
 	isSenior := hasSenior || hasSr
-	isLead := hasLead || hasPrincipal || hasStaff || hasHead
+	isLead := hasLead || hasPrincipal || hasStaff || hasHead || hasManager || hasDirector || hasChief
 	isMid := !(isEntry || isJunior || isSenior || isLead)
 	return isEntry, isJunior, isMid, isSenior, isLead
+}
+
+func findDailyRemoteArticles(doc *nethtml.Node) []*nethtml.Node {
+	articles := []*nethtml.Node{}
+	var walk func(*nethtml.Node)
+	walk = func(node *nethtml.Node) {
+		if node.Type == nethtml.ElementNode && strings.EqualFold(node.Data, "article") {
+			if hasClass(node, "card") && hasClass(node, "js-card") {
+				articles = append(articles, node)
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(doc)
+	return articles
+}
+
+func extractListingURLFromArticle(article *nethtml.Node, pageURL string) string {
+	link := ""
+	var walk func(*nethtml.Node)
+	walk = func(node *nethtml.Node) {
+		if link != "" {
+			return
+		}
+		if node.Type == nethtml.ElementNode && strings.EqualFold(node.Data, "h2") && hasClass(node, "job-position") {
+			if href := firstAnchorHref(node); href != "" {
+				link = href
+				return
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(article)
+	if link == "" {
+		if href := firstAnchorHrefWithClass(article, "apply-button"); href != "" {
+			link = href
+		}
+	}
+	if link == "" {
+		return ""
+	}
+	return resolveURL(pageURL, link)
+}
+
+func extractExternalIDFromArticle(article *nethtml.Node, listingURL string) int {
+	for _, attr := range article.Attr {
+		if strings.EqualFold(attr.Key, "data-id") {
+			if id, err := strconv.Atoi(strings.TrimSpace(attr.Val)); err == nil && id > 0 {
+				return id
+			}
+		}
+	}
+	return ExtractExternalIDFromURL(listingURL)
+}
+
+func extractRelativePostDateFromArticle(article *nethtml.Node, now time.Time) time.Time {
+	var found time.Time
+	var walk func(*nethtml.Node)
+	walk = func(node *nethtml.Node) {
+		if !found.IsZero() {
+			return
+		}
+		if node.Type == nethtml.ElementNode && strings.EqualFold(node.Data, "span") {
+			text := normalizeText(textContent(node))
+			if text != "" {
+				found = extractRelativePostDateFromText(text, now)
+				if !found.IsZero() {
+					return
+				}
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(article)
+	return found
+}
+
+func extractRelativePostDateFromText(text string, now time.Time) time.Time {
+	lowered := strings.ToLower(strings.TrimSpace(text))
+	switch {
+	case strings.Contains(lowered, "just now"), strings.Contains(lowered, " now "), strings.Contains(lowered, " today "):
+		return now.UTC()
+	case strings.Contains(lowered, "yesterday"):
+		return now.UTC().Add(-24 * time.Hour)
+	}
+	match := relTimePattern.FindStringSubmatch(lowered)
+	if len(match) < 3 {
+		return time.Time{}
+	}
+	count, _ := strconv.Atoi(match[1])
+	unit := strings.ToLower(match[2])
+	switch {
+	case strings.HasPrefix(unit, "min"):
+		return now.UTC().Add(-time.Duration(count) * time.Minute)
+	case strings.HasPrefix(unit, "hour"):
+		return now.UTC().Add(-time.Duration(count) * time.Hour)
+	case strings.HasPrefix(unit, "day"):
+		return now.UTC().Add(-time.Duration(count) * 24 * time.Hour)
+	case strings.HasPrefix(unit, "week"):
+		return now.UTC().Add(-time.Duration(count) * 7 * 24 * time.Hour)
+	default:
+		return time.Time{}
+	}
+}
+
+func textContent(node *nethtml.Node) string {
+	var b strings.Builder
+	var walk func(*nethtml.Node)
+	walk = func(n *nethtml.Node) {
+		if n.Type == nethtml.TextNode {
+			b.WriteString(n.Data)
+		}
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(node)
+	return b.String()
+}
+
+func firstAnchorHref(node *nethtml.Node) string {
+	if node.Type == nethtml.ElementNode && strings.EqualFold(node.Data, "a") {
+		for _, attr := range node.Attr {
+			if strings.EqualFold(attr.Key, "href") {
+				return strings.TrimSpace(attr.Val)
+			}
+		}
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if href := firstAnchorHref(child); href != "" {
+			return href
+		}
+	}
+	return ""
+}
+
+func firstAnchorHrefWithClass(node *nethtml.Node, className string) string {
+	if node.Type == nethtml.ElementNode && strings.EqualFold(node.Data, "a") && hasClass(node, className) {
+		for _, attr := range node.Attr {
+			if strings.EqualFold(attr.Key, "href") {
+				return strings.TrimSpace(attr.Val)
+			}
+		}
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if href := firstAnchorHrefWithClass(child, className); href != "" {
+			return href
+		}
+	}
+	return ""
+}
+
+func hasClass(node *nethtml.Node, className string) bool {
+	for _, attr := range node.Attr {
+		if strings.EqualFold(attr.Key, "class") {
+			parts := strings.Fields(attr.Val)
+			for _, part := range parts {
+				if part == className {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func findFirstNodeWithClass(node *nethtml.Node, tag, className string) *nethtml.Node {
+	if node.Type == nethtml.ElementNode && strings.EqualFold(node.Data, tag) && hasClass(node, className) {
+		return node
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if match := findFirstNodeWithClass(child, tag, className); match != nil {
+			return match
+		}
+	}
+	return nil
+}
+
+func findNodesWithClasses(node *nethtml.Node, tag string, classNames []string) []*nethtml.Node {
+	matches := []*nethtml.Node{}
+	var walk func(*nethtml.Node)
+	walk = func(n *nethtml.Node) {
+		if n.Type == nethtml.ElementNode && strings.EqualFold(n.Data, tag) {
+			ok := true
+			for _, className := range classNames {
+				if !hasClass(n, className) {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				matches = append(matches, n)
+			}
+		}
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(node)
+	return matches
 }
