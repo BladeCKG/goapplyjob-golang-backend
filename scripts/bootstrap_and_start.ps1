@@ -57,12 +57,19 @@ if ($ForceRebuild) {
 }
 
 $services = @(
-    @{ Name = "api"; Out = "logs\api.out.log"; Err = "logs\api.err.log"; Args = @("run", "./cmd/api") },
-    @{ Name = "watcher"; Out = "logs\watcher.out.log"; Err = "logs\watcher.err.log"; Args = @("run", "./cmd/watcher") },
-    @{ Name = "importer"; Out = "logs\importer.out.log"; Err = "logs\importer.err.log"; Args = @("run", "./cmd/importer") },
-    @{ Name = "rawjobworker"; Out = "logs\rawjobworker.out.log"; Err = "logs\rawjobworker.err.log"; Args = @("run", "./cmd/rawjobworker") },
-    @{ Name = "parsedjobworker"; Out = "logs\parsedjobworker.out.log"; Err = "logs\parsedjobworker.err.log"; Args = @("run", "./cmd/parsedjobworker") }
+    @{ Name = "api"; Out = "logs\api.out.log"; Err = "logs\api.err.log"; Args = @("run", "./cmd/api") }
 )
+
+if ($env:WORKER_CHAIN_ENABLED -eq "true") {
+    $services += @{ Name = "workerchain"; Out = "logs\workerchain.out.log"; Err = "logs\workerchain.err.log"; Args = @("run", "./cmd/workerchain") }
+} else {
+    $services += @(
+        @{ Name = "watcher"; Out = "logs\watcher.out.log"; Err = "logs\watcher.err.log"; Args = @("run", "./cmd/watcher") },
+        @{ Name = "importer"; Out = "logs\importer.out.log"; Err = "logs\importer.err.log"; Args = @("run", "./cmd/importer") },
+        @{ Name = "rawjobworker"; Out = "logs\rawjobworker.out.log"; Err = "logs\rawjobworker.err.log"; Args = @("run", "./cmd/rawjobworker") },
+        @{ Name = "parsedjobworker"; Out = "logs\parsedjobworker.out.log"; Err = "logs\parsedjobworker.err.log"; Args = @("run", "./cmd/parsedjobworker") }
+    )
+}
 
 $started = @()
 foreach ($svc in $services) {

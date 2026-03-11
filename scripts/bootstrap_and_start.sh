@@ -54,10 +54,14 @@ run_service() {
 : > "logs/processes.pid"
 
 run_service "api" "api.log" go run ./cmd/api
-run_service "watcher" "watcher.log" go run ./cmd/watcher
-run_service "importer" "importer.log" go run ./cmd/importer
-run_service "rawjobworker" "rawjobworker.log" go run ./cmd/rawjobworker
-run_service "parsedjobworker" "parsedjobworker.log" go run ./cmd/parsedjobworker
+if [[ "${WORKER_CHAIN_ENABLED:-false}" == "true" ]]; then
+  run_service "workerchain" "worker_chain.log" go run ./cmd/workerchain
+else
+  run_service "watcher" "watcher.log" go run ./cmd/watcher
+  run_service "importer" "importer.log" go run ./cmd/importer
+  run_service "rawjobworker" "rawjobworker.log" go run ./cmd/rawjobworker
+  run_service "parsedjobworker" "parsedjobworker.log" go run ./cmd/parsedjobworker
+fi
 
 echo
 echo "All services started."

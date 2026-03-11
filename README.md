@@ -88,6 +88,33 @@ Optional env:
 SKIPPABLE_RECHECK_BATCH_SIZE=100
 ```
 
+### Worker Chain (watcher → importer → raw → parsed)
+
+The worker chain runs the four core workers sequentially in a loop. This is useful
+for cron-style execution or low-memory environments where you want one process
+handling the full pipeline.
+
+Run once:
+
+```bash
+WORKER_CHAIN_RUN_ONCE=true go run ./cmd/workerchain
+```
+
+Run continuously:
+
+```bash
+go run ./cmd/workerchain
+```
+
+Key env vars:
+
+```env
+WORKER_CHAIN_RUN_ONCE=false
+WORKER_CHAIN_SLEEP_SECONDS=5
+WORKER_ERROR_BACKOFF_SECONDS=10
+ENABLED_SOURCES=remoterocketship,builtin
+```
+
 ### Fresh Environment Bootstrap (Linux + Windows)
 
 Start the current backend commands in one step:
@@ -114,6 +141,17 @@ What these scripts do:
 * ensure `logs/` exists
 * run `go run ./cmd/migrate`
 * start the Go API and all workers (`watcher`, `importer`, `rawjobworker`, `parsedjobworker`) in background
+
+To use the worker chain instead of individual workers:
+
+```bash
+WORKER_CHAIN_ENABLED=true ./scripts/bootstrap_and_start.sh
+```
+
+```powershell
+$env:WORKER_CHAIN_ENABLED="true"
+.\scripts\bootstrap_and_start.ps1
+```
 
 Source selection is runtime-configurable through `ENABLED_SOURCES`.
 Examples:
