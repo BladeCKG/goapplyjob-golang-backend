@@ -1547,6 +1547,12 @@ func (h *Handler) buildListingFilterInput(c *gin.Context, currentUser *auth.User
 			input.CreatedFrom = pgtype.Timestamptz{Time: cutoff, Valid: true}
 		}
 	}
+	if postDateTo := strings.TrimSpace(c.Query("post_date_to")); postDateTo != "" {
+		if cutoff, ok := parsePostDateFrom(postDateTo); ok {
+			input.HasCreatedTo = true
+			input.CreatedTo = pgtype.Timestamptz{Time: cutoff, Valid: true}
+		}
+	}
 	if includePostDate {
 		if postDate := strings.ToLower(strings.TrimSpace(c.Query("post_date"))); postDate != "" {
 			postDateLocation := resolvePostDateTimezone(c.Query("post_date_tz"), c.Query("post_date_tz_offset"))
