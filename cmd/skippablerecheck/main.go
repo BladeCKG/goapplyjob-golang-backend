@@ -24,7 +24,7 @@ func main() {
 	}
 	defer db.Close()
 
-	svc := raw.New(db)
+	svc := raw.New(raw.Config{}, db)
 	checkedCount, clearedCount, err := svc.RecheckSkippable(context.Background(), cfg.SkippableRecheckBatchSize)
 	if err != nil {
 		log.Fatal(err)

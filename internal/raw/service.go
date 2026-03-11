@@ -40,13 +40,24 @@ type Service struct {
 	ParseHTML      ParseHTMLFunc
 	Status         StatusFunc
 	EnabledSources map[string]struct{}
+	Config         Config
+}
+
+type Config struct {
+	BatchSize             int
+	PollSeconds           int
+	RunOnce               bool
+	ErrorBackoffSeconds   int
+	RetentionDays         int
+	RetentionCleanupBatch int
 }
 
 var scriptJSONBlockPattern = regexp.MustCompile(`(?is)<script[^>]*type=['"]application/json['"][^>]*>(.*?)</script>`)
 
-func New(db *database.DB) *Service {
+func New(cfg Config, db *database.DB) *Service {
 	return &Service{
-		DB: db,
+		DB:     db,
+		Config: cfg,
 		ReadHTML: func(string) (string, int, error) {
 			return "", 0, errors.New("read html not configured")
 		},
@@ -71,6 +82,56 @@ func New(db *database.DB) *Service {
 			}
 			return jobData, nil
 		},
+	}
+}
+
+func (s *Service) RunOnce(ctx context.Context) (int, error) {
+	batchSize := s.Config.BatchSize
+	if batchSize < 1 {
+		batchSize = 100
+	}
+	retentionDays := s.Config.RetentionDays
+	if retentionDays < 1 {
+		retentionDays = 365
+	}
+	retentionCleanupBatch := s.Config.RetentionCleanupBatch
+	if retentionCleanupBatch < 1 {
+		retentionCleanupBatch = 1
+	}
+	deletedRaw, deletedParsed, cleanupErr := s.CleanupOldRawJobs(ctx, retentionDays, retentionCleanupBatch)
+	if cleanupErr != nil {
+		return 0, cleanupErr
+	}
+	if deletedRaw > 0 || deletedParsed > 0 {
+		log.Printf("raw-us-job-worker cleanup_done raw_jobs=%d parsed_jobs=%d", deletedRaw, deletedParsed)
+	}
+	return s.ProcessPending(ctx, batchSize)
+}
+
+func (s *Service) RunForever() error {
+	pollSeconds := s.Config.PollSeconds
+	if pollSeconds < 1 {
+		pollSeconds = 5
+	}
+	errorBackoffSeconds := s.Config.ErrorBackoffSeconds
+	if errorBackoffSeconds < 1 {
+		errorBackoffSeconds = 1
+	}
+	for {
+		processed, err := s.RunOnce(context.Background())
+		if err != nil {
+			log.Printf("raw-us-job-worker cycle_failed error=%v", err)
+			if s.Config.RunOnce {
+				return err
+			}
+			time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
+			continue
+		}
+		if s.Config.RunOnce {
+			log.Printf("raw-us-job-worker run-once completed processed=%d", processed)
+			return nil
+		}
+		time.Sleep(time.Duration(pollSeconds) * time.Second)
 	}
 }
 
@@ -105,7 +166,7 @@ func parseHTMLForSource(source, html, sourceURL string) map[string]any {
 	if plugin, ok := plugins.Get(source); ok && plugin.ParseRawHTML != nil {
 		return plugin.ParseRawHTML(html, sourceURL)
 	}
-	parser := New(nil).ParseHTML
+	parser := New(Config{}, nil).ParseHTML
 	payload, _ := parser(html)
 	if payload == nil {
 		return map[string]any{}

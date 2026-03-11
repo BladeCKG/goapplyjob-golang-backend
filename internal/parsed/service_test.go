@@ -76,7 +76,7 @@ func TestProcessPendingKeepsParsingWhenSourceCreatedAtIsOlderThanPostDate(t *tes
 		t.Fatal(err)
 	}
 
-	svc := New(db)
+	svc := New(Config{}, db)
 	svc.EnabledSources = map[string]struct{}{"remoterocketship": {}}
 	processed, err := svc.ProcessPending(context.Background(), 10)
 	if err != nil {
@@ -217,7 +217,7 @@ func TestBuiltinBackfillsCategoriesFromSimilarRemoteJob(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := New(db)
+	svc := New(Config{}, db)
 	svc.EnabledSources = map[string]struct{}{"builtin": {}}
 	if _, err := svc.ProcessPending(context.Background(), 10); err != nil {
 		t.Fatal(err)
@@ -255,7 +255,7 @@ func TestFindSimilarRemoteCategoriesAvoidsGenericEngineer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := New(db)
+	svc := New(Config{}, db)
 	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Product Implementation Engineer", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -292,7 +292,7 @@ func TestFindSimilarRemoteCategoriesPrefersExactNormalizedRoleTitle(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := New(db)
+	svc := New(Config{}, db)
 	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Senior SWE Dev Ops", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -323,7 +323,7 @@ func TestFindSimilarRemoteCategoriesUsesTechStackFilter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := New(db)
+	svc := New(Config{}, db)
 	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Platform Engineer", []string{"Ruby"})
 	if err != nil {
 		t.Fatal(err)
@@ -352,7 +352,7 @@ func TestFindSimilarRemoteCategoriesFallsBackWhenTechStackFilterHasNoMatch(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := New(db)
+	svc := New(Config{}, db)
 	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Backend Engineer", []string{"Rust"})
 	if err != nil {
 		t.Fatal(err)
@@ -471,7 +471,7 @@ func TestUpsertCompanyFromPayloadUsesExternalCompanyIDForRemoteRocketship(t *tes
 		t.Fatal(err)
 	}
 
-	svc := New(db)
+	svc := New(Config{}, db)
 	plugin, ok := plugins.Get("remoterocketship")
 	if !ok {
 		t.Fatal("missing remoterocketship plugin")
@@ -525,7 +525,7 @@ func TestFindDuplicateCrossSourceParsedJobByURL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := New(db)
+	svc := New(Config{}, db)
 	payload := map[string]any{
 		"url":       "https://example.com/job/shared",
 		"roleTitle": "Backend Engineer",
@@ -566,7 +566,7 @@ func TestFindDuplicateCrossSourceParsedJobByNormalizedURLWithinDateWindow(t *tes
 		t.Fatal(err)
 	}
 
-	svc := New(db)
+	svc := New(Config{}, db)
 	payload := map[string]any{
 		"url":        "https://www.example.com/job/shared/",
 		"created_at": time.Now().UTC().Format(time.RFC3339Nano),
@@ -633,7 +633,7 @@ func TestProcessPendingRemoterocketshipDuplicateReplacementKeepsCreatedAtSource(
 		t.Fatal(err)
 	}
 
-	svc := New(db)
+	svc := New(Config{}, db)
 	svc.EnabledSources = map[string]struct{}{"remoterocketship": {}}
 	if _, err := svc.ProcessPending(context.Background(), 10); err != nil {
 		t.Fatal(err)
@@ -691,7 +691,7 @@ func TestProcessPendingReturnsZeroWhenNoEnabledSources(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := New(db)
+	svc := New(Config{}, db)
 	processed, err := svc.ProcessPending(context.Background(), 10)
 	if err != nil {
 		t.Fatal(err)
@@ -751,7 +751,7 @@ func TestProcessPendingCrossSourceDuplicateMarksRawRowSkippable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := New(db)
+	svc := New(Config{}, db)
 	svc.EnabledSources = map[string]struct{}{"builtin": {}}
 	processed, err := svc.ProcessPending(context.Background(), 10)
 	if err != nil {
@@ -829,7 +829,7 @@ func TestProcessPendingUpsertOverwritesExistingParsedRowColumns(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := New(db)
+	svc := New(Config{}, db)
 	svc.EnabledSources = map[string]struct{}{"builtin": {}}
 	processed, err := svc.ProcessPending(context.Background(), 10)
 	if err != nil {

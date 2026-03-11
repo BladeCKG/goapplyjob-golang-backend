@@ -22,7 +22,7 @@ func TestRecheckSkippableClearsRecoveringJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := New(db)
+	svc := New(Config{}, db)
 	svc.Status = func(url string) (int, error) {
 		switch url {
 		case "https://example.com/jobs/1":

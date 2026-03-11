@@ -46,7 +46,7 @@ func TestProcessPendingUsesNormalizedURLForFetchAndKeepsOriginalPayloadURL(t *te
 		t.Fatal(err)
 	}
 
-	svc := New(db)
+	svc := New(Config{}, db)
 	svc.EnabledSources = map[string]struct{}{"remoterocketship": {}}
 	fetchedURLs := []string{}
 	svc.ReadHTML = func(targetURL string) (string, int, error) {
@@ -126,7 +126,7 @@ func TestProcessPendingSkipsReadyWhenParserRequestsRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := New(db)
+	svc := New(Config{}, db)
 	svc.EnabledSources = map[string]struct{}{"remoterocketship": {}}
 	svc.ReadHTML = func(targetURL string) (string, int, error) {
 		return "<html></html>", 200, nil
@@ -177,7 +177,7 @@ func TestProcessPendingSkipsNonUSAndMarksRowSkippable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := New(db)
+	svc := New(Config{}, db)
 	svc.EnabledSources = map[string]struct{}{"remoterocketship": {}}
 	svc.ReadHTML = func(targetURL string) (string, int, error) {
 		return "<html></html>", 200, nil
@@ -235,7 +235,7 @@ func TestProcessPendingSkipsRemainingSourceJobsAfter429(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := New(db)
+	svc := New(Config{}, db)
 	svc.EnabledSources = map[string]struct{}{"remoterocketship": {}}
 	fetchCount := 0
 	svc.ReadHTML = func(targetURL string) (string, int, error) {
@@ -287,7 +287,7 @@ func TestProcessPendingMarks404AsTerminalSkip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := New(db)
+	svc := New(Config{}, db)
 	svc.EnabledSources = map[string]struct{}{"remoterocketship": {}}
 	svc.ReadHTML = func(targetURL string) (string, int, error) {
 		return "", 404, nil
@@ -337,7 +337,7 @@ func TestProcessPendingMarksDailyRemote410GoneAsTerminalSkip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := New(db)
+	svc := New(Config{}, db)
 	svc.EnabledSources = map[string]struct{}{"dailyremote": {}}
 	svc.ReadHTML = func(targetURL string) (string, int, error) {
 		_ = targetURL
@@ -389,7 +389,7 @@ func TestProcessPendingBuiltinRemovedIsTerminalSkipWithoutRetryIncrement(t *test
 		t.Fatal(err)
 	}
 
-	svc := New(db)
+	svc := New(Config{}, db)
 	svc.EnabledSources = map[string]struct{}{"builtin": {}}
 	svc.ReadHTML = func(targetURL string) (string, int, error) {
 		return "<html><body>Sorry, this job was removed.</body></html>", 200, nil
@@ -439,7 +439,7 @@ func TestProcessPendingSkipsWhenEnabledSourcesEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := New(db)
+	svc := New(Config{}, db)
 	svc.EnabledSources = map[string]struct{}{}
 	called := false
 	svc.ReadHTML = func(targetURL string) (string, int, error) {
@@ -475,7 +475,7 @@ func TestProcessPendingDoesNotParseNon2xxResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := New(db)
+	svc := New(Config{}, db)
 	svc.EnabledSources = map[string]struct{}{"remoterocketship": {}}
 	parsedCalled := false
 	svc.ReadHTML = func(targetURL string) (string, int, error) {

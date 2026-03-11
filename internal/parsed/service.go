@@ -239,9 +239,56 @@ var normalizationReplacements = []struct {
 type Service struct {
 	DB             *database.DB
 	EnabledSources map[string]struct{}
+	Config         Config
 }
 
-func New(db *database.DB) *Service { return &Service{DB: db} }
+type Config struct {
+	BatchSize           int
+	PollSeconds         float64
+	RunOnce             bool
+	ErrorBackoffSeconds int
+}
+
+func New(cfg Config, db *database.DB) *Service { return &Service{DB: db, Config: cfg} }
+
+func (s *Service) RunOnce(ctx context.Context) (int, error) {
+	batchSize := s.Config.BatchSize
+	if batchSize < 1 {
+		batchSize = 100
+	}
+	return s.ProcessPending(ctx, batchSize)
+}
+
+func (s *Service) RunForever() error {
+	pollSeconds := s.Config.PollSeconds
+	if pollSeconds < 1 {
+		pollSeconds = 1
+	}
+	errorBackoffSeconds := s.Config.ErrorBackoffSeconds
+	if errorBackoffSeconds < 1 {
+		errorBackoffSeconds = 1
+	}
+	for {
+		processed, err := s.RunOnce(context.Background())
+		if err != nil {
+			log.Printf("parsed-job-worker cycle_failed error=%v", err)
+			if s.Config.RunOnce {
+				return err
+			}
+			time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
+			continue
+		}
+		if s.Config.RunOnce {
+			if processed == 0 {
+				log.Printf("parsed-job-worker run-once completed: no pending parsed rows")
+			} else {
+				log.Printf("parsed-job-worker run-once completed processed=%d", processed)
+			}
+			return nil
+		}
+		time.Sleep(time.Duration(pollSeconds * float64(time.Second)))
+	}
+}
 
 func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, roleTitle, roleDescription string, techStack any) (string, string, []string, error) {
 	normalizedTechStack := normalizeTechStack(techStack)

@@ -65,7 +65,7 @@ func TestResetStaleParsedRemovesStaleParsedRows(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := New(db)
+	svc := New(Config{}, db)
 	checkedCount, staleCount, err := svc.ResetStaleParsed(context.Background(), 100)
 	if err != nil {
 		t.Fatal(err)

@@ -847,7 +847,7 @@ func (h *Handler) autoCategorizeParsedJob(c *gin.Context) {
 		return
 	}
 
-	parsedSvc := parsed.New(h.db)
+	parsedSvc := parsed.New(parsed.Config{}, h.db)
 	nextTitle, nextFunction, nextTechStack, err := parsedSvc.SuggestCategoryWithTechStack(
 		c.Request.Context(),
 		source,

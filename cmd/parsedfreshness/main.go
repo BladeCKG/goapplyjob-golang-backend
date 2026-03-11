@@ -24,7 +24,7 @@ func main() {
 	}
 	defer db.Close()
 
-	svc := parsed.New(db)
+	svc := parsed.New(parsed.Config{}, db)
 	checkedCount, staleCount, err := svc.ResetStaleParsed(context.Background(), 100)
 	if err != nil {
 		log.Fatal(err)
