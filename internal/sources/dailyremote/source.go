@@ -160,26 +160,26 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 	targetURL := resolveRedirectURLDailyRemote(ToTargetJobURL(firstNonEmpty(stringValue(jobPosting["url"]), sourceURL)))
 	salaryPayload := parseSalaryRangeFromText(headSalaryText)
 	payload := map[string]any{
-		"id":                           nilIfEmpty(strconv.Itoa(externalID)),
-		"url":                          targetURL,
-		"slug":                         buildJobSlug(sourceURL, roleTitle),
-		"created_at":                   createdAt,
-		"validUntilDate":               nilIfEmpty(validUntil),
-		"roleTitle":                    nilIfEmpty(roleTitle),
-		"occupationalCategory":         nilIfEmpty(normalizeText(jobPosting["occupationalCategory"])),
-		"roleDescription":              nilIfEmpty(roleDescription),
-		"roleRequirements":             nil,
-		"benefits":                     nilIfEmpty(decodeHTMLText(stringValue(jobPosting["jobBenefits"]))),
-		"descriptionLanguage":          "en",
-		"employmentType":               normalizeEmploymentType(jobPosting["employmentType"]),
-		"locationType":                 locationType,
-		"locationCountries":            locationCountries,
-		"isEntryLevel":                 isEntry,
-		"isJunior":                     isJunior,
-		"isMidLevel":                   isMid,
-		"isSenior":                     isSenior,
-		"isLead":                       isLead,
-		"company":                      company,
+		"id":                   nilIfEmpty(strconv.Itoa(externalID)),
+		"url":                  targetURL,
+		"slug":                 buildJobSlug(sourceURL, roleTitle),
+		"created_at":           createdAt,
+		"validUntilDate":       nilIfEmpty(validUntil),
+		"roleTitle":            nilIfEmpty(roleTitle),
+		"occupationalCategory": nilIfEmpty(normalizeText(jobPosting["occupationalCategory"])),
+		"roleDescription":      nilIfEmpty(roleDescription),
+		"roleRequirements":     nil,
+		"benefits":             nilIfEmpty(decodeHTMLText(stringValue(jobPosting["jobBenefits"]))),
+		"descriptionLanguage":  "en",
+		"employmentType":       normalizeEmploymentType(jobPosting["employmentType"]),
+		"locationType":         locationType,
+		"locationCountries":    locationCountries,
+		"isEntryLevel":         isEntry,
+		"isJunior":             isJunior,
+		"isMidLevel":           isMid,
+		"isSenior":             isSenior,
+		"isLead":               isLead,
+		"company":              company,
 	}
 	if strings.TrimSpace(aiSummary) != "" {
 		payload["jobDescriptionSummary"] = aiSummary
@@ -291,8 +291,8 @@ func resolveRedirectURLDailyRemote(rawURL string) string {
 	if err != nil {
 		return trimmed
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; GoApplyJobBot/1.0; +https://goapplyjob.online)")
-	client := &http.Client{Timeout: 3 * time.Second}
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return trimmed
