@@ -79,6 +79,9 @@ func TestParseRawHTMLExtractsSalarySummaryAndCompanyEnrichment(t *testing.T) {
 	if payload["id"] != "4683161" {
 		t.Fatalf("expected extracted id, got %#v", payload["id"])
 	}
+	if payload["_skip_for_retry"] != nil {
+		t.Fatalf("did not expect retry marker for resolved url, got %#v", payload["_skip_for_retry"])
+	}
 	if payload["isSenior"] != true || payload["isMidLevel"] != false {
 		t.Fatalf("unexpected seniority flags %#v", payload)
 	}
@@ -111,6 +114,33 @@ func TestParseRawHTMLExtractsSalarySummaryAndCompanyEnrichment(t *testing.T) {
 		}
 	default:
 		t.Fatalf("unexpected company industries type %#T", company["industrySpecialities"])
+	}
+}
+
+func TestParseRawHTMLMarksRetryWhenUnresolvedApplyURL(t *testing.T) {
+	html := `
+<script type="application/ld+json">
+{
+  "@type":"JobPosting",
+  "url":"https://dailyremote.com/remote-job/senior-platform-engineer-4683999",
+  "title":"Senior Platform Engineer",
+  "description":"&lt;p&gt;Role&lt;/p&gt;",
+  "datePosted":"2026-03-04T14:00:16.000Z",
+  "employmentType":"FULL_TIME",
+  "applicantLocationRequirements":[{"@type":"Country","name":"United States"}],
+  "hiringOrganization":{"@type":"Organization","name":"Acme"}
+}
+</script>`
+
+	orig := resolveRedirectURLDailyRemoteFunc
+	resolveRedirectURLDailyRemoteFunc = func(_url string) string {
+		return "https://dailyremote.com/apply/4683999"
+	}
+	defer func() { resolveRedirectURLDailyRemoteFunc = orig }()
+
+	payload := ParseRawHTML(html, "https://dailyremote.com/remote-job/senior-platform-engineer-4683999")
+	if payload["_skip_for_retry"] != true {
+		t.Fatalf("expected retry marker, got %#v", payload["_skip_for_retry"])
 	}
 }
 

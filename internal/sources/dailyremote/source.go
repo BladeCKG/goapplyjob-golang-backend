@@ -37,6 +37,8 @@ var (
 	companyTagPattern     = regexp.MustCompile(`(?is)<span[^>]*class=['"][^'"]*\btag\b[^'"]*['"][^>]*>(.*?)</span>`)
 )
 
+var resolveRedirectURLDailyRemoteFunc = resolveRedirectURLDailyRemote
+
 func ExtractExternalIDFromURL(rawURL string) int {
 	match := externalIDPattern.FindStringSubmatch(strings.TrimSpace(rawURL))
 	if len(match) < 2 {
@@ -157,7 +159,7 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 	if industry, ok := companyEnrichment["industrySpecialities"]; ok {
 		company["industrySpecialities"] = industry
 	}
-	targetURL := resolveRedirectURLDailyRemote(ToTargetJobURL(firstNonEmpty(stringValue(jobPosting["url"]), sourceURL)))
+	targetURL := resolveRedirectURLDailyRemoteFunc(ToTargetJobURL(firstNonEmpty(stringValue(jobPosting["url"]), sourceURL)))
 	salaryPayload := parseSalaryRangeFromText(headSalaryText)
 	payload := map[string]any{
 		"id":                   nilIfEmpty(strconv.Itoa(externalID)),
@@ -180,6 +182,10 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 		"isSenior":             isSenior,
 		"isLead":               isLead,
 		"company":              company,
+	}
+	if strings.Contains(targetURL, "dailyremote.com/apply/") {
+		payload["_skip_for_retry"] = true
+		payload["_skip_reason"] = "dailyremote_unresolved_url"
 	}
 	if strings.TrimSpace(aiSummary) != "" {
 		payload["jobDescriptionSummary"] = aiSummary
