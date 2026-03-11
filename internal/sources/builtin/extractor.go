@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"goapplyjob-golang-backend/internal/locationnorm"
+	nethtml "golang.org/x/net/html"
 )
 
 var (
@@ -473,15 +474,55 @@ func extractRoleRequirementsAndCleanDescription(descriptionText string) (any, an
 	if strings.TrimSpace(descriptionText) == "" {
 		return nil, nil
 	}
-	if strings.Contains(descriptionText, "<") && strings.Contains(descriptionText, ">") {
-		descriptionText = normalizeHTMLForSectionParsing(descriptionText)
+	requirementHeadingPattern := regexp.MustCompile(`(?i)(requirement|required|qualification|what you'll bring|what you bring|must have|who you are|experience you have|skills and qualifications|\bskills\b)`)
+	stopHeadingPattern := regexp.MustCompile(`(?i)(about|responsibilit|what you'll do|what you will do|benefit|perks|compensation|salary|about the role|company)`)
+	descriptionHeadingPattern := regexp.MustCompile(`(?i)(overview|about|job description|role summary|summary|duties|responsibilit|what you'll do|what you will do)`)
+
+	sectionFromHeading := func(value string) string {
+		normalized := normalizeHeadingText(value)
+		switch {
+		case requirementHeadingPattern.MatchString(normalized):
+			return "requirements"
+		case descriptionHeadingPattern.MatchString(normalized):
+			return "description"
+		default:
+			return ""
+		}
 	}
-	lines := strings.Split(descriptionText, "\n")
+
+	cleanLines := func(text string) []string {
+		lines := strings.Split(text, "\n")
+		out := []string{}
+		seen := map[string]struct{}{}
+		for _, line := range lines {
+			line = strings.TrimSpace(spacePattern.ReplaceAllString(line, " "))
+			if line == "" {
+				continue
+			}
+			key := strings.ToLower(line)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, line)
+		}
+		return out
+	}
+
+	if strings.Contains(descriptionText, "<") && strings.Contains(descriptionText, ">") {
+		if req, desc := extractRoleRequirementsFromHTML(descriptionText, sectionFromHeading, cleanLines, requirementHeadingPattern, stopHeadingPattern); req != nil || desc != nil {
+			return req, desc
+		}
+	}
+
+	plainText := descriptionText
+	if strings.Contains(descriptionText, "<") && strings.Contains(descriptionText, ">") {
+		plainText = normalizeHTMLForSectionParsing(descriptionText)
+	}
+	lines := strings.Split(plainText, "\n")
 	cleanedLines := make([]string, 0, len(lines))
 	requirementLines := []string{}
 	capturing := false
-	requirementHeadingPattern := regexp.MustCompile(`(?i)(requirement|required|qualification|what you'll bring|what you bring|must have|who you are|experience you have|skills and qualifications|\bskills\b)`)
-	stopHeadingPattern := regexp.MustCompile(`(?i)(about|responsibilit|what you'll do|what you will do|benefit|perks|compensation|salary|about the role|company)`)
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
@@ -489,13 +530,11 @@ func extractRoleRequirementsAndCleanDescription(descriptionText string) (any, an
 		}
 		normalized := normalizeHeadingText(trimmed)
 		if requirementHeadingPattern.MatchString(normalized) && len(trimmed) <= 80 {
-			// Allow inline headings like "Requirements: 5+ years..."
 			remainder := strings.TrimSpace(regexp.MustCompile(`(?i)^(requirements|requirement|qualifications|qualification)\s*[:\-]\s*`).ReplaceAllString(trimmed, ""))
 			capturing = true
 			if remainder != "" && strings.ToLower(remainder) != strings.ToLower(trimmed) {
 				requirementLines = append(requirementLines, remainder)
 			}
-			capturing = true
 			continue
 		}
 		if capturing && stopHeadingPattern.MatchString(normalized) && len(trimmed) <= 80 {
@@ -511,6 +550,295 @@ func extractRoleRequirementsAndCleanDescription(descriptionText string) (any, an
 		return nil, strings.Join(cleanedLines, "\n")
 	}
 	return strings.Join(dedupeLines(requirementLines), "\n"), strings.Join(cleanedLines, "\n")
+}
+
+func extractRoleRequirementsFromHTML(
+	descriptionHTML string,
+	sectionFromHeading func(string) string,
+	cleanLines func(string) []string,
+	requirementHeadingPattern *regexp.Regexp,
+	stopHeadingPattern *regexp.Regexp,
+) (any, any) {
+	doc, err := nethtml.Parse(strings.NewReader(descriptionHTML))
+	if err != nil {
+		return nil, nil
+	}
+
+	type token struct {
+		kind string
+		text string
+	}
+
+	isBlockTag := func(tag string) bool {
+		switch tag {
+		case "p", "li", "div", "ul", "ol":
+			return true
+		default:
+			return false
+		}
+	}
+
+	isHeadingTag := func(tag string) bool {
+		return len(tag) == 2 && tag[0] == 'h' && tag[1] >= '1' && tag[1] <= '6'
+	}
+
+	textContent := func(n *nethtml.Node) string {
+		var b strings.Builder
+		var walk func(*nethtml.Node)
+		walk = func(node *nethtml.Node) {
+			if node.Type == nethtml.TextNode {
+				b.WriteString(node.Data)
+			}
+			if node.Type == nethtml.ElementNode && strings.EqualFold(node.Data, "br") {
+				b.WriteString("\n")
+			}
+			for child := node.FirstChild; child != nil; child = child.NextSibling {
+				walk(child)
+			}
+			if node.Type == nethtml.ElementNode && isBlockTag(strings.ToLower(node.Data)) {
+				b.WriteString("\n")
+			}
+		}
+		walk(n)
+		return b.String()
+	}
+
+	var tokens []token
+	var walkTokens func(*nethtml.Node)
+	walkTokens = func(node *nethtml.Node) {
+		if node.Type == nethtml.ElementNode {
+			tag := strings.ToLower(node.Data)
+			if tag == "b" || tag == "strong" {
+				heading := strings.TrimSpace(spacePattern.ReplaceAllString(textContent(node), " "))
+				if heading != "" {
+					tokens = append(tokens, token{kind: "heading", text: heading})
+				}
+				return
+			}
+			if tag == "br" {
+				tokens = append(tokens, token{kind: "newline"})
+				return
+			}
+			if isBlockTag(tag) {
+				tokens = append(tokens, token{kind: "newline"})
+			}
+			for child := node.FirstChild; child != nil; child = child.NextSibling {
+				walkTokens(child)
+			}
+			if isBlockTag(tag) {
+				tokens = append(tokens, token{kind: "newline"})
+			}
+			return
+		}
+		if node.Type == nethtml.TextNode {
+			if strings.TrimSpace(node.Data) != "" {
+				tokens = append(tokens, token{kind: "text", text: node.Data})
+			}
+		}
+	}
+	walkTokens(doc)
+
+	inlineDescription := []string{}
+	inlineRequirements := []string{}
+	currentSection := ""
+	lineParts := []string{}
+
+	flushLine := func() {
+		if len(lineParts) == 0 {
+			return
+		}
+		line := strings.TrimSpace(spacePattern.ReplaceAllString(strings.Join(lineParts, " "), " "))
+		lineParts = nil
+		if line == "" {
+			return
+		}
+		switch currentSection {
+		case "requirements":
+			inlineRequirements = append(inlineRequirements, line)
+		case "description":
+			inlineDescription = append(inlineDescription, line)
+		}
+	}
+
+	for _, tok := range tokens {
+		switch tok.kind {
+		case "heading":
+			flushLine()
+			currentSection = sectionFromHeading(tok.text)
+		case "newline":
+			flushLine()
+		case "text":
+			lineParts = append(lineParts, tok.text)
+		}
+	}
+	flushLine()
+
+	if len(inlineDescription) > 0 || len(inlineRequirements) > 0 {
+		desc := cleanLines(strings.Join(inlineDescription, "\n"))
+		req := cleanLines(strings.Join(inlineRequirements, "\n"))
+		var descText any
+		var reqText any
+		if len(desc) > 0 {
+			descText = strings.Join(desc, "\n")
+		}
+		if len(req) > 0 {
+			reqText = strings.Join(req, "\n")
+		}
+		return reqText, descText
+	}
+
+	blocks := []*nethtml.Node{}
+	var collectBlocks func(*nethtml.Node)
+	collectBlocks = func(node *nethtml.Node) {
+		if node.Type == nethtml.ElementNode {
+			tag := strings.ToLower(node.Data)
+			if isBlockTag(tag) {
+				blocks = append(blocks, node)
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			collectBlocks(child)
+		}
+	}
+	collectBlocks(doc)
+
+	blockDescription := []string{}
+	blockRequirements := []string{}
+	currentSection = ""
+
+	for _, block := range blocks {
+		tag := strings.ToLower(block.Data)
+		headingText, remainder := extractBoldHeadingFromBlock(block, textContent, cleanLines)
+		if headingText != "" {
+			currentSection = sectionFromHeading(headingText)
+			if remainder != "" && (currentSection == "requirements" || currentSection == "description") {
+				lines := cleanLines(remainder)
+				if currentSection == "requirements" {
+					blockRequirements = append(blockRequirements, lines...)
+				} else {
+					blockDescription = append(blockDescription, lines...)
+				}
+			}
+			continue
+		}
+
+		if currentSection != "requirements" && currentSection != "description" {
+			continue
+		}
+		if tag == "div" || tag == "ul" || tag == "ol" {
+			continue
+		}
+		lines := cleanLines(textContent(block))
+		if currentSection == "requirements" {
+			blockRequirements = append(blockRequirements, lines...)
+		} else {
+			blockDescription = append(blockDescription, lines...)
+		}
+	}
+
+	if len(blockDescription) > 0 || len(blockRequirements) > 0 {
+		var descText any
+		var reqText any
+		if len(blockDescription) > 0 {
+			descText = strings.Join(cleanLines(strings.Join(blockDescription, "\n")), "\n")
+		}
+		if len(blockRequirements) > 0 {
+			reqText = strings.Join(cleanLines(strings.Join(blockRequirements, "\n")), "\n")
+		}
+		return reqText, descText
+	}
+
+	var walkHeadings func(*nethtml.Node)
+	var reqLines []string
+	var descText any
+
+	walkHeadings = func(node *nethtml.Node) {
+		if node.Type == nethtml.ElementNode && isHeadingTag(strings.ToLower(node.Data)) {
+			headingText := strings.TrimSpace(spacePattern.ReplaceAllString(textContent(node), " "))
+			if headingText != "" && requirementHeadingPattern.MatchString(normalizeHeadingText(headingText)) {
+				// Collect following siblings until the next heading or stop heading.
+				collected := []string{}
+				for sib := node.NextSibling; sib != nil; sib = sib.NextSibling {
+					if sib.Type == nethtml.ElementNode && isHeadingTag(strings.ToLower(sib.Data)) {
+						sibHeading := strings.TrimSpace(spacePattern.ReplaceAllString(textContent(sib), " "))
+						if sibHeading != "" && stopHeadingPattern.MatchString(normalizeHeadingText(sibHeading)) {
+							break
+						}
+						break
+					}
+					text := strings.TrimSpace(textContent(sib))
+					if text != "" {
+						collected = append(collected, cleanLines(text)...)
+					}
+				}
+				if len(collected) > 0 {
+					reqLines = append(reqLines, collected...)
+					descText = strings.TrimSpace(textContent(doc))
+					return
+				}
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walkHeadings(child)
+		}
+	}
+	walkHeadings(doc)
+
+	if len(reqLines) > 0 {
+		return strings.Join(dedupeLines(reqLines), "\n"), descText
+	}
+	return nil, nil
+}
+
+func extractBoldHeadingFromBlock(
+	node *nethtml.Node,
+	textContent func(*nethtml.Node) string,
+	cleanLines func(string) []string,
+) (string, string) {
+	if node == nil || node.Type != nethtml.ElementNode {
+		return "", ""
+	}
+	if node.Data != "p" && node.Data != "li" && node.Data != "div" {
+		return "", ""
+	}
+
+	firstTag := (*nethtml.Node)(nil)
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == nethtml.TextNode && strings.TrimSpace(child.Data) != "" {
+			return "", ""
+		}
+		if child.Type == nethtml.ElementNode {
+			firstTag = child
+			break
+		}
+	}
+	if firstTag == nil || (firstTag.Data != "b" && firstTag.Data != "strong") {
+		return "", ""
+	}
+
+	headingText := strings.TrimSpace(spacePattern.ReplaceAllString(textContent(firstTag), " "))
+	if headingText == "" {
+		return "", ""
+	}
+	fullText := textContent(node)
+	lines := cleanLines(fullText)
+	if len(lines) == 0 {
+		return headingText, ""
+	}
+	normalizedHeading := normalizeHeadingText(headingText)
+	if normalizeHeadingText(lines[0]) == normalizedHeading {
+		lines = lines[1:]
+	} else {
+		filtered := []string{}
+		for _, line := range lines {
+			if normalizeHeadingText(line) == normalizedHeading {
+				continue
+			}
+			filtered = append(filtered, line)
+		}
+		lines = filtered
+	}
+	return headingText, strings.Join(lines, "\n")
 }
 
 func dedupeLines(lines []string) []string {

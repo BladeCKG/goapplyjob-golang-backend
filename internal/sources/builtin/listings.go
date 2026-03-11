@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"html"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -19,11 +18,11 @@ type ImportRow struct {
 	PostDate time.Time
 }
 
-var publishedDateByJobIDRegex = regexp.MustCompile(`(?is)\{[^{}]*['"]id['"]\s*:\s*(\d+)[^{}]*['"]published_date['"]\s*:\s*['"]([^'"]+)['"][^{}]*\}`)
+var publishedDateRegex = regexp.MustCompile(`(?is)\{[^{}]*['"]published_date['"]\s*:\s*['"]([^'"]+)['"][^{}]*\}`)
 
 func ExtractJobListings(htmlText string) []map[string]any {
 	collectionPage, itemList := findItemListLD(htmlText)
-	publishedDatesByJobID := extractPublishedDatesByJobID(htmlText)
+	publishedDates := extractPublishedDatesSequence(htmlText)
 	_ = collectionPage
 
 	items, _ := itemList["itemListElement"].([]any)
@@ -32,15 +31,15 @@ func ExtractJobListings(htmlText string) []map[string]any {
 	}
 
 	parsed := make([]map[string]any, 0, len(items))
-	for _, item := range items {
+	for idx, item := range items {
 		node, _ := item.(map[string]any)
 		if node == nil {
 			continue
 		}
 		jobURL := stringValue(node["url"])
 		postDate := ""
-		if externalJobID := extractNumericExternalJobID(jobURL); externalJobID > 0 {
-			postDate = publishedDatesByJobID[externalJobID]
+		if idx < len(publishedDates) {
+			postDate = publishedDates[idx]
 		}
 		normalizedPostDate := normalizePostDate(postDate)
 		parsed = append(parsed, map[string]any{
@@ -54,15 +53,6 @@ func ExtractJobListings(htmlText string) []map[string]any {
 		})
 	}
 	return parsed
-}
-
-func extractNumericExternalJobID(rawURL string) int {
-	re := regexp.MustCompile(`/(\d+)(?:[/?#]|$)`)
-	if match := re.FindStringSubmatch(rawURL); len(match) == 2 {
-		id, _ := strconv.Atoi(match[1])
-		return id
-	}
-	return 0
 }
 
 func findItemListLD(htmlText string) (map[string]any, map[string]any) {
@@ -117,21 +107,17 @@ func flattenLDNodes(payload any) []map[string]any {
 	}
 }
 
-func extractPublishedDatesByJobID(htmlText string) map[int]string {
+func extractPublishedDatesSequence(htmlText string) []string {
 	decoded := html.UnescapeString(htmlText)
 	match := regexp.MustCompile(`(?is)logBuiltinTrackEvent\(\s*['"]job_board_view['"],\s*\{.*?['"]jobs['"]\s*:\s*\[(.*?)\]\s*,\s*['"]filters['"]`).FindStringSubmatch(decoded)
 	if len(match) < 2 {
-		return map[int]string{}
+		return []string{}
 	}
-	out := map[int]string{}
-	for _, item := range publishedDateByJobIDRegex.FindAllStringSubmatch(match[1], -1) {
-		id, err := strconv.Atoi(item[1])
-		if err != nil {
-			continue
-		}
-		value := strings.TrimSpace(item[2])
+	out := []string{}
+	for _, item := range publishedDateRegex.FindAllStringSubmatch(match[1], -1) {
+		value := strings.TrimSpace(item[1])
 		if value != "" {
-			out[id] = value
+			out = append(out, value)
 		}
 	}
 	return out
