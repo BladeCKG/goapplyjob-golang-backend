@@ -4,13 +4,16 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"goapplyjob-golang-backend/internal/locationnorm"
 	"html"
+	"math"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
-	"goapplyjob-golang-backend/internal/locationnorm"
+	nethtml "golang.org/x/net/html"
 )
 
 const (
@@ -19,10 +22,11 @@ const (
 )
 
 var (
-	scriptLDPattern = regexp.MustCompile(`(?is)<script[^>]*type=['"]application/ld\+json['"][^>]*>(.*?)</script>`)
-	tagPattern      = regexp.MustCompile(`(?is)<[^>]+>`)
-	descItemPattern = regexp.MustCompile(`(?is)<(p|li)([^>]*)>(.*?)</(?:p|li)>`)
-	anchorHrefRE    = regexp.MustCompile(`(?is)<a\b[^>]*\bhref\s*=\s*['"]([^'"]+)['"][^>]*>(.*?)</a>`)
+	scriptLDPattern     = regexp.MustCompile(`(?is)<script[^>]*type=['"]application/ld\+json['"][^>]*>(.*?)</script>`)
+	tagPattern          = regexp.MustCompile(`(?is)<[^>]+>`)
+	descItemPattern     = regexp.MustCompile(`(?is)<(p|li)([^>]*)>(.*?)</(?:p|li)>`)
+	anchorHrefRE        = regexp.MustCompile(`(?is)<a\b[^>]*\bhref\s*=\s*['"]([^'"]+)['"][^>]*>(.*?)</a>`)
+	salaryNumberPattern = regexp.MustCompile(`([$€£])?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*([kKmM])?`)
 )
 
 type sitemapURL struct {
@@ -65,6 +69,10 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 	jobSlug := buildJobSlug(stringValue(jobPosting["url"]))
 	roleTitle := stringValue(normalizeTitle(stringValue(jobPosting["title"])))
 	isEntry, isJunior, isMid, isSenior, isLead := inferSeniority(roleTitle)
+	salaryRange := parseSalaryRange(jobPosting["baseSalary"])
+	if salaryRange == nil {
+		salaryRange = extractSalaryRangeFromSummaryHTML(htmlText)
+	}
 	return map[string]any{
 		"id":                           nilIfEmpty(externalID),
 		"url":                          firstNonEmpty(applyURL, stringValue(jobPosting["url"]), sourceURL),
@@ -87,7 +95,7 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 		"isMidLevel":                   isMid,
 		"isSenior":                     isSenior,
 		"isLead":                       isLead,
-		"salaryRange":                  parseSalaryRange(jobPosting["baseSalary"]),
+		"salaryRange":                  salaryRange,
 		"company":                      parseCompany(jobPosting["hiringOrganization"], externalID, companyTagline),
 	}
 }
@@ -286,6 +294,188 @@ func parseSalaryRange(value any) any {
 		return nil
 	}
 	return out
+}
+
+func normalizeText(value string) string {
+	value = strings.ReplaceAll(value, "\u00a0", " ")
+	return strings.TrimSpace(value)
+}
+
+func extractSalaryRangeFromSummaryHTML(htmlText string) any {
+	if strings.TrimSpace(htmlText) == "" {
+		return nil
+	}
+	doc, err := nethtml.Parse(strings.NewReader(htmlText))
+	if err != nil {
+		return nil
+	}
+	foundH1 := false
+	summaryText := ""
+	var walk func(*nethtml.Node)
+	walk = func(node *nethtml.Node) {
+		if summaryText != "" {
+			return
+		}
+		if node.Type == nethtml.ElementNode && strings.EqualFold(node.Data, "h1") {
+			foundH1 = true
+		} else if foundH1 && node.Type == nethtml.ElementNode && strings.EqualFold(node.Data, "p") {
+			summaryText = normalizeText(textContent(node))
+			return
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(doc)
+	if summaryText == "" {
+		return nil
+	}
+	lower := strings.ToLower(summaryText)
+	idx := strings.Index(lower, "salary:")
+	if idx < 0 {
+		return nil
+	}
+	salaryText := strings.TrimSpace(summaryText[idx+len("salary:"):])
+	if locIdx := strings.Index(strings.ToLower(salaryText), "location:"); locIdx >= 0 {
+		salaryText = strings.TrimSpace(salaryText[:locIdx])
+	}
+	return parseSalaryRangeFromText(salaryText)
+}
+
+func parseSalaryRangeFromText(value string) any {
+	raw := strings.TrimSpace(value)
+	if raw == "" {
+		return nil
+	}
+	normalizedText := normalizeSalaryText(raw)
+	normalized := strings.ToLower(normalizedText)
+	matches := salaryNumberPattern.FindAllStringSubmatch(raw, -1)
+	if len(matches) == 0 {
+		matches = salaryNumberPattern.FindAllStringSubmatch(normalizedText, -1)
+	}
+	if len(matches) == 0 {
+		return nil
+	}
+	amounts := make([]float64, 0, len(matches))
+	currencySymbol := ""
+	for _, match := range matches {
+		if len(match) < 4 {
+			continue
+		}
+		if currencySymbol == "" && strings.TrimSpace(match[1]) != "" {
+			currencySymbol = strings.TrimSpace(match[1])
+		}
+		amount := parseAmount(match[2], match[3])
+		if amount > 0 {
+			amounts = append(amounts, amount)
+		}
+	}
+	if len(amounts) == 0 {
+		return nil
+	}
+	salaryType := "per year"
+	if strings.Contains(normalized, "per hour") || strings.Contains(normalized, "/hour") || strings.Contains(normalized, "/hr") || strings.Contains(normalized, " hourly") {
+		salaryType = "per hour"
+	} else if strings.Contains(normalized, "per month") || strings.Contains(normalized, "/month") || strings.Contains(normalized, "/mo") || strings.Contains(normalized, " monthly") {
+		salaryType = "per month"
+	} else if strings.Contains(normalized, "per week") || strings.Contains(normalized, "/week") || strings.Contains(normalized, "/wk") || strings.Contains(normalized, " weekly") {
+		salaryType = "per week"
+	} else if strings.Contains(normalized, "per day") || strings.Contains(normalized, "/day") || strings.Contains(normalized, " daily") {
+		salaryType = "per day"
+	} else if strings.Contains(normalized, "per year") || strings.Contains(normalized, "/year") || strings.Contains(normalized, "/yr") || strings.Contains(normalized, " yearly") || strings.Contains(normalized, " annual") {
+		salaryType = "per year"
+	}
+	currencyCode := "USD"
+	if strings.Contains(normalized, "eur") {
+		currencyCode = "EUR"
+		if currencySymbol == "" {
+			currencySymbol = "€"
+		}
+	} else if strings.Contains(normalized, "gbp") {
+		currencyCode = "GBP"
+		if currencySymbol == "" {
+			currencySymbol = "£"
+		}
+	}
+	if currencySymbol == "" {
+		currencySymbol = "$"
+	}
+	minValue := amounts[0]
+	maxValue := amounts[0]
+	if len(amounts) > 1 {
+		maxValue = amounts[1]
+	}
+	payload := map[string]any{
+		"min":                     normalizeSalaryValue(minValue),
+		"max":                     normalizeSalaryValue(maxValue),
+		"salaryType":              salaryType,
+		"currencyCode":            currencyCode,
+		"currencySymbol":          currencySymbol,
+		"salaryHumanReadableText": raw,
+	}
+	if currencyCode == "USD" {
+		payload["minSalaryAsUSD"] = normalizeSalaryValue(minValue)
+		payload["maxSalaryAsUSD"] = normalizeSalaryValue(maxValue)
+	}
+	return payload
+}
+
+func normalizeSalaryValue(value float64) any {
+	if value == 0 {
+		return 0
+	}
+	if value == float64(int64(value)) {
+		return int64(value)
+	}
+	return math.Round(value*100) / 100
+}
+
+func normalizeSalaryText(value string) string {
+	text := html.UnescapeString(value)
+	replacer := strings.NewReplacer(
+		"â‚¬", "€",
+		"в‚¬", "€",
+		"Â£", "£",
+		"Ã‚Â£", "£",
+		"Г‚ВЈ", "£",
+		"ВЈ", "£",
+		"Ј", "£",
+		"â‚¹", "₹",
+	)
+	return replacer.Replace(text)
+}
+
+func parseAmount(numberText, suffix string) float64 {
+	clean := strings.TrimSpace(strings.ReplaceAll(numberText, ",", ""))
+	if clean == "" {
+		return 0
+	}
+	value, err := strconv.ParseFloat(clean, 64)
+	if err != nil {
+		return 0
+	}
+	switch strings.ToLower(strings.TrimSpace(suffix)) {
+	case "k":
+		value *= 1000
+	case "m":
+		value *= 1000000
+	}
+	return value
+}
+
+func textContent(node *nethtml.Node) string {
+	var b strings.Builder
+	var walk func(*nethtml.Node)
+	walk = func(n *nethtml.Node) {
+		if n.Type == nethtml.TextNode {
+			b.WriteString(n.Data)
+		}
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(node)
+	return b.String()
 }
 
 func normalizeEmploymentType(value any) any {
@@ -588,10 +778,13 @@ func inferSeniority(title string) (bool, bool, bool, bool, bool) {
 	_, hasPrincipal := tokens["principal"]
 	_, hasStaff := tokens["staff"]
 	_, hasHead := tokens["head"]
+	_, hasDirector := tokens["director"]
+	_, hasChief := tokens["chief"]
+	_, hasManager := tokens["manager"]
 	isEntry := hasEntry || hasIntern
 	isJunior := hasJunior || hasJr
 	isSenior := hasSenior || hasSr
-	isLead := hasLead || hasPrincipal || hasStaff || hasHead
+	isLead := hasLead || hasPrincipal || hasStaff || hasHead || hasDirector || hasChief || hasManager
 	isMid := !(isEntry || isJunior || isSenior || isLead)
 	return isEntry, isJunior, isMid, isSenior, isLead
 }
