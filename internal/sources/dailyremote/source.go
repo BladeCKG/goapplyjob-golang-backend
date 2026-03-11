@@ -144,6 +144,7 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 	externalID := extractExternalID(jobPosting, sourceURL)
 	roleTitle := normalizeText(jobPosting["title"])
 	roleDescription := decodeHTMLText(stringValue(jobPosting["description"]))
+	isEntry, isJunior, isMid, isSenior, isLead := inferSeniority(roleTitle)
 	createdAt := normalizeISO(jobPosting["datePosted"])
 	validUntil := normalizeISO(jobPosting["validThrough"])
 	locationType := normalizeLocationType(jobPosting["jobLocationType"])
@@ -173,6 +174,11 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 		"employmentType":               normalizeEmploymentType(jobPosting["employmentType"]),
 		"locationType":                 locationType,
 		"locationCountries":            locationCountries,
+		"isEntryLevel":                 isEntry,
+		"isJunior":                     isJunior,
+		"isMidLevel":                   isMid,
+		"isSenior":                     isSenior,
+		"isLead":                       isLead,
 		"company":                      company,
 	}
 	if strings.TrimSpace(aiSummary) != "" {
@@ -677,4 +683,28 @@ func containsIgnoreCase(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func inferSeniority(title string) (bool, bool, bool, bool, bool) {
+	normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(title), " ")
+	tokens := map[string]struct{}{}
+	for _, token := range strings.Fields(strings.TrimSpace(normalized)) {
+		tokens[token] = struct{}{}
+	}
+	_, hasEntry := tokens["entry"]
+	_, hasIntern := tokens["intern"]
+	_, hasJunior := tokens["junior"]
+	_, hasJr := tokens["jr"]
+	_, hasSenior := tokens["senior"]
+	_, hasSr := tokens["sr"]
+	_, hasLead := tokens["lead"]
+	_, hasPrincipal := tokens["principal"]
+	_, hasStaff := tokens["staff"]
+	_, hasHead := tokens["head"]
+	isEntry := hasEntry || hasIntern
+	isJunior := hasJunior || hasJr
+	isSenior := hasSenior || hasSr
+	isLead := hasLead || hasPrincipal || hasStaff || hasHead
+	isMid := !(isEntry || isJunior || isSenior || isLead)
+	return isEntry, isJunior, isMid, isSenior, isLead
 }

@@ -79,6 +79,9 @@ func TestParseRawHTMLExtractsSalarySummaryAndCompanyEnrichment(t *testing.T) {
 	if payload["id"] != "4683161" {
 		t.Fatalf("expected extracted id, got %#v", payload["id"])
 	}
+	if payload["isSenior"] != true || payload["isMidLevel"] != false {
+		t.Fatalf("unexpected seniority flags %#v", payload)
+	}
 	if payload["jobDescriptionSummary"] == nil {
 		t.Fatalf("expected AI summary mapped into jobDescriptionSummary")
 	}

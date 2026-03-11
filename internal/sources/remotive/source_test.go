@@ -99,6 +99,9 @@ func TestParseRawHTMLNormalizesTitleAndCountryTokens(t *testing.T) {
 	if payload["roleTitle"] != "Senior Backend Engineer" {
 		t.Fatalf("expected normalized roleTitle, got %#v", payload["roleTitle"])
 	}
+	if payload["isSenior"] != true || payload["isMidLevel"] != false {
+		t.Fatalf("unexpected seniority flags %#v", payload)
+	}
 	countries, _ := payload["locationCountries"].([]string)
 	if len(countries) != 1 || countries[0] != "United States" {
 		t.Fatalf("expected normalized country token, got %#v", payload["locationCountries"])

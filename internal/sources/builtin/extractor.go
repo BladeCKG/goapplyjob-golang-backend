@@ -2,14 +2,13 @@ package builtin
 
 import (
 	"encoding/json"
+	"goapplyjob-golang-backend/internal/locationnorm"
 	"html"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-
-	"goapplyjob-golang-backend/internal/locationnorm"
 )
 
 var (
@@ -19,7 +18,8 @@ var (
 	jobPostInitRegex        = regexp.MustCompile(`(?is)Builtin\.jobPostInit\((\{.*\})\)`)
 	topSkillsRegex          = regexp.MustCompile(`(?is)Top Skills\s*</h[1-6]>.*?<div[^>]*>\s*([^<]*,[^<]*)\s*</div>`)
 	salaryChipRegex         = regexp.MustCompile(`(?is)(\d[\d,]*)\s*K?\s*-\s*(\d[\d,]*)\s*K?\s*(Annually|Yearly|Hourly|Monthly)?`)
-	seniorityRegex          = regexp.MustCompile(`(?is)\b(Entry level|Junior level|Mid level|Senior level|Expert\s*/\s*Leader)\b`)
+	seniorityRegex          = regexp.MustCompile(`(?is)\b(Entry level|Junior level|Mid level|Senior level|Junior|Expert\s*/\s*Leader)\b`)
+	senioritySpanRegex      = regexp.MustCompile(`(?is)<span[^>]*>(.*?)</span>`)
 	tagPattern              = regexp.MustCompile(`(?is)<[^>]+>`)
 	spacePattern            = regexp.MustCompile(`\s+`)
 )
@@ -681,16 +681,21 @@ func normalizeLocationType(value string) any {
 }
 
 func inferLevelFlags(roleTitle, seniorityLabel string) map[string]bool {
-	switch strings.ToLower(strings.TrimSpace(seniorityLabel)) {
+	normalizedLabel := strings.ToLower(strings.TrimSpace(seniorityLabel))
+	normalizedLabel = spacePattern.ReplaceAllString(normalizedLabel, " ")
+	normalizedLabel = strings.ReplaceAll(normalizedLabel, " / ", "/")
+	normalizedLabel = strings.ReplaceAll(normalizedLabel, "/ ", "/")
+	normalizedLabel = strings.ReplaceAll(normalizedLabel, " /", "/")
+	switch normalizedLabel {
 	case "entry level":
 		return map[string]bool{"isEntryLevel": true, "isJunior": false, "isMidLevel": false, "isSenior": false, "isLead": false}
-	case "junior level":
+	case "junior level", "junior":
 		return map[string]bool{"isEntryLevel": false, "isJunior": true, "isMidLevel": false, "isSenior": false, "isLead": false}
 	case "mid level":
 		return map[string]bool{"isEntryLevel": false, "isJunior": false, "isMidLevel": true, "isSenior": false, "isLead": false}
 	case "senior level":
 		return map[string]bool{"isEntryLevel": false, "isJunior": false, "isMidLevel": false, "isSenior": true, "isLead": false}
-	case "expert / leader":
+	case "expert / leader", "expert/leader":
 		return map[string]bool{"isEntryLevel": false, "isJunior": false, "isMidLevel": false, "isSenior": false, "isLead": true}
 	}
 	normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(roleTitle), " ")
@@ -708,25 +713,33 @@ func inferLevelFlags(roleTitle, seniorityLabel string) map[string]bool {
 	_, hasLead := tokens["lead"]
 	_, hasPrincipal := tokens["principal"]
 	_, hasStaff := tokens["staff"]
+	_, hasDirector := tokens["director"]
+	_, hasManager := tokens["manager"]
+	_, hasHead := tokens["head"]
+	_, hasChief := tokens["chief"]
 	return map[string]bool{
 		"isEntryLevel": hasEntry || hasIntern,
 		"isJunior":     hasJunior || hasJr,
 		"isMidLevel":   hasMid,
 		"isSenior":     hasSenior || hasSr,
-		"isLead":       hasLead || hasPrincipal || hasStaff,
+		"isLead":       hasLead || hasPrincipal || hasStaff || hasDirector || hasHead || hasChief || hasManager,
 	}
 }
 
 func extractSeniorityLabel(htmlText string) string {
-	headerPart := htmlText
-	if parts := strings.SplitN(htmlText, "container py-lg", 2); len(parts) > 0 {
-		headerPart = parts[0]
+	for _, match := range senioritySpanRegex.FindAllStringSubmatch(htmlText, -1) {
+		if len(match) < 2 {
+			continue
+		}
+		spanText := strings.TrimSpace(spacePattern.ReplaceAllString(html.UnescapeString(tagPattern.ReplaceAllString(match[1], " ")), " "))
+		if spanText == "" {
+			continue
+		}
+		if labelMatch := seniorityRegex.FindStringSubmatch(spanText); len(labelMatch) >= 2 {
+			return strings.TrimSpace(spacePattern.ReplaceAllString(labelMatch[1], " "))
+		}
 	}
-	match := seniorityRegex.FindStringSubmatch(html.UnescapeString(tagPattern.ReplaceAllString(headerPart, " ")))
-	if len(match) < 2 {
-		return ""
-	}
-	return strings.TrimSpace(spacePattern.ReplaceAllString(match[1], " "))
+	return ""
 }
 
 func parseSalaryRange(jobPosting map[string]any, htmlText string) map[string]any {
