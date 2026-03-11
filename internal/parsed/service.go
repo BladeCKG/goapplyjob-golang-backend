@@ -139,6 +139,8 @@ var techStackAliases = map[string]string{
 var groqTechStackExtractAllowedCategories = []string{
 	"engineer",
 	"engineers",
+	"programmer",
+	"programmers",
 	"developer",
 	"developers",
 	"scientist",
