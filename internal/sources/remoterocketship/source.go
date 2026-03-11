@@ -4,13 +4,12 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"goapplyjob-golang-backend/internal/locationnorm"
 	"html"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
-
-	"goapplyjob-golang-backend/internal/locationnorm"
 )
 
 const (
@@ -195,6 +194,13 @@ func DeltaNewerThanLastmod(fullData []byte, previousFirstLastmod string) []byte 
 	return output
 }
 
+func parseISO(value string) string {
+	if parsed, err := normalizeTime(value); err == nil {
+		return parsed.UTC().Format(time.RFC3339Nano)
+	}
+	return ""
+}
+
 func normalizeTime(value string) (time.Time, error) {
 	if parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(value)); err == nil {
 		return parsed.UTC(), nil
@@ -202,8 +208,16 @@ func normalizeTime(value string) (time.Time, error) {
 	if parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(value)); err == nil {
 		return parsed.UTC(), nil
 	}
-	if parsed, err := time.Parse("2006-01-02T15:04:05", strings.TrimSpace(value)); err == nil {
+	if parsed, err := time.Parse("2006-01-02 15:04:05", strings.TrimSpace(value)); err == nil {
 		return parsed.UTC(), nil
+	}
+	if parsed, err := time.Parse("2006-01-02", strings.TrimSpace(value)); err == nil {
+		dateOnly := parsed.UTC()
+		now := time.Now().UTC()
+		if dateOnly.Year() == now.Year() && dateOnly.YearDay() == now.YearDay() {
+			return now, nil
+		}
+		return dateOnly, nil
 	}
 	return time.Time{}, errors.New("invalid time format")
 }
