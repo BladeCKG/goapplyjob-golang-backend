@@ -40,7 +40,7 @@ func ExtractJob(htmlText, companyHTML string) map[string]any {
 		identifierValue = stringValue(identifier["value"])
 	}
 
-	locationLabels, firstLocality, applicantCountry := extractLocationParts(jobPosting)
+	_, locationCity, locationStates, locationCountries := extractLocationFields(jobPosting)
 	descriptionHTML := stringValue(jobPosting["description"])
 	var roleDescription any
 	if strings.TrimSpace(descriptionHTML) != "" {
@@ -117,11 +117,10 @@ func ExtractJob(htmlText, companyHTML string) map[string]any {
 		"slug":                                     slugFromURL(extractCanonicalURL(htmlText)),
 		"isPromoted":                               false,
 		"employmentType":                           normalizeEmploymentType(stringValue(jobPosting["employmentType"])),
-		"location":                                 firstNonEmpty(strings.Join(locationLabels, " | "), applicantCountry),
 		"locationType":                             normalizeLocationType(stringValue(jobPosting["jobLocationType"])),
-		"locationCity":                             firstLocality,
-		"locationUSStates":                         extractUSStates(jobPosting),
-		"locationCountries":                        extractLocationCountries(jobPosting),
+		"locationCity":                             locationCity,
+		"locationUSStates":                         locationStates,
+		"locationCountries":                        locationCountries,
 		"categorizedJobTitle":                      nil,
 		"categorizedJobFunction":                   nil,
 		"company":                                  rawCompany,
@@ -363,7 +362,7 @@ func extractRoleRequirementsAndCleanDescription(descriptionText string) (any, an
 		return nil, nil
 	}
 	if strings.Contains(descriptionText, "<") && strings.Contains(descriptionText, ">") {
-		descriptionText = stringValue(toPlainText(descriptionText))
+		descriptionText = normalizeHTMLForSectionParsing(descriptionText)
 	}
 	lines := strings.Split(descriptionText, "\n")
 	cleanedLines := make([]string, 0, len(lines))
@@ -378,6 +377,12 @@ func extractRoleRequirementsAndCleanDescription(descriptionText string) (any, an
 		}
 		normalized := normalizeHeadingText(trimmed)
 		if requirementHeadingPattern.MatchString(normalized) && len(trimmed) <= 80 {
+			// Allow inline headings like "Requirements: 5+ years..."
+			remainder := strings.TrimSpace(regexp.MustCompile(`(?i)^(requirements|requirement|qualifications|qualification)\s*[:\-]\s*`).ReplaceAllString(trimmed, ""))
+			capturing = true
+			if remainder != "" && strings.ToLower(remainder) != strings.ToLower(trimmed) {
+				requirementLines = append(requirementLines, remainder)
+			}
 			capturing = true
 			continue
 		}
@@ -879,6 +884,223 @@ func extractLocationParts(jobPosting map[string]any) ([]string, any, string) {
 	}
 	applicantCountry := stringValueFromMap(jobPosting, "applicantLocationRequirements", "name")
 	return labels, valueOrNil(firstLocality), applicantCountry
+}
+
+func extractLocationFields(jobPosting map[string]any) (any, any, any, any) {
+	locations, _ := jobPosting["jobLocation"].([]any)
+	if locations == nil {
+		if one, ok := jobPosting["jobLocation"].(map[string]any); ok {
+			locations = []any{one}
+		}
+	}
+
+	type locEntry struct {
+		locality string
+		region   string
+		country  string
+	}
+
+	locationEntries := make([]locEntry, 0, len(locations))
+	usStates := []string{}
+	usCountryTokens := map[string]struct{}{"USA": {}, "US": {}, "UNITED STATES": {}}
+
+	isRemoteToken := func(value string) bool {
+		normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(strings.TrimSpace(value)), " ")
+		normalized = strings.TrimSpace(normalized)
+		return normalized == "remote" || strings.HasPrefix(normalized, "remote ")
+	}
+	isNullLike := func(value string) bool {
+		normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(strings.TrimSpace(value)), " ")
+		normalized = strings.TrimSpace(normalized)
+		switch normalized {
+		case "null", "none", "na", "n a", "unknown":
+			return true
+		default:
+			return false
+		}
+	}
+	isCountryLike := func(value string) bool {
+		normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(strings.TrimSpace(value)), " ")
+		normalized = strings.TrimSpace(normalized)
+		switch normalized {
+		case "us", "usa", "united states", "united states of america":
+			return true
+		default:
+			return false
+		}
+	}
+	stripRemotePrefix := func(value string) string {
+		if strings.TrimSpace(value) == "" {
+			return ""
+		}
+		parts := strings.Split(value, ",")
+		filtered := make([]string, 0, len(parts))
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part == "" || isRemoteToken(part) || isNullLike(part) {
+				continue
+			}
+			filtered = append(filtered, part)
+		}
+		if len(filtered) == 0 {
+			return ""
+		}
+		return filtered[0]
+	}
+	isUSCountry := func(value string) bool {
+		if strings.TrimSpace(value) == "" {
+			return false
+		}
+		_, ok := usCountryTokens[strings.ToUpper(strings.TrimSpace(value))]
+		return ok
+	}
+
+	for _, location := range locations {
+		entry, _ := location.(map[string]any)
+		address, _ := entry["address"].(map[string]any)
+		locality := stripRemotePrefix(stringValue(address["addressLocality"]))
+		region := stripRemotePrefix(stringValue(address["addressRegion"]))
+		if isCountryLike(locality) {
+			locality = ""
+		}
+		if isCountryLike(region) || isNullLike(region) {
+			region = ""
+		}
+		country := stringValue(address["addressCountry"])
+		locationEntries = append(locationEntries, locEntry{locality: locality, region: region, country: country})
+		if region != "" && !isRemoteToken(region) && isUSCountry(country) {
+			seen := false
+			for _, value := range usStates {
+				if value == region {
+					seen = true
+					break
+				}
+			}
+			if !seen {
+				usStates = append(usStates, region)
+			}
+		}
+	}
+
+	localities := []string{}
+	usLocalities := []string{}
+	countriesFromLocations := []string{}
+	for _, entry := range locationEntries {
+		if entry.locality != "" && !isRemoteToken(entry.locality) {
+			if !containsString(localities, entry.locality) {
+				localities = append(localities, entry.locality)
+			}
+			if isUSCountry(entry.country) && !containsString(usLocalities, entry.locality) {
+				usLocalities = append(usLocalities, entry.locality)
+			}
+		}
+		if entry.country != "" && !containsString(countriesFromLocations, entry.country) {
+			countriesFromLocations = append(countriesFromLocations, entry.country)
+		}
+	}
+	cityValues := localities
+	if len(usLocalities) > 0 {
+		cityValues = usLocalities
+	}
+	locationCity := any(nil)
+	if len(cityValues) > 0 {
+		locationCity = strings.Join(cityValues, ", ")
+	}
+
+	applicantLocation := jobPosting["applicantLocationRequirements"]
+	applicantLocations, _ := applicantLocation.([]any)
+	if applicantLocations == nil {
+		if one, ok := applicantLocation.(map[string]any); ok {
+			applicantLocations = []any{one}
+		}
+	}
+	applicantCountries := []string{}
+	for _, item := range applicantLocations {
+		entry, _ := item.(map[string]any)
+		name := stringValue(entry["name"])
+		if name != "" && !containsString(applicantCountries, name) {
+			applicantCountries = append(applicantCountries, name)
+		}
+	}
+	applicantCountryLabel := ""
+	if len(applicantCountries) > 0 {
+		applicantCountryLabel = applicantCountries[0]
+	}
+
+	hasUSLocation := false
+	for _, country := range countriesFromLocations {
+		if isUSCountry(country) {
+			hasUSLocation = true
+			break
+		}
+	}
+	hasUSApplicant := false
+	for _, country := range applicantCountries {
+		if isUSCountry(country) {
+			hasUSApplicant = true
+			break
+		}
+	}
+
+	primaryCountry := ""
+	switch {
+	case hasUSLocation || hasUSApplicant:
+		primaryCountry = "United States"
+	case len(countriesFromLocations) > 0:
+		primaryCountry = locationnorm.NormalizeCountryName(countriesFromLocations[0], true)
+	case applicantCountryLabel != "":
+		primaryCountry = locationnorm.NormalizeCountryName(applicantCountryLabel, true)
+	}
+	locationLabel := any(nil)
+	if strings.TrimSpace(primaryCountry) != "" {
+		locationLabel = primaryCountry
+	}
+
+	locationCountries := []string{}
+	appendCountry := func(value string) {
+		normalized := locationnorm.NormalizeCountryName(value, true)
+		if normalized == "" || containsString(locationCountries, normalized) {
+			return
+		}
+		locationCountries = append(locationCountries, normalized)
+	}
+	for _, country := range countriesFromLocations {
+		appendCountry(country)
+	}
+	for _, country := range applicantCountries {
+		appendCountry(country)
+	}
+
+	return locationLabel, locationCity, usStates, locationCountries
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeHTMLForSectionParsing(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	withBreaks := regexp.MustCompile(`(?is)<br\s*/?>`).ReplaceAllString(value, "\n")
+	withBreaks = regexp.MustCompile(`(?is)</(p|div|li|h[1-6])>`).ReplaceAllString(withBreaks, "\n")
+	withoutTags := tagPattern.ReplaceAllString(withBreaks, "")
+	cleaned := html.UnescapeString(withoutTags)
+	lines := strings.Split(cleaned, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(spacePattern.ReplaceAllString(line, " "))
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	cleaned = strings.Join(out, "\n")
+	return strings.TrimSpace(cleaned)
 }
 
 func extractUSStates(jobPosting map[string]any) any {

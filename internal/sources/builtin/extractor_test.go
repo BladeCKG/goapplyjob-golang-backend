@@ -90,8 +90,8 @@ func TestExtractJobBuildsBuiltInRawJobShape(t *testing.T) {
 	if payload["locationType"] != "remote" {
 		t.Fatalf("expected normalized location type, got %#v", payload["locationType"])
 	}
-	if payload["location"] != "New York, NY, United States | Austin, TX, United States" {
-		t.Fatalf("expected location label, got %#v", payload["location"])
+	if _, ok := payload["location"]; ok {
+		t.Fatalf("expected location field to be omitted, got %#v", payload["location"])
 	}
 	if payload["jobDescriptionSummary"] != "Short BuiltIn summary." || payload["twoLineJobDescriptionSummary"] != "Short BuiltIn summary." {
 		t.Fatalf("expected BuiltIn summary override, got summary=%#v twoLine=%#v", payload["jobDescriptionSummary"], payload["twoLineJobDescriptionSummary"])
