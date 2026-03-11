@@ -2,20 +2,23 @@ package builtin
 
 import (
 	"encoding/json"
-	"goapplyjob-golang-backend/internal/locationnorm"
+	"errors"
 	"html"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"goapplyjob-golang-backend/internal/locationnorm"
 )
 
 var (
-	scriptLDPattern         = regexp.MustCompile(`(?is)<script[^>]*type=['"]application/ld\+json['"][^>]*>(.*?)</script>`)
+	scriptLDPattern         = regexp.MustCompile(`(?is)<script[^>]*type=['"][^'"]*ld(?:\+|&#x2B;|&#43;)json[^'"]*['"][^>]*>(.*?)</script>`)
 	canonicalPattern        = regexp.MustCompile(`(?is)<link[^>]*rel=['"]canonical['"][^>]*href=['"]([^'"]+)['"]`)
 	companyProfileInitRegex = regexp.MustCompile(`(?is)Builtin\.companyProfileInit\((\{.*?\})\);`)
-	jobPostInitRegex        = regexp.MustCompile(`(?is)Builtin\.jobPostInit\((\{.*\})\)`)
+	jobPostInitRegex        = regexp.MustCompile(`(?is)Builtin\.jobPostInit\((.*)\)`)
+	howToApplyRegex         = regexp.MustCompile(`(?is)howToApply\s*:\s*"([^"]+)"`)
 	topSkillsRegex          = regexp.MustCompile(`(?is)Top Skills\s*</h[1-6]>.*?<div[^>]*>\s*([^<]*,[^<]*)\s*</div>`)
 	salaryChipRegex         = regexp.MustCompile(`(?is)(\d[\d,]*)\s*K?\s*-\s*(\d[\d,]*)\s*K?\s*(Annually|Yearly|Hourly|Monthly)?`)
 	seniorityRegex          = regexp.MustCompile(`(?is)\b(Entry level|Junior level|Mid level|Senior level|Junior|Expert\s*/\s*Leader)\b`)
@@ -32,6 +35,9 @@ func ExtractJob(htmlText, companyHTML string) map[string]any {
 
 	jobPostInit := extractJobPostInit(htmlText)
 	jobURL := stringValueFromMap(jobPostInit, "job", "howToApply")
+	if jobURL == "" {
+		jobURL = extractHowToApplyURL(htmlText)
+	}
 	if jobURL == "" {
 		jobURL = extractCanonicalURL(htmlText)
 	}
@@ -68,7 +74,7 @@ func ExtractJob(htmlText, companyHTML string) map[string]any {
 	salaryRange := parseSalaryRange(jobPosting, htmlText)
 	benefits := valueOrNil(jobPosting["jobBenefits"])
 
-	return map[string]any{
+	payload := map[string]any{
 		"id":                           extractExternalJobID(jobURL, identifierValue),
 		"created_at":                   parseISO(stringValue(jobPosting["datePosted"])),
 		"validUntilDate":               parseISO(stringValue(jobPosting["validThrough"])),
@@ -125,6 +131,7 @@ func ExtractJob(htmlText, companyHTML string) map[string]any {
 		"categorizedJobFunction":                   nil,
 		"company":                                  rawCompany,
 	}
+	return payload
 }
 
 func ExtractJobFromHTML(htmlText string, fallbackJobURL string) map[string]any {
@@ -195,28 +202,133 @@ func extractCanonicalURL(htmlText string) string {
 }
 
 func extractJobPostInit(htmlText string) map[string]any {
-	match := jobPostInitRegex.FindStringSubmatch(htmlText)
-	if len(match) < 2 {
+	marker := "Builtin.jobPostInit("
+	start := strings.Index(htmlText, marker)
+	if start < 0 {
 		return map[string]any{}
 	}
+
+	payloadStart := strings.Index(htmlText[start+len(marker):], "{")
+	if payloadStart < 0 {
+		return map[string]any{}
+	}
+	i := start + len(marker) + payloadStart
+	depth := 0
+	inString := false
+	stringChar := byte(0)
+	escaped := false
+	payloadChars := make([]byte, 0, 4096)
+
+	for i < len(htmlText) {
+		ch := htmlText[i]
+		payloadChars = append(payloadChars, ch)
+
+		if inString {
+			if escaped {
+				escaped = false
+			} else if ch == '\\' {
+				escaped = true
+			} else if ch == stringChar {
+				inString = false
+			}
+			i++
+			continue
+		}
+
+		if ch == '"' || ch == '\'' {
+			inString = true
+			stringChar = ch
+		} else if ch == '{' {
+			depth++
+		} else if ch == '}' {
+			depth--
+			if depth == 0 {
+				break
+			}
+		}
+		i++
+	}
+
+	payloadRaw := strings.TrimSpace(string(payloadChars))
+	if payloadRaw == "" {
+		return map[string]any{}
+	}
+
 	payload := map[string]any{}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(match[1])), &payload); err != nil {
+	if err := json.Unmarshal([]byte(payloadRaw), &payload); err == nil {
+		return payload
+	}
+
+	cleaned := coerceJSObjectToJSON(payloadRaw)
+	if cleaned == "" {
+		return map[string]any{}
+	}
+	if err := json.Unmarshal([]byte(cleaned), &payload); err != nil {
 		return map[string]any{}
 	}
 	return payload
 }
 
-func parseISO(value string) any {
-	if value == "" {
-		return nil
+func coerceJSObjectToJSON(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
 	}
-	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
-		return parsed.UTC().Format(time.RFC3339Nano)
-	}
-	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
-		return parsed.UTC().Format(time.RFC3339Nano)
-	}
+	// Quote unquoted keys.
+	value = regexp.MustCompile(`([,{]\s*)([A-Za-z_][A-Za-z0-9_$]*)\s*:`).ReplaceAllString(value, `$1"$2":`)
+	// Convert single-quoted strings to double-quoted strings.
+	value = regexp.MustCompile(`'([^'\\]*(?:\\.[^'\\]*)*)'`).ReplaceAllStringFunc(value, func(match string) string {
+		if len(match) < 2 {
+			return match
+		}
+		content := match[1 : len(match)-1]
+		content = strings.ReplaceAll(content, `"`, `\"`)
+		return `"` + content + `"`
+	})
+	// Remove trailing commas.
+	value = regexp.MustCompile(`,(\s*[}\]])`).ReplaceAllString(value, `$1`)
 	return value
+}
+
+func extractHowToApplyURL(htmlText string) string {
+	match := howToApplyRegex.FindStringSubmatch(htmlText)
+	if len(match) < 2 {
+		return ""
+	}
+	value := strings.TrimSpace(match[1])
+	if value == "" {
+		return ""
+	}
+	value = strings.ReplaceAll(value, `\u0026`, "&")
+	value = strings.ReplaceAll(value, `\\u0026`, "&")
+	return html.UnescapeString(value)
+}
+
+func parseISO(value string) string {
+	if parsed, err := normalizeTime(value); err == nil {
+		return parsed.UTC().Format(time.RFC3339Nano)
+	}
+	return ""
+}
+
+func normalizeTime(value string) (time.Time, error) {
+	if parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(value)); err == nil {
+		return parsed.UTC(), nil
+	}
+	if parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(value)); err == nil {
+		return parsed.UTC(), nil
+	}
+	if parsed, err := time.Parse("2006-01-02 15:04:05", strings.TrimSpace(value)); err == nil {
+		return parsed.UTC(), nil
+	}
+	if parsed, err := time.Parse("2006-01-02", strings.TrimSpace(value)); err == nil {
+		dateOnly := parsed.UTC()
+		now := time.Now().UTC()
+		if dateOnly.Year() == now.Year() && dateOnly.YearDay() == now.YearDay() {
+			return now, nil
+		}
+		return dateOnly, nil
+	}
+	return time.Time{}, errors.New("invalid time format")
 }
 
 func toPlainText(htmlText string) any {
