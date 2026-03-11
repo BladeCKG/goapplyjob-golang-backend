@@ -3,6 +3,7 @@ package importer
 import (
 	"context"
 	"database/sql"
+	"goapplyjob-golang-backend/internal/database"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -10,8 +11,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"goapplyjob-golang-backend/internal/database"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -103,7 +102,7 @@ func TestProcessImportFileKeepsFailedRowsAndExportsSuccesses(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	svc := New(db)
+	svc := New(Config{}, db)
 
 	importFile := filepath.Join(dir, "latest_delta.xml")
 	xml := `<?xml version="1.0" encoding="UTF-8"?>
@@ -149,7 +148,7 @@ func TestImportRawUSJobsReturnsFailedRowsAndSuccessesSeparately(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	svc := New(db)
+	svc := New(Config{}, db)
 
 	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (1, 'https://example.com/b', ?, true, false, true, 0, '{}')`, time.Date(2026, 2, 12, 16, 0, 0, 0, time.UTC).Format(time.RFC3339))
 	if err != nil {
@@ -190,7 +189,7 @@ func TestImportRawUSJobsTextProcessesWatcherPayloadBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	svc := New(db)
+	svc := New(Config{}, db)
 
 	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO watcher_payloads (source_url, payload_type, body_text, created_at) VALUES (?, 'delta_xml', ?, ?)`,
 		"https://example.com/jobs.xml",
@@ -233,7 +232,7 @@ func TestPickUnconsumedPayloadsReturnsNewestFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	svc := New(db)
+	svc := New(Config{}, db)
 
 	now := time.Now().UTC()
 	for idx, createdAt := range []time.Time{now.Add(-2 * time.Minute), now.Add(-1 * time.Minute), now} {
@@ -279,7 +278,7 @@ func TestReplacePayloadRowsKeepsRemainingRowsInOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	svc := New(db)
+	svc := New(Config{}, db)
 
 	var payloadID int64
 	if err := db.SQL.QueryRowContext(
@@ -321,7 +320,7 @@ func TestDeleteConsumedPayloadsRemovesLegacyRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	svc := New(db)
+	svc := New(Config{}, db)
 
 	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO watcher_payloads (source_url, payload_type, body_text, consumed_at, created_at) VALUES (?, 'delta_xml', ?, ?, ?)`,
 		"https://example.com/jobs.xml",

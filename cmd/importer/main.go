@@ -1,13 +1,12 @@
 package main
 
 import (
-	"log"
-	"time"
-
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/importer"
 	"goapplyjob-golang-backend/internal/workerlog"
+	"log"
+	"time"
 )
 
 func main() {
@@ -23,12 +22,6 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.Close()
-	svc := importer.New(db)
-	if deleted, err := svc.DeleteConsumedPayloads(); err != nil {
-		log.Fatal(err)
-	} else if deleted > 0 {
-		log.Printf("importer removed legacy consumed payloads=%d", deleted)
-	}
 	intervalMinutes := config.GetenvFloat("RAW_IMPORT_INTERVAL_MINUTES", 1)
 	if intervalMinutes < 0 {
 		intervalMinutes = 1
@@ -52,76 +45,17 @@ func main() {
 		errorBackoffSeconds = 1
 	}
 
-	for {
-		payloads, err := svc.PickUnconsumedPayloads(payloadsPerCycle, enabledSources)
-		if err != nil {
-			log.Printf("raw-import-worker cycle_failed error=%v", err)
-			if runOnce {
-				return
-			}
-			time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
-			continue
-		}
-		remainingRowsBudget := batchSize
-		for _, payload := range payloads {
-			if remainingRowsBudget <= 0 {
-				break
-			}
-			payloadRows, skippedInvalid, supported := importer.ParseRowsForSourcePayload(payload.Source, payload.PayloadType, payload.BodyText)
-			if !supported {
-				log.Printf("importer skipping unsupported payload_id=%d source=%s payload_type=%s", payload.ID, payload.Source, payload.PayloadType)
-				continue
-			}
-			if len(payloadRows) == 0 {
-				log.Printf("importer kept empty payload_id=%d skipped_invalid=%d", payload.ID, skippedInvalid)
-				continue
-			}
+	svc := importer.New(importer.Config{
+		IntervalMinutes:     intervalMinutes,
+		SleepDuration:       sleepDuration,
+		BatchSize:           batchSize,
+		PayloadsPerCycle:    payloadsPerCycle,
+		EnabledSources:      enabledSources,
+		RunOnce:             runOnce,
+		ErrorBackoffSeconds: errorBackoffSeconds,
+	}, db)
 
-			toProcessCount := len(payloadRows)
-			if toProcessCount > remainingRowsBudget {
-				toProcessCount = remainingRowsBudget
-			}
-			rowsToProcess := payloadRows[:toProcessCount]
-			unprocessedRows := payloadRows[toProcessCount:]
-
-			stats, failedRows, _, err := svc.ImportRawUSJobsRows(rowsToProcess, batchSize, payload.Source)
-			if err != nil {
-				log.Printf("raw-import-worker payload_failed payload_id=%d source=%s error=%v", payload.ID, payload.Source, err)
-				continue
-			}
-			stats.SkippedInvalid = skippedInvalid
-			failedRowsList := importer.FailedImportRowsToList(failedRows)
-			remainingRows := append(failedRowsList, unprocessedRows...)
-			remainingRowsBudget -= toProcessCount
-
-			if len(remainingRows) > 0 {
-				var err error
-				if payload.PayloadType == "delta" && payload.Source == "builtin" {
-					err = svc.ReplaceBuiltinPayloadRows(payload.ID, remainingRows)
-				} else {
-					serializedRows := make([]map[string]any, 0, len(remainingRows))
-					for _, row := range remainingRows {
-						serializedRows = append(serializedRows, map[string]any{"url": row.URL, "post_date": row.PostDate})
-					}
-					err = svc.ReplaceSourcePayloadRows(payload.ID, payload.Source, serializedRows)
-				}
-				if err != nil {
-					log.Printf("raw-import-worker payload_update_failed payload_id=%d source=%s error=%v", payload.ID, payload.Source, err)
-					continue
-				}
-				log.Printf("importer partial payload_id=%d seen=%d inserted=%d updated=%d skipped_invalid=%d failed_db=%d remaining_rows=%d remaining_budget=%d", payload.ID, stats.Seen, stats.Inserted, stats.Updated, stats.SkippedInvalid, stats.FailedDB, len(remainingRows), remainingRowsBudget)
-				continue
-			}
-			if err := svc.DeletePayload(payload.ID); err != nil {
-				log.Printf("raw-import-worker payload_delete_failed payload_id=%d source=%s error=%v", payload.ID, payload.Source, err)
-				continue
-			}
-			log.Printf("importer imported payload_id=%d seen=%d inserted=%d updated=%d skipped_invalid=%d failed_db=%d", payload.ID, stats.Seen, stats.Inserted, stats.Updated, stats.SkippedInvalid, stats.FailedDB)
-		}
-
-		if runOnce {
-			return
-		}
-		time.Sleep(sleepDuration)
+	if err := svc.RunForever(); err != nil {
+		log.Fatal(err)
 	}
 }

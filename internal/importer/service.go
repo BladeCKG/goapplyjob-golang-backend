@@ -6,6 +6,11 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/sources/dailyremote"
+	"goapplyjob-golang-backend/internal/sources/plugins"
+	"goapplyjob-golang-backend/internal/sources/remotive"
+	"goapplyjob-golang-backend/internal/sources/workable"
 	"log"
 	"os"
 	"path/filepath"
@@ -13,12 +18,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"goapplyjob-golang-backend/internal/database"
-	"goapplyjob-golang-backend/internal/sources/dailyremote"
-	"goapplyjob-golang-backend/internal/sources/plugins"
-	"goapplyjob-golang-backend/internal/sources/remotive"
-	"goapplyjob-golang-backend/internal/sources/workable"
 )
 
 const (
@@ -48,8 +47,19 @@ type SitemapRow struct {
 	RawJSON  map[string]any
 }
 
+type Config struct {
+	IntervalMinutes     float64
+	SleepDuration       time.Duration
+	BatchSize           int
+	PayloadsPerCycle    int
+	EnabledSources      map[string]struct{}
+	RunOnce             bool
+	ErrorBackoffSeconds int
+}
+
 type Service struct {
-	DB *database.DB
+	DB     *database.DB
+	Config Config
 }
 
 const sourceName = "remoterocketship"
@@ -63,7 +73,9 @@ const (
 	defaultPayloadsPerCycle = 40
 )
 
-func New(db *database.DB) *Service { return &Service{DB: db} }
+func New(config Config, db *database.DB) *Service {
+	return &Service{DB: db, Config: config}
+}
 
 func extractCompleteURLBlocks(xmlText string) []string {
 	return urlBlockPattern.FindAllString(xmlText, -1)
@@ -531,7 +543,8 @@ func (s *Service) PickUnconsumedPayloads(limit int, enabledSources map[string]st
 	Source      string
 	PayloadType string
 	BodyText    string
-}, error) {
+}, error,
+) {
 	if limit <= 0 {
 		limit = 1
 	}
@@ -762,4 +775,97 @@ func parseGenericImportRow(row map[string]any, requireRawPayload bool) (SitemapR
 		return SitemapRow{}, false
 	}
 	return SitemapRow{URL: rowURL, PostDate: postDate, RawJSON: rawPayload}, true
+}
+
+func (s *Service) RunOnce() error {
+	batchSize := s.Config.BatchSize
+	payloadsPerCycle := s.Config.PayloadsPerCycle
+	enabledSources := s.Config.EnabledSources
+	errorBackoffSeconds := s.Config.ErrorBackoffSeconds
+
+	payloads, err := s.PickUnconsumedPayloads(payloadsPerCycle, enabledSources)
+	if err != nil {
+		log.Printf("raw-import-worker cycle_failed error=%v", err)
+		time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
+		return nil
+	}
+	remainingRowsBudget := batchSize
+	for _, payload := range payloads {
+		if remainingRowsBudget <= 0 {
+			break
+		}
+		payloadRows, skippedInvalid, supported := ParseRowsForSourcePayload(payload.Source, payload.PayloadType, payload.BodyText)
+		if !supported {
+			log.Printf("importer skipping unsupported payload_id=%d source=%s payload_type=%s", payload.ID, payload.Source, payload.PayloadType)
+			continue
+		}
+		if len(payloadRows) == 0 {
+			log.Printf("importer kept empty payload_id=%d skipped_invalid=%d", payload.ID, skippedInvalid)
+			continue
+		}
+
+		toProcessCount := len(payloadRows)
+		if toProcessCount > remainingRowsBudget {
+			toProcessCount = remainingRowsBudget
+		}
+		rowsToProcess := payloadRows[:toProcessCount]
+		unprocessedRows := payloadRows[toProcessCount:]
+
+		stats, failedRows, _, err := s.ImportRawUSJobsRows(rowsToProcess, batchSize, payload.Source)
+		if err != nil {
+			log.Printf("raw-import-worker payload_failed payload_id=%d source=%s error=%v", payload.ID, payload.Source, err)
+			continue
+		}
+		stats.SkippedInvalid = skippedInvalid
+		failedRowsList := FailedImportRowsToList(failedRows)
+		remainingRows := append(failedRowsList, unprocessedRows...)
+		remainingRowsBudget -= toProcessCount
+
+		if len(remainingRows) > 0 {
+			var err error
+			if payload.PayloadType == "delta" && payload.Source == "builtin" {
+				err = s.ReplaceBuiltinPayloadRows(payload.ID, remainingRows)
+			} else {
+				serializedRows := make([]map[string]any, 0, len(remainingRows))
+				for _, row := range remainingRows {
+					serializedRows = append(serializedRows, map[string]any{"url": row.URL, "post_date": row.PostDate})
+				}
+				err = s.ReplaceSourcePayloadRows(payload.ID, payload.Source, serializedRows)
+			}
+			if err != nil {
+				log.Printf("raw-import-worker payload_update_failed payload_id=%d source=%s error=%v", payload.ID, payload.Source, err)
+				continue
+			}
+			log.Printf("importer partial payload_id=%d seen=%d inserted=%d updated=%d skipped_invalid=%d failed_db=%d remaining_rows=%d remaining_budget=%d", payload.ID, stats.Seen, stats.Inserted, stats.Updated, stats.SkippedInvalid, stats.FailedDB, len(remainingRows), remainingRowsBudget)
+			continue
+		}
+		if err := s.DeletePayload(payload.ID); err != nil {
+			log.Printf("raw-import-worker payload_delete_failed payload_id=%d source=%s error=%v", payload.ID, payload.Source, err)
+			continue
+		}
+		log.Printf("importer imported payload_id=%d seen=%d inserted=%d updated=%d skipped_invalid=%d failed_db=%d", payload.ID, stats.Seen, stats.Inserted, stats.Updated, stats.SkippedInvalid, stats.FailedDB)
+	}
+	log.Printf("raw-import-worker cycle_complete processed_payloads=%d remaining_rows_budget=%d", len(payloads), remainingRowsBudget)
+	return nil
+}
+
+func (s *Service) RunForever() error {
+	sleepDuration := s.Config.SleepDuration
+	runOnce := s.Config.RunOnce
+
+	if deleted, err := s.DeleteConsumedPayloads(); err != nil {
+		log.Fatal(err)
+	} else if deleted > 0 {
+		log.Printf("importer removed legacy consumed payloads=%d", deleted)
+	}
+
+	for {
+		if err := s.RunOnce(); err != nil {
+			return err
+		}
+		if runOnce {
+			return nil
+		}
+		time.Sleep(sleepDuration)
+	}
 }

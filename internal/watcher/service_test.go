@@ -4,15 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/sources/dailyremote"
+	"goapplyjob-golang-backend/internal/sources/remotive"
 	"net/url"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
-
-	"goapplyjob-golang-backend/internal/database"
-	"goapplyjob-golang-backend/internal/sources/dailyremote"
-	"goapplyjob-golang-backend/internal/sources/remotive"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -64,17 +63,17 @@ func buildService(t *testing.T) *Service {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	return New(Config{
-		Enabled:                 true,
-		URL:                     "https://example.com/jobs.xml",
-		IntervalMinutes:         1,
-		SampleKB:                8,
-		TimeoutSeconds:          30,
-		BuiltinBaseURL:          "",
-		BuiltinMaxPage:          1000,
-		BuiltinPagesPerCycle:    25,
-		HiringCafeSearchAPIURL:  "",
-		HiringCafeTotalCountURL: "",
-		HiringCafePageSize:      200,
+		Enabled:                         true,
+		RemoteRocketshipUSJobSitemapURL: "https://example.com/jobs.xml",
+		IntervalMinutes:                 1,
+		SampleKB:                        8,
+		TimeoutSeconds:                  30,
+		BuiltinBaseURL:                  "",
+		BuiltinMaxPage:                  1000,
+		BuiltinPagesPerCycle:            25,
+		HiringCafeSearchAPIURL:          "",
+		HiringCafeTotalCountURL:         "",
+		HiringCafePageSize:              200,
 		EnabledSources: map[string]struct{}{
 			sourceRemoterocketship: {},
 		},
@@ -131,8 +130,8 @@ func TestRunOnceSkipsDeltaFileWhenDeltaIsEmpty(t *testing.T) {
 <url><loc>https://example.com/a</loc><lastmod>2026-02-12T10:00:00+00:00</lastmod></url>
 </urlset>`)
 
-	service.FetchSample = func() ([]byte, error) { return sample, nil }
-	service.FetchFull = func() ([]byte, error) { return fullData, nil }
+	service.RemoteRocketShipUSJobsSitemapFetchSample = func() ([]byte, error) { return sample, nil }
+	service.RemoteRocketShipUSJobsSitemapFetchFull = func() ([]byte, error) { return fullData, nil }
 	if _, err := service.DB.SQL.ExecContext(context.Background(), `INSERT INTO watcher_states (source, state_json, updated_at) VALUES (?, ?, ?)`, "remoterocketship", `{"source_url":"https://example.com/jobs.xml","sample_hash":"old-hash","first_lastmod":"2026-02-12T10:00:00+00:00"}`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
@@ -157,8 +156,8 @@ func TestRunOnceUsesSampleDeltaWithoutFullFetch(t *testing.T) {
 <url><loc>https://example.com/old</loc><lastmod>2026-02-12T10:00:00+00:00</lastmod></url>
 </urlset>`)
 
-	service.FetchSample = func() ([]byte, error) { return sample, nil }
-	service.FetchFull = func() ([]byte, error) { return nil, errors.New("full fetch should not be called") }
+	service.RemoteRocketShipUSJobsSitemapFetchSample = func() ([]byte, error) { return sample, nil }
+	service.RemoteRocketShipUSJobsSitemapFetchFull = func() ([]byte, error) { return nil, errors.New("full fetch should not be called") }
 	if _, err := service.DB.SQL.ExecContext(context.Background(), `INSERT INTO watcher_states (source, state_json, updated_at) VALUES (?, ?, ?)`, "remoterocketship", `{"source_url":"https://example.com/jobs.xml","sample_hash":"old-hash","first_lastmod":"2026-02-12T10:00:00+00:00"}`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
@@ -184,11 +183,11 @@ func TestRunForeverRunOnceExecutesSingleCycle(t *testing.T) {
 	sample := []byte(`<urlset><url><loc>https://example.com/a</loc><lastmod>2026-02-12T10:00:00+00:00</lastmod></url></urlset>`)
 	sampleCalls := 0
 	fullCalls := 0
-	service.FetchSample = func() ([]byte, error) {
+	service.RemoteRocketShipUSJobsSitemapFetchSample = func() ([]byte, error) {
 		sampleCalls++
 		return sample, nil
 	}
-	service.FetchFull = func() ([]byte, error) {
+	service.RemoteRocketShipUSJobsSitemapFetchFull = func() ([]byte, error) {
 		fullCalls++
 		return sample, nil
 	}
@@ -209,7 +208,6 @@ func TestRunForeverRunOnceExecutesSingleCycle(t *testing.T) {
 
 func TestBuiltinScansNextPagesThenUpperPages(t *testing.T) {
 	service := buildService(t)
-	service.Config.URL = ""
 	service.Config.BuiltinBaseURL = "https://builtin.com/jobs?page={page}"
 	service.Config.BuiltinMaxPage = 1000
 	service.Config.BuiltinPagesPerCycle = 4
@@ -273,7 +271,6 @@ func TestBuiltinScansNextPagesThenUpperPages(t *testing.T) {
 
 func TestBuiltinKeepsNextPageAtOneAfterFullScan(t *testing.T) {
 	service := buildService(t)
-	service.Config.URL = ""
 	service.Config.BuiltinBaseURL = "https://builtin.com/jobs?page={page}"
 	service.Config.BuiltinMaxPage = 2
 	service.Config.BuiltinPagesPerCycle = 5
@@ -304,7 +301,6 @@ func TestBuiltinKeepsNextPageAtOneAfterFullScan(t *testing.T) {
 
 func TestRemotiveWatcherUsesJobIDCutoffAndNewestFirst(t *testing.T) {
 	service := buildService(t)
-	service.Config.URL = ""
 	service.Config.RemotiveSitemapURLTemplate = "https://remotive.com/sitemap-job-postings-{partition}.xml"
 	service.Config.RemotiveSitemapMaxIndex = 8
 	service.Config.RemotiveSitemapMinIndex = 1
@@ -364,7 +360,6 @@ func TestExtractRemotiveJobIDFromCurrentSlugFormat(t *testing.T) {
 
 func TestRemotiveWatcherScansBackwardPartitionsUntilCrossingWatermark(t *testing.T) {
 	service := buildService(t)
-	service.Config.URL = ""
 	service.Config.RemotiveSitemapURLTemplate = "https://remotive.com/sitemap-job-postings-{partition}.xml"
 	service.Config.RemotiveSitemapMaxIndex = 9
 	service.Config.RemotiveSitemapMinIndex = 1
@@ -431,7 +426,6 @@ func TestRemotiveWatcherScansBackwardPartitionsUntilCrossingWatermark(t *testing
 
 func TestRemotiveWatcherUsesNowForDateOnlyLastmodWhenToday(t *testing.T) {
 	service := buildService(t)
-	service.Config.URL = ""
 	service.Config.RemotiveSitemapURLTemplate = "https://remotive.com/sitemap-job-postings-{partition}.xml"
 	service.Config.RemotiveSitemapMaxIndex = 10
 	service.Config.RemotiveSitemapMinIndex = 1
@@ -488,7 +482,6 @@ func TestRemotiveWatcherUsesNowForDateOnlyLastmodWhenToday(t *testing.T) {
 
 func TestRemotiveWatcherUsesNowFallbackWhenLastmodInvalid(t *testing.T) {
 	service := buildService(t)
-	service.Config.URL = ""
 	service.Config.RemotiveSitemapURLTemplate = "https://remotive.com/sitemap-job-postings-{partition}.xml"
 	service.Config.RemotiveSitemapMaxIndex = 10
 	service.Config.RemotiveSitemapMinIndex = 1
@@ -538,7 +531,6 @@ func anyString(value any) string {
 
 func TestHiringCafeWatcherUpsertsJobsWithoutImporter(t *testing.T) {
 	service := buildService(t)
-	service.Config.URL = ""
 	service.Config.HiringCafeSearchAPIURL = "https://hiring.cafe/api/search-jobs?s=abc"
 	service.Config.HiringCafeTotalCountURL = "https://hiring.cafe/api/search-jobs/get-total-count?s=abc"
 	service.Config.HiringCafePageSize = 1
@@ -569,7 +561,6 @@ func TestHiringCafeWatcherUpsertsJobsWithoutImporter(t *testing.T) {
 
 func TestWorkableWatcherUpsertsJobsWithoutImporter(t *testing.T) {
 	service := buildService(t)
-	service.Config.URL = ""
 	service.Config.WorkableAPIURL = "https://jobs.workable.com/api/v1/jobs?location=United%20States&workplace=remote&day_range=1"
 	service.Config.WorkablePageLimit = 100
 	service.Config.EnabledSources = map[string]struct{}{sourceWorkable: {}}
@@ -603,7 +594,6 @@ func TestWorkableWatcherUpsertsJobsWithoutImporter(t *testing.T) {
 
 func TestDailyremoteWatcherCreatesDeltaPayload(t *testing.T) {
 	service := buildService(t)
-	service.Config.URL = ""
 	service.Config.DailyRemoteBaseURL = "https://dailyremote.com/?page={page}"
 	service.Config.DailyRemoteMaxPage = 2
 	service.Config.DailyRemotePagesPerCycle = 2
@@ -633,7 +623,6 @@ func TestDailyremoteWatcherCreatesDeltaPayload(t *testing.T) {
 
 func TestDailyremoteWatcherUsesExternalIDWatermark(t *testing.T) {
 	service := buildService(t)
-	service.Config.URL = ""
 	service.Config.DailyRemoteBaseURL = "https://dailyremote.com/?location_country=United+States&sort_by=time&page={page}"
 	service.Config.DailyRemoteMaxPage = 10
 	service.Config.DailyRemotePagesPerCycle = 3
