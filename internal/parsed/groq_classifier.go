@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"html"
 	"io"
 	"log"
 	"net/http"
@@ -39,6 +40,8 @@ var groqAPIKeyRing = struct {
 	keys []string
 	next int
 }{}
+
+var groqHTMLTagPattern = regexp.MustCompile(`(?is)<[^>]+>`)
 
 func SetCachedGroqCategorizedJobTitles(titles []string) {
 	normalized := make([]string, 0, len(titles))
@@ -191,6 +194,16 @@ func normalizeGroqCategory(category string, allowedCategories []string) string {
 	return normalizedCategory
 }
 
+func cleanGroqDescription(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	unescaped := html.UnescapeString(trimmed)
+	withoutTags := groqHTMLTagPattern.ReplaceAllString(unescaped, " ")
+	return strings.Join(strings.Fields(withoutTags), " ")
+}
+
 func extractGroqClassification(rawContent string, allowedCategories []string) (string, []string) {
 	payload := extractJSONPayload(rawContent)
 	if len(payload) == 0 {
@@ -298,7 +311,7 @@ func (g *GroqJobClassifier) classifySync(jobTitle, jobDescription string, allowe
 	if model == "" {
 		model = defaultGroqModel
 	}
-	description := strings.TrimSpace(jobDescription)
+	description := cleanGroqDescription(jobDescription)
 	schema := buildGroqJobClassifierSchema(allowedCategories)
 
 	reqPayload := map[string]any{
