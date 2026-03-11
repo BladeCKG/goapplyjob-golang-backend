@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/sources/plugins"
 	"log"
 	"net/url"
 	"os"
@@ -13,9 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"goapplyjob-golang-backend/internal/database"
-	"goapplyjob-golang-backend/internal/sources/plugins"
 )
 
 const (
@@ -137,6 +136,81 @@ var techStackAliases = map[string]string{
 	"salesforce crm":           "Salesforce",
 }
 
+var groqTechStackExtractAllowedCategories = []string{
+	"engineer",
+	"engineers",
+	"developer",
+	"developers",
+	"scientist",
+	"scientists",
+	"analyst",
+	"analysts",
+	"administrator",
+	"administrators",
+	"designer",
+	"designers",
+	"architect",
+	"architects",
+	"technician",
+	"technicians",
+	"technologist",
+	"technologists",
+	"machinist",
+	"machinists",
+	"manager",
+	"managers",
+	"therapist",
+	"therapists",
+	"specialist",
+	"specialists",
+	"coordinator",
+	"coordinators",
+	"eng",
+	"engr",
+	"engrs",
+	"dev",
+	"devs",
+	"scient",
+	"anal",
+	"admin",
+	"admins",
+	"des",
+	"arch",
+	"tech",
+	"technol",
+	"machin",
+	"mgr",
+	"therap",
+	"spec",
+	"specs",
+	"coord",
+	"coords",
+	"swe",
+	"se",
+	"sse",
+	"sde",
+	"sdet",
+	"de",
+	"da",
+	"ba",
+	"ds",
+	"dba",
+	"sysadmin",
+	"netadmin",
+	"uxd",
+	"uid",
+	"ux",
+	"ui",
+	"ea",
+	"ta",
+	"pm",
+	"em",
+	"pt",
+	"ot",
+	"rt",
+	"spec",
+}
+
 var techStackDropValues = map[string]struct{}{
 	"n/a": {}, "na": {}, "none": {}, "null": {}, "unknown": {}, "tbd": {},
 }
@@ -236,26 +310,28 @@ func shouldUseGroqClassification(roleTitle string) bool {
 	if normalized == "" {
 		return false
 	}
-	for _, token := range strings.Fields(normalized) {
-		switch token {
-		case "engineer", "engineers",
-			"developer", "developers",
-			"scientist", "scientists",
-			"analyst", "analysts",
-			"administrator", "administrators",
-			"designer", "designers",
-			"architect", "architects",
-			"technician", "technicians",
-			"technologist", "technologists",
-			"machinist", "machinists",
-			"manager", "managers",
-			"therapist", "therapists",
-			"specialist", "specialists",
-			"coordinator", "coordinators":
-			return true
+	return func(a, b []string) bool {
+		if len(a) == 0 || len(b) == 0 {
+			return false
 		}
-	}
-	return false
+
+		// Build the map from the smaller slice to reduce memory use.
+		if len(a) > len(b) {
+			a, b = b, a
+		}
+
+		set := make(map[string]struct{}, len(a))
+		for _, s := range a {
+			set[s] = struct{}{}
+		}
+
+		for _, s := range b {
+			if _, ok := set[s]; ok {
+				return true
+			}
+		}
+		return false
+	}(strings.Fields(normalized), groqTechStackExtractAllowedCategories)
 }
 
 func normalizeDT(value *time.Time) *time.Time {

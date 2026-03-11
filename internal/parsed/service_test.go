@@ -4,11 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"testing"
-	"time"
-
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/sources/plugins"
+	"testing"
+	"time"
 )
 
 func TestSourceOlderThanPostDateReturnsTrue(t *testing.T) {
