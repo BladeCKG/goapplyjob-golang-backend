@@ -74,7 +74,7 @@ services:
       - key: WATCH_INTERVAL_MINUTES
         value: "1"
       - key: WATCH_SAMPLE_KB
-        value: "8"
+        value: "40"
       - key: WATCH_TIMEOUT_SECONDS
         value: "30"
       - key: WATCH_RUN_ONCE

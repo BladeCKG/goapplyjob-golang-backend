@@ -1,11 +1,12 @@
 package main
 
 import (
+	"log"
+
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/watcher"
 	"goapplyjob-golang-backend/internal/workerlog"
-	"log"
 )
 
 func main() {
@@ -38,7 +39,7 @@ func main() {
 		Enabled:                         config.GetenvBool("WATCH_ENABLED", true),
 		RemoteRocketshipUSJobSitemapURL: defaultRemoteRocketshipURL,
 		IntervalMinutes:                 config.GetenvFloat("WATCH_INTERVAL_MINUTES", 1),
-		SampleKB:                        config.GetenvInt("WATCH_SAMPLE_KB", 8),
+		SampleKB:                        config.GetenvInt("WATCH_SAMPLE_KB", 40),
 		TimeoutSeconds:                  config.GetenvFloat("WATCH_TIMEOUT_SECONDS", 30),
 		BuiltinBaseURL:                  defaultBuiltinBaseURL,
 		BuiltinMaxPage:                  config.GetenvInt("WATCH_BUILTIN_MAX_PAGE", 1000),
