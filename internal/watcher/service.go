@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/scraper"
 	"goapplyjob-golang-backend/internal/sources/builtin"
 	"goapplyjob-golang-backend/internal/sources/dailyremote"
 	"goapplyjob-golang-backend/internal/sources/hiringcafe"
@@ -85,11 +86,20 @@ type Service struct {
 	RemoteRocketShipUSJobsSitemapFetchSample FetchSampleFunc
 	RemoteRocketShipUSJobsSitemapFetchFull   FetchFullFunc
 	FetchText                                func(string) (string, error)
+	Cloudscraper                             *scraper.TLSClientFetcher
 	status                                   map[string]any
 }
 
 func New(config Config, db *database.DB) *Service {
 	svc := &Service{Config: config, DB: db}
+	cloudFetcher, err := scraper.NewTLSClientFetcher(scraper.TLSClientConfig{
+		Timeout: 30 * time.Second,
+	})
+	if err != nil {
+		log.Printf("watcher cloudscraper init failed, fallback to net/http: %v", err)
+	} else {
+		svc.Cloudscraper = cloudFetcher
+	}
 	svc.status = map[string]any{
 		"enabled":                       config.Enabled,
 		"url":                           config.RemoteRocketshipUSJobSitemapURL,
@@ -160,9 +170,22 @@ func New(config Config, db *database.DB) *Service {
 	}
 	svc.RemoteRocketShipUSJobsSitemapFetchSample = func() ([]byte, error) {
 		sampleBytes := int64(max(config.SampleKB, 1) * 1024)
+		if svc.Cloudscraper != nil {
+			if data, err := svc.fetchBytesWithCloudscraper(config.RemoteRocketshipUSJobSitemapURL); err == nil {
+				if int64(len(data)) <= sampleBytes {
+					return data, nil
+				}
+				return data[:sampleBytes], nil
+			}
+		}
 		return doFetchBytes(config.RemoteRocketshipUSJobSitemapURL, "bytes=0-"+strconv.FormatInt(sampleBytes-1, 10))
 	}
 	svc.RemoteRocketShipUSJobsSitemapFetchFull = func() ([]byte, error) {
+		if svc.Cloudscraper != nil {
+			if data, err := svc.fetchBytesWithCloudscraper(config.RemoteRocketshipUSJobSitemapURL); err == nil {
+				return data, nil
+			}
+		}
 		return doFetchBytes(config.RemoteRocketshipUSJobSitemapURL, "")
 	}
 	svc.FetchText = func(rawURL string) (string, error) {
@@ -187,6 +210,37 @@ func (s *Service) setStatus(values map[string]any) {
 	for k, v := range values {
 		s.status[k] = v
 	}
+}
+
+func (s *Service) fetchBytesWithCloudscraper(rawURL string) ([]byte, error) {
+	if s.Cloudscraper == nil {
+		return nil, errors.New("cloudscraper not available")
+	}
+	htmlText, status, err := s.Cloudscraper.ReadHTML(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, errors.New("http status " + strconv.Itoa(status))
+	}
+	return []byte(htmlText), nil
+}
+
+func (s *Service) fetchTextWithCloudscraper(rawURL string) (string, error) {
+	data, err := s.fetchBytesWithCloudscraper(rawURL)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func (s *Service) fetchTextForDailyRemote(rawURL string) (string, error) {
+	if s.Cloudscraper != nil {
+		if text, err := s.fetchTextWithCloudscraper(rawURL); err == nil {
+			return text, nil
+		}
+	}
+	return s.FetchText(rawURL)
 }
 
 func (s *Service) RunForever(runOnce bool) error {
@@ -289,7 +343,7 @@ func (s *Service) runOnceDailyremote() error {
 	for page := 1; page <= s.Config.DailyRemoteMaxPage && pagesScanned < s.Config.DailyRemotePagesPerCycle; page++ {
 		pageURL := strings.ReplaceAll(s.Config.DailyRemoteBaseURL, "{page}", strconv.Itoa(page))
 		log.Printf("DailyRemote fetch_start page=%d url=%s", page, pageURL)
-		htmlText, err := s.FetchText(pageURL)
+		htmlText, err := s.fetchTextForDailyRemote(pageURL)
 		if err != nil {
 			return err
 		}
