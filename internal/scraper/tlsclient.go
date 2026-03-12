@@ -94,6 +94,45 @@ func (f *TLSClientFetcher) ReadHTML(targetURL string) (string, int, error) {
 	return string(body), resp.StatusCode, nil
 }
 
+func (f *TLSClientFetcher) ResolveFinalURL(targetURL string) (string, int, error) {
+	if f == nil {
+		return "", 0, errors.New("tls-client fetcher is nil")
+	}
+	req, err := fhttp.NewRequest("GET", targetURL, nil)
+	if err != nil {
+		return "", 0, err
+	}
+	req.Header = fhttp.Header{
+		"User-Agent":                {UserAgents[rand.Intn(len(UserAgents))]},
+		"Accept":                    {"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"},
+		"Accept-Language":           {"en-US,en;q=0.9"},
+		"Accept-Encoding":           {"gzip, deflate, br"},
+		"Cache-Control":             {"no-cache"},
+		"Pragma":                    {"no-cache"},
+		"Upgrade-Insecure-Requests": {"1"},
+		"Sec-Fetch-Dest":            {"document"},
+		"Sec-Fetch-Mode":            {"navigate"},
+		"Sec-Fetch-Site":            {"none"},
+		"Sec-Fetch-User":            {"?1"},
+		"Referer":                   {"https://www.google.com/"},
+	}
+
+	resp, err := f.client.Do(req)
+	if err != nil {
+		return "", -1, nil
+	}
+	if resp.Body == nil {
+		return "", -1, nil
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+	finalURL := targetURL
+	if resp.Request != nil && resp.Request.URL != nil {
+		finalURL = resp.Request.URL.String()
+	}
+	return finalURL, resp.StatusCode, nil
+}
+
 func (f *TLSClientFetcher) ReadHTMLWith429Retry(targetURL string, max429Retries int, retryDelay time.Duration) (string, int, error) {
 	attempt := 0
 	for {

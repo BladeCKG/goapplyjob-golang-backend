@@ -3,17 +3,17 @@ package dailyremote
 import (
 	"encoding/json"
 	"errors"
-	"goapplyjob-golang-backend/internal/locationnorm"
-	"goapplyjob-golang-backend/internal/sources/currency"
 	"html"
-	"io"
 	"math"
-	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"goapplyjob-golang-backend/internal/locationnorm"
+	"goapplyjob-golang-backend/internal/scraper"
+	"goapplyjob-golang-backend/internal/sources/currency"
 
 	nethtml "golang.org/x/net/html"
 )
@@ -294,22 +294,18 @@ func resolveRedirectURLDailyRemote(rawURL string) string {
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return trimmed
 	}
-	req, err := http.NewRequest(http.MethodGet, trimmed, nil)
+	fetcher, err := scraper.NewTLSClientFetcher(scraper.TLSClientConfig{
+		Timeout: 5 * time.Second,
+	})
 	if err != nil {
 		return trimmed
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0")
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
+	finalURL, _, err := fetcher.ResolveFinalURL(trimmed)
 	if err != nil {
 		return trimmed
 	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
-	_ = resp.Body.Close()
-	if resp.Request != nil && resp.Request.URL != nil {
-		if finalURL := strings.TrimSpace(resp.Request.URL.String()); finalURL != "" {
-			return finalURL
-		}
+	if strings.TrimSpace(finalURL) != "" {
+		return strings.TrimSpace(finalURL)
 	}
 	return trimmed
 }
