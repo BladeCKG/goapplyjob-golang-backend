@@ -177,11 +177,11 @@ func main() {
 }
 
 func makeReadHTMLWith429Retry(max429Retries int, retryDelay time.Duration) raw.ReadHTMLFunc {
-	fetcher, err := scraper.NewCollyFetcher(scraper.CollyConfig{
+	fetcher, err := scraper.NewTLSClientFetcher(scraper.TLSClientConfig{
 		Timeout: 30 * time.Second,
 	})
 	if err != nil {
-		log.Printf("worker-chain colly init failed, fallback to net/http: %v", err)
+		log.Printf("worker-chain tls-client init failed, fallback to net/http: %v", err)
 		return makeReadHTMLWithHTTP429Retry(max429Retries, retryDelay)
 	}
 	return func(targetURL string) (string, int, error) {
