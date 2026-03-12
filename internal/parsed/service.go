@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"goapplyjob-golang-backend/internal/database"
-	"goapplyjob-golang-backend/internal/sources/plugins"
 	"log"
 	"net/url"
 	"os"
@@ -15,6 +13,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/sources/plugins"
 )
 
 const (
@@ -137,6 +138,8 @@ var techStackAliases = map[string]string{
 }
 
 var groqTechStackExtractAllowedCategories = []string{
+	"expert",
+	"experts",
 	"engineer",
 	"engineers",
 	"programmer",
