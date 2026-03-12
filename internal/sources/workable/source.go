@@ -340,10 +340,13 @@ func inferSeniority(title string) (bool, bool, bool, bool, bool) {
 	_, hasPrincipal := tokens["principal"]
 	_, hasStaff := tokens["staff"]
 	_, hasHead := tokens["head"]
+	_, hasDirector := tokens["director"]
+	_, hasChief := tokens["chief"]
+	_, hasManager := tokens["manager"]
 	isEntry := hasEntry || hasIntern
 	isJunior := hasJunior || hasJr
 	isSenior := hasSenior || hasSr
-	isLead := hasLead || hasPrincipal || hasStaff || hasHead
+	isLead := hasLead || hasPrincipal || hasStaff || hasHead || hasDirector || hasChief || hasManager
 	isMid := !(isEntry || isJunior || isSenior || isLead)
 	return isEntry, isJunior, isMid, isSenior, isLead
 }
