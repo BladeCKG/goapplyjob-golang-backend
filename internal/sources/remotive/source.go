@@ -5,6 +5,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"goapplyjob-golang-backend/internal/locationnorm"
+	"goapplyjob-golang-backend/internal/sources/currency"
 	"html"
 	"math"
 	"net/url"
@@ -22,11 +23,10 @@ const (
 )
 
 var (
-	scriptLDPattern     = regexp.MustCompile(`(?is)<script[^>]*type=['"]application/ld\+json['"][^>]*>(.*?)</script>`)
-	tagPattern          = regexp.MustCompile(`(?is)<[^>]+>`)
-	descItemPattern     = regexp.MustCompile(`(?is)<(p|li)([^>]*)>(.*?)</(?:p|li)>`)
-	anchorHrefRE        = regexp.MustCompile(`(?is)<a\b[^>]*\bhref\s*=\s*['"]([^'"]+)['"][^>]*>(.*?)</a>`)
-	salaryNumberPattern = regexp.MustCompile(`([$€£])?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*([kKmM])?`)
+	scriptLDPattern = regexp.MustCompile(`(?is)<script[^>]*type=['"]application/ld\+json['"][^>]*>(.*?)</script>`)
+	tagPattern      = regexp.MustCompile(`(?is)<[^>]+>`)
+	descItemPattern = regexp.MustCompile(`(?is)<(p|li)([^>]*)>(.*?)</(?:p|li)>`)
+	anchorHrefRE    = regexp.MustCompile(`(?is)<a\b[^>]*\bhref\s*=\s*['"]([^'"]+)['"][^>]*>(.*?)</a>`)
 )
 
 type sitemapURL struct {
@@ -349,21 +349,17 @@ func parseSalaryRangeFromText(value string) any {
 	}
 	normalizedText := normalizeSalaryText(raw)
 	normalized := strings.ToLower(normalizedText)
-	matches := salaryNumberPattern.FindAllStringSubmatch(raw, -1)
+	matches := currency.SalaryNumberPattern.FindAllStringSubmatch(raw, -1)
 	if len(matches) == 0 {
-		matches = salaryNumberPattern.FindAllStringSubmatch(normalizedText, -1)
+		matches = currency.SalaryNumberPattern.FindAllStringSubmatch(normalizedText, -1)
 	}
 	if len(matches) == 0 {
 		return nil
 	}
 	amounts := make([]float64, 0, len(matches))
-	currencySymbol := ""
 	for _, match := range matches {
 		if len(match) < 4 {
 			continue
-		}
-		if currencySymbol == "" && strings.TrimSpace(match[1]) != "" {
-			currencySymbol = strings.TrimSpace(match[1])
 		}
 		amount := parseAmount(match[2], match[3])
 		if amount > 0 {
@@ -385,21 +381,8 @@ func parseSalaryRangeFromText(value string) any {
 	} else if strings.Contains(normalized, "per year") || strings.Contains(normalized, "/year") || strings.Contains(normalized, "/yr") || strings.Contains(normalized, " yearly") || strings.Contains(normalized, " annual") {
 		salaryType = "per year"
 	}
-	currencyCode := "USD"
-	if strings.Contains(normalized, "eur") {
-		currencyCode = "EUR"
-		if currencySymbol == "" {
-			currencySymbol = "€"
-		}
-	} else if strings.Contains(normalized, "gbp") {
-		currencyCode = "GBP"
-		if currencySymbol == "" {
-			currencySymbol = "£"
-		}
-	}
-	if currencySymbol == "" {
-		currencySymbol = "$"
-	}
+	currencyCode, currencySymbol, _ := currency.DetectCurrency(normalized)
+
 	minValue := amounts[0]
 	maxValue := amounts[0]
 	if len(amounts) > 1 {

@@ -3,6 +3,8 @@ package dailyremote
 import (
 	"encoding/json"
 	"errors"
+	"goapplyjob-golang-backend/internal/locationnorm"
+	"goapplyjob-golang-backend/internal/sources/currency"
 	"html"
 	"io"
 	"math"
@@ -13,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"goapplyjob-golang-backend/internal/locationnorm"
 	nethtml "golang.org/x/net/html"
 )
 
@@ -23,14 +24,13 @@ const (
 )
 
 var (
-	externalIDPattern     = regexp.MustCompile(`(\d+)(?:[/?#].*)?$`)
-	jsonLDPattern         = regexp.MustCompile(`(?is)<script[^>]*type=['"]application/ld\+json['"][^>]*>(.*?)</script>`)
-	articlePattern        = regexp.MustCompile(`(?is)<article[^>]*class=['"][^'"]*\bcard\b[^'"]*\bjs-card\b[^'"]*['"][^>]*>(.*?)</article>`)
-	hrefPattern           = regexp.MustCompile(`(?is)href=['"]([^'"]+)['"]`)
-	tagPattern            = regexp.MustCompile(`(?is)<[^>]+>`)
-	relTimePattern        = regexp.MustCompile(`(?i)(\d+)\s*(min|mins|minute|minutes|hour|hours|day|days|week|weeks)\s*ago`)
-	salaryNumberPattern   = regexp.MustCompile(`([$€£])?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*([kKmM])?`)
-	salaryHintPattern     = regexp.MustCompile(`(?i)(?:[$€£]|\b(?:usd|eur|gbp|salary|compensation|hour|hr|day|week|month|year|annual|annum|monthly|weekly|daily)\b|/[a-z]+)`)
+	externalIDPattern = regexp.MustCompile(`(\d+)(?:[/?#].*)?$`)
+	jsonLDPattern     = regexp.MustCompile(`(?is)<script[^>]*type=['"]application/ld\+json['"][^>]*>(.*?)</script>`)
+	articlePattern    = regexp.MustCompile(`(?is)<article[^>]*class=['"][^'"]*\bcard\b[^'"]*\bjs-card\b[^'"]*['"][^>]*>(.*?)</article>`)
+	hrefPattern       = regexp.MustCompile(`(?is)href=['"]([^'"]+)['"]`)
+	tagPattern        = regexp.MustCompile(`(?is)<[^>]+>`)
+	relTimePattern    = regexp.MustCompile(`(?i)(\d+)\s*(min|mins|minute|minutes|hour|hours|day|days|week|weeks)\s*ago`)
+
 	experienceHintPattern = regexp.MustCompile(`(?i)\b(?:exp|experience|yr|yrs|year|years)\b`)
 	headContainerPattern  = regexp.MustCompile(`(?is)<div[^>]*class=['"][^'"]*\bjob_head_info_container\b[^'"]*['"][^>]*>(.*?)</div>`)
 	inlineHeadItemPattern = regexp.MustCompile(`(?is)<div[^>]*class=['"][^'"]*\binline-flex\b[^'"]*\bitems-center\b[^'"]*['"][^>]*>(.*?)</div>`)
@@ -381,7 +381,7 @@ func extractHeadInfoFromHTML(htmlText string) (string, string) {
 			items := findNodesWithClasses(container, "div", []string{"inline-flex", "items-center"})
 			for _, item := range items {
 				text := normalizeText(textContent(item))
-				if looksLikeSalaryText(text) && salaryNumberPattern.MatchString(normalizeSalaryText(text)) {
+				if looksLikeSalaryText(text) && currency.SalaryNumberPattern.MatchString(normalizeSalaryText(text)) {
 					salaryText = text
 					break
 				}
@@ -458,22 +458,19 @@ func parseSalaryRangeFromText(value string) any {
 	if raw == "" {
 		return nil
 	}
-	normalized := strings.ToLower(normalizeSalaryText(raw))
-	matches := salaryNumberPattern.FindAllStringSubmatch(raw, -1)
+	normalizedText := normalizeSalaryText(raw)
+	normalized := strings.ToLower(normalizedText)
+	matches := currency.SalaryNumberPattern.FindAllStringSubmatch(raw, -1)
 	if len(matches) == 0 {
-		matches = salaryNumberPattern.FindAllStringSubmatch(normalizeSalaryText(raw), -1)
+		matches = currency.SalaryNumberPattern.FindAllStringSubmatch(normalizedText, -1)
 	}
 	if len(matches) == 0 {
 		return nil
 	}
 	amounts := make([]float64, 0, len(matches))
-	currencySymbol := "$"
 	for _, match := range matches {
 		if len(match) < 4 {
 			continue
-		}
-		if strings.TrimSpace(currencySymbol) == "$" && strings.TrimSpace(match[1]) != "" {
-			currencySymbol = strings.TrimSpace(match[1])
 		}
 		amount := parseAmount(match[2], match[3])
 		if amount > 0 {
@@ -493,17 +490,15 @@ func parseSalaryRangeFromText(value string) any {
 	} else if strings.Contains(normalized, "per day") || strings.Contains(normalized, "/day") || strings.Contains(normalized, " daily") {
 		salaryType = "per day"
 	}
+
+	currencyCode, currencySymbol, _ := currency.DetectCurrency(normalized)
+
 	minValue := amounts[0]
 	maxValue := amounts[0]
 	if len(amounts) > 1 {
 		maxValue = amounts[1]
 	}
-	currencyCode := "USD"
-	if currencySymbol == "€" {
-		currencyCode = "EUR"
-	} else if currencySymbol == "£" {
-		currencyCode = "GBP"
-	}
+	// currencyCode already derived via currency.Detect above.
 	payload := map[string]any{
 		"min":                     normalizeSalaryValue(minValue),
 		"max":                     normalizeSalaryValue(maxValue),
@@ -563,7 +558,7 @@ func normalizeSalaryText(value string) string {
 }
 
 func looksLikeSalaryText(value string) bool {
-	if salaryHintPattern.MatchString(value) {
+	if currency.SalaryHintPattern.MatchString(value) {
 		return true
 	}
 	if experienceHintPattern.MatchString(value) {
