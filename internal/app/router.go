@@ -33,6 +33,26 @@ func NewRouter(cfg config.Config, db *database.DB) *gin.Engine {
 	pricingHandler := pricing.NewHandler(cfg, db, authHandler)
 	employerHandler := employer.NewHandler(cfg, db, authHandler)
 
+	registerHealthRoutes(router, db)
+	authHandler.Register(router)
+	adminHandler.Register(router)
+	employerHandler.Register(router)
+	jobActionsHandler.Register(router)
+	jobsHandler.Register(router)
+	pricingHandler.Register(router)
+
+	return router
+}
+
+func NewHealthRouter(db *database.DB) *gin.Engine {
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.Use(accessLog())
+	registerHealthRoutes(router, db)
+	return router
+}
+
+func registerHealthRoutes(router *gin.Engine, db *database.DB) {
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
@@ -43,14 +63,6 @@ func NewRouter(cfg config.Config, db *database.DB) *gin.Engine {
 		}
 		c.JSON(http.StatusOK, gin.H{"status": status})
 	})
-	authHandler.Register(router)
-	adminHandler.Register(router)
-	employerHandler.Register(router)
-	jobActionsHandler.Register(router)
-	jobsHandler.Register(router)
-	pricingHandler.Register(router)
-
-	return router
 }
 
 func accessLog() gin.HandlerFunc {

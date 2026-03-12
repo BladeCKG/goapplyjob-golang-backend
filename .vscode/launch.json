@@ -55,6 +55,17 @@
       "env": {
         "WORKERS_DEBUG": "true"
       }
+    },
+    {
+      "name": "Worker Chain (cmd/workerchain)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/workerchain/main.go",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "WORKERS_DEBUG": "true"
+      }
     }
   ],
   "compounds": [
