@@ -41,9 +41,7 @@ var registry = map[string]SourcePlugin{
 		ToTargetJobURL: func(rawURL string) string {
 			return rawURL
 		},
-		ParseRawHTML: func(htmlText, sourceURL string) map[string]any {
-			return builtin.ExtractJobFromHTML(htmlText, sourceURL)
-		},
+		ParseRawHTML:         builtin.ExtractJobFromHTML,
 		ParseImportRows:      builtin.ParseImportRows,
 		SerializeImportRows:  builtin.SerializeImportRows,
 		UseExternalCompanyID: false,
