@@ -244,12 +244,46 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	processed := 0
 	throttledSources := map[string]struct{}{}
 	for _, job := range jobs {
-		if _, throttled := throttledSources[strings.TrimSpace(strings.ToLower(job.source))]; throttled {
-			log.Printf("raw-us-job-worker source_throttled_skip job_id=%d source=%s reason=prior_429_in_cycle", job.id, job.source)
-			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
-				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET retry_count = retry_count + 1 WHERE id = ?`, job.id)
+		clearParsed := func(jobID int64) error {
+			return database.RetryLocked(8, 50*time.Millisecond, func() error {
+				var parsedJobID int64
+				err := s.DB.SQL.QueryRowContext(ctx, `SELECT id FROM parsed_jobs WHERE raw_us_job_id = ? LIMIT 1`, jobID).Scan(&parsedJobID)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return err
+				}
+				if err == nil {
+					if _, execErr := s.DB.SQL.ExecContext(ctx, `DELETE FROM user_job_actions WHERE parsed_job_id = ?`, parsedJobID); execErr != nil {
+						return execErr
+					}
+					if _, execErr := s.DB.SQL.ExecContext(ctx, `DELETE FROM parsed_jobs WHERE id = ?`, parsedJobID); execErr != nil {
+						return execErr
+					}
+				}
+				return nil
+			})
+		}
+		setRetry := func(jobID int64) error {
+			if err := clearParsed(jobID); err != nil {
 				return err
-			}); err != nil {
+			}
+			return database.RetryLocked(8, 50*time.Millisecond, func() error {
+				_, err := s.DB.SQL.ExecContext(
+					ctx,
+					`UPDATE raw_us_jobs
+					 SET is_ready = false,
+					     is_skippable = false,
+					     is_parsed = false,
+					     raw_json = NULL,
+					     retry_count = retry_count + 1
+					 WHERE id = ?`,
+					jobID,
+				)
+				return err
+			})
+		}
+		if _, throttled := throttledSources[job.source]; throttled {
+			log.Printf("raw-us-job-worker source_throttled_skip job_id=%d source=%s reason=prior_429_in_cycle", job.id, job.source)
+			if err := setRetry(job.id); err != nil {
 				return processed, err
 			}
 			processed++
@@ -263,6 +297,9 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		}
 
 		setSkippable := func(job_id int64) error {
+			if err := clearParsed(job_id); err != nil {
+				return err
+			}
 			return database.RetryLocked(8, 50*time.Millisecond, func() error {
 				_, err := s.DB.SQL.ExecContext(
 					ctx,
@@ -279,8 +316,8 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			})
 		}
 		switch {
-		case statusCode == statusNotFound:
-			log.Printf("raw-us-job-worker fetch_result job_id=%d status=404", job.id)
+		case isRemovedBuiltinJobHTML(job.source, html):
+			log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s detected_builtin_removed_job", job.id, job.source)
 			if err := setSkippable(job.id); err != nil {
 				return processed, err
 			}
@@ -289,34 +326,25 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			if err := setSkippable(job.id); err != nil {
 				return processed, err
 			}
+		case statusCode == statusNotFound:
+			log.Printf("raw-us-job-worker fetch_result job_id=%d status=404", job.id)
+			if err := setSkippable(job.id); err != nil {
+				return processed, err
+			}
 		case statusCode == statusTooManyRequests:
 			log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s status=429 retry_later", job.id, job.source)
-			throttledSources[strings.TrimSpace(strings.ToLower(job.source))] = struct{}{}
-			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
-				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET retry_count = retry_count + 1 WHERE id = ?`, job.id)
-				return err
-			}); err != nil {
+			throttledSources[job.source] = struct{}{}
+			if err := setRetry(job.id); err != nil {
 				return processed, err
 			}
 		case statusCode < 200 || statusCode >= 300:
 			log.Printf("raw-us-job-worker fetch_result job_id=%d status=%d empty_html_or_error", job.id, statusCode)
-			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
-				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET retry_count = retry_count + 1 WHERE id = ?`, job.id)
-				return err
-			}); err != nil {
-				return processed, err
-			}
-		case isRemovedBuiltinJobHTML(job.source, html):
-			log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s detected_builtin_removed_job", job.id, job.source)
-			if err := setSkippable(job.id); err != nil {
+			if err := setRetry(job.id); err != nil {
 				return processed, err
 			}
 		case strings.TrimSpace(html) == "":
 			log.Printf("raw-us-job-worker fetch_result job_id=%d status=%d empty_html_or_error", job.id, statusCode)
-			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
-				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET retry_count = retry_count + 1 WHERE id = ?`, job.id)
-				return err
-			}); err != nil {
+			if err := setRetry(job.id); err != nil {
 				return processed, err
 			}
 		default:
@@ -333,10 +361,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			}
 			if skipRetry, _ := payload["_skip_for_retry"].(bool); skipRetry {
 				log.Printf("raw-us-job-worker parse_retry_later job_id=%d source=%s reason=%v", job.id, job.source, payload["_skip_reason"])
-				if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
-					_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET retry_count = retry_count + 1 WHERE id = ?`, job.id)
-					return err
-				}); err != nil {
+				if err := setRetry(job.id); err != nil {
 					return processed, err
 				}
 				processed++
@@ -350,12 +375,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				processed++
 				continue
 			}
-			if _, ok := payload["url"]; !ok {
-				payload["url"] = job.url
-			}
-			if _, ok := payload["created_at"]; !ok && !job.postDate.IsZero() {
-				payload["created_at"] = job.postDate.UTC().Format(time.RFC3339Nano)
-			}
+
 			extraPayload := parseExtraJSON(job.extraJSON)
 			if len(extraPayload) > 0 {
 				for key, value := range extraPayload {
