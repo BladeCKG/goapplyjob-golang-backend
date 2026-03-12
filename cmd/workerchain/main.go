@@ -13,6 +13,7 @@ import (
 	"goapplyjob-golang-backend/internal/importer"
 	"goapplyjob-golang-backend/internal/parsed"
 	"goapplyjob-golang-backend/internal/raw"
+	"goapplyjob-golang-backend/internal/scraper"
 	"goapplyjob-golang-backend/internal/watcher"
 	"goapplyjob-golang-backend/internal/workerlog"
 )
@@ -176,6 +177,20 @@ func main() {
 }
 
 func makeReadHTMLWith429Retry(max429Retries int, retryDelay time.Duration) raw.ReadHTMLFunc {
+	fetcher, err := scraper.NewCollyFetcher(scraper.CollyConfig{
+		Timeout: 30 * time.Second,
+	})
+	if err != nil {
+		log.Printf("worker-chain colly init failed, fallback to net/http: %v", err)
+		return makeReadHTMLWithHTTP429Retry(max429Retries, retryDelay)
+	}
+	return func(targetURL string) (string, int, error) {
+		return fetcher.ReadHTMLWith429Retry(targetURL, max429Retries, retryDelay)
+	}
+}
+
+func makeReadHTMLWithHTTP429Retry(max429Retries int, retryDelay time.Duration) raw.ReadHTMLFunc {
+	userAgent := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 	return func(targetURL string) (string, int, error) {
 		attempt := 0
@@ -184,7 +199,7 @@ func makeReadHTMLWith429Retry(max429Retries int, retryDelay time.Duration) raw.R
 			if err != nil {
 				return "", 0, err
 			}
-			req.Header.Set("User-Agent", "goapplyjob-backend/raw-job-worker")
+			req.Header.Set("User-Agent", userAgent)
 			resp, err := httpClient.Do(req)
 			if err != nil {
 				return "", -1, nil

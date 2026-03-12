@@ -8,12 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"goapplyjob-golang-backend/internal/database"
-	"goapplyjob-golang-backend/internal/sources/builtin"
-	"goapplyjob-golang-backend/internal/sources/dailyremote"
-	"goapplyjob-golang-backend/internal/sources/hiringcafe"
-	"goapplyjob-golang-backend/internal/sources/remotive"
-	"goapplyjob-golang-backend/internal/sources/workable"
 	"io"
 	"log"
 	"math"
@@ -24,6 +18,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/sources/builtin"
+	"goapplyjob-golang-backend/internal/sources/dailyremote"
+	"goapplyjob-golang-backend/internal/sources/hiringcafe"
+	"goapplyjob-golang-backend/internal/sources/remotive"
+	"goapplyjob-golang-backend/internal/sources/workable"
 )
 
 const (
@@ -1586,7 +1587,7 @@ func (s *Service) isSourceEnabled(source string) bool {
 	if len(s.Config.EnabledSources) == 0 {
 		return false
 	}
-	_, ok := s.Config.EnabledSources[strings.ToLower(strings.TrimSpace(source))]
+	_, ok := s.Config.EnabledSources[source]
 	return ok
 }
 
