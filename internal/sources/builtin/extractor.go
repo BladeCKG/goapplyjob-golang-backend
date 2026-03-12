@@ -429,83 +429,21 @@ func extractTopSkills(htmlText string) []string {
 		return []string{}
 	}
 	if doc, err := nethtml.Parse(strings.NewReader(htmlText)); err == nil {
-		if skills := extractTopSkillsFromDoc(doc); len(skills) > 0 {
-			return skills
-		}
+		return extractTopSkillsFromDoc(doc)
 	}
-	if skills := extractTopSkillsFromRegex(htmlText); len(skills) > 0 {
-		return skills
-	}
-	match := topSkillsRegex.FindStringSubmatch(htmlText)
-	if len(match) < 2 {
-		return []string{}
-	}
-	parts := strings.Split(match[1], ",")
-	out := make([]string, 0, len(parts))
-	seen := map[string]struct{}{}
-	for _, part := range parts {
-		skill := strings.TrimSpace(spacePattern.ReplaceAllString(html.UnescapeString(part), " "))
-		if skill == "" || isNullLikeSkillToken(skill) {
-			continue
-		}
-		key := strings.ToLower(skill)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, skill)
-	}
-	return out
+	return []string{}
 }
 
 func extractTopSkillsFromRegex(htmlText string) []string {
-	lower := strings.ToLower(htmlText)
-	idx := strings.Index(lower, "top skills")
-	if idx < 0 {
-		return nil
-	}
-	windowEnd := idx + 5000
-	if windowEnd > len(htmlText) {
-		windowEnd = len(htmlText)
-	}
-	window := htmlText[idx:windowEnd]
-	itemMatches := regexp.MustCompile(`(?is)<div[^>]*class=["'][^"']*py-xs[^"']*px-sm[^"']*text-nowrap[^"']*border[^"']*["'][^>]*>(.*?)</div>`).FindAllStringSubmatch(window, -1)
-	if len(itemMatches) == 0 {
-		return nil
-	}
-	out := []string{}
-	seen := map[string]struct{}{}
-	for _, match := range itemMatches {
-		text := strings.TrimSpace(spacePattern.ReplaceAllString(html.UnescapeString(tagPattern.ReplaceAllString(match[1], " ")), " "))
-		if text == "" || strings.EqualFold(text, "top skills") || isNullLikeSkillToken(text) {
-			continue
-		}
-		key := strings.ToLower(text)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, text)
-	}
-	return out
+	return nil
 }
 
 func extractTopSkillsFromDoc(doc *nethtml.Node) []string {
-	heading := findTopSkillsHeading(doc)
-	var container *nethtml.Node
-	if heading != nil {
-		container = findAncestorWithClass(heading, "full-size", 6)
-		if container == nil {
-			container = heading.Parent
-		}
-	}
-	if container == nil {
-		container = doc
-	}
-	chipsContainer := findFirstDescendantWithClasses(container, []string{"d-flex", "gap-sm", "flex-wrap"})
+	chipsContainer := findTopSkillsChipsContainer(doc)
 	if chipsContainer == nil {
-		return nil
+		return []string{}
 	}
+
 	values := []string{}
 	seen := map[string]struct{}{}
 	for child := chipsContainer.FirstChild; child != nil; child = child.NextSibling {
@@ -524,6 +462,32 @@ func extractTopSkillsFromDoc(doc *nethtml.Node) []string {
 		values = append(values, value)
 	}
 	return values
+}
+
+func findTopSkillsChipsContainer(doc *nethtml.Node) *nethtml.Node {
+	foundHeading := false
+	var chips *nethtml.Node
+	var walk func(*nethtml.Node)
+	walk = func(n *nethtml.Node) {
+		if chips != nil {
+			return
+		}
+		if n.Type == nethtml.ElementNode && (n.Data == "h1" || n.Data == "h2" || n.Data == "h3" || n.Data == "h4" || n.Data == "h5" || n.Data == "h6") {
+			text := strings.ToLower(strings.TrimSpace(spacePattern.ReplaceAllString(extractNodeText(n), " ")))
+			if strings.Contains(text, "top skills") {
+				foundHeading = true
+			}
+		}
+		if foundHeading && n.Type == nethtml.ElementNode && n.Data == "div" && hasClass(n, "d-flex") && hasClass(n, "gap-sm") && hasClass(n, "flex-wrap") {
+			chips = n
+			return
+		}
+		for child := n.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(doc)
+	return chips
 }
 
 func findTopSkillsHeading(doc *nethtml.Node) *nethtml.Node {
