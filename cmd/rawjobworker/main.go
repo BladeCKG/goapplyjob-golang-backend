@@ -52,11 +52,11 @@ func main() {
 }
 
 func makeReadHTMLWith429Retry(max429Retries int, retryDelay time.Duration) raw.ReadHTMLFunc {
-	fetcher, err := scraper.NewTLSClientFetcher(scraper.TLSClientConfig{
+	fetcher, err := scraper.NewCloudscraperFetcher(scraper.CloudscraperConfig{
 		Timeout: 30 * time.Second,
 	})
 	if err != nil {
-		log.Printf("rawjobworker tls-client init failed, fallback to net/http: %v", err)
+		log.Printf("rawjobworker cloudscraper init failed, fallback to net/http: %v", err)
 		return makeReadHTMLWithHTTP429Retry(max429Retries, retryDelay)
 	}
 	return func(targetURL string) (string, int, error) {

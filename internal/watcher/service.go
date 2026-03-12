@@ -86,13 +86,13 @@ type Service struct {
 	RemoteRocketShipUSJobsSitemapFetchSample FetchSampleFunc
 	RemoteRocketShipUSJobsSitemapFetchFull   FetchFullFunc
 	FetchText                                func(string) (string, error)
-	Cloudscraper                             *scraper.TLSClientFetcher
+	Cloudscraper                             *scraper.CloudscraperFetcher
 	status                                   map[string]any
 }
 
 func New(config Config, db *database.DB) *Service {
 	svc := &Service{Config: config, DB: db}
-	cloudFetcher, err := scraper.NewTLSClientFetcher(scraper.TLSClientConfig{
+	cloudFetcher, err := scraper.NewCloudscraperFetcher(scraper.CloudscraperConfig{
 		Timeout: 30 * time.Second,
 	})
 	if err != nil {

@@ -294,7 +294,7 @@ func resolveRedirectURLDailyRemote(rawURL string) string {
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return trimmed
 	}
-	fetcher, err := scraper.NewTLSClientFetcher(scraper.TLSClientConfig{
+	fetcher, err := scraper.NewCloudscraperFetcher(scraper.CloudscraperConfig{
 		Timeout: 5 * time.Second,
 	})
 	if err != nil {
