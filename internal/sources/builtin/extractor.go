@@ -26,6 +26,7 @@ var (
 	senioritySpanRegex      = regexp.MustCompile(`(?is)<span[^>]*>(.*?)</span>`)
 	tagPattern              = regexp.MustCompile(`(?is)<[^>]+>`)
 	spacePattern            = regexp.MustCompile(`\s+`)
+	nullLikeTokenPattern    = regexp.MustCompile(`[^a-z0-9]+`)
 )
 
 func ExtractJob(htmlText, companyHTML string) map[string]any {
@@ -432,7 +433,7 @@ func extractTopSkills(htmlText string) []string {
 	seen := map[string]struct{}{}
 	for _, part := range parts {
 		skill := strings.TrimSpace(spacePattern.ReplaceAllString(html.UnescapeString(part), " "))
-		if skill == "" {
+		if skill == "" || isNullLikeSkillToken(skill) {
 			continue
 		}
 		key := strings.ToLower(skill)
@@ -871,7 +872,7 @@ func extractJSONLDSkills(jobPosting map[string]any) []string {
 			}
 			for _, part := range parts {
 				skill := strings.TrimSpace(part)
-				if skill == "" {
+				if skill == "" || isNullLikeSkillToken(skill) {
 					continue
 				}
 				key := strings.ToLower(skill)
@@ -890,6 +891,11 @@ func extractJSONLDSkills(jobPosting map[string]any) []string {
 	add(jobPosting["skills"])
 	add(jobPosting["keywords"])
 	return out
+}
+
+func isNullLikeSkillToken(value string) bool {
+	normalized := strings.TrimSpace(nullLikeTokenPattern.ReplaceAllString(strings.ToLower(value), " "))
+	return normalized == "null" || normalized == "none" || normalized == "na" || normalized == "n a" || normalized == "unknown"
 }
 
 func extractCompanyInfo(companyHTML, companySameAs string) map[string]any {

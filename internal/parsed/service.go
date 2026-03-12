@@ -1455,11 +1455,11 @@ func nilIfEmpty(value string) any {
 
 func jsonStringOrNil(values []string) any {
 	if len(values) == 0 {
-		return nil
+		return "[]"
 	}
 	encoded, err := json.Marshal(values)
 	if err != nil {
-		return nil
+		return "[]"
 	}
 	return string(encoded)
 }
@@ -1486,7 +1486,7 @@ func normalizeLocationCountries(values any) any {
 		}
 		return jsonStringOrNil(out)
 	default:
-		return nil
+		return "[]"
 	}
 }
 
@@ -1845,7 +1845,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				_normalizeNullStringToNone(payload["isMidLevel"]),
 				_normalizeNullStringToNone(payload["isSenior"]),
 				_normalizeNullStringToNone(payload["isLead"]),
-				normalizedJSONText(_normalizeNullStringToNone(payload["requiredLanguages"])),
+				normalizedJSONArrayText(_normalizeNullStringToNone(payload["requiredLanguages"])),
 				normalizedUSStates,
 				normalizedLocationCountries,
 				normalizedTechStackJSON,
@@ -2407,28 +2407,75 @@ func (s *Service) findDuplicateCrossSourceParsedJob(ctx context.Context, rawJobI
 }
 
 func normalizedJSONText(value any) any {
+	if value == nil {
+		return "[]"
+	}
 	switch item := value.(type) {
 	case []any:
+		if len(item) == 0 {
+			return "[]"
+		}
 		body, err := json.Marshal(item)
 		if err != nil {
-			return nil
+			return "[]"
 		}
 		return string(body)
 	case []string:
+		if len(item) == 0 {
+			return "[]"
+		}
 		body, err := json.Marshal(item)
 		if err != nil {
-			return nil
+			return "[]"
 		}
 		return string(body)
 	case map[string]any:
+		if len(item) == 0 {
+			return "{}"
+		}
 		body, err := json.Marshal(item)
 		if err != nil {
-			return nil
+			return "{}"
 		}
 		return string(body)
 	default:
 		return nil
 	}
+}
+
+func normalizedJSONArrayText(value any) any {
+	if value == nil {
+		return "[]"
+	}
+	switch item := value.(type) {
+	case []any:
+		if len(item) == 0 {
+			return "[]"
+		}
+		body, err := json.Marshal(item)
+		if err != nil {
+			return "[]"
+		}
+		return string(body)
+	case []string:
+		if len(item) == 0 {
+			return "[]"
+		}
+		body, err := json.Marshal(item)
+		if err != nil {
+			return "[]"
+		}
+		return string(body)
+	case string:
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" || strings.EqualFold(trimmed, "null") {
+			return "[]"
+		}
+		if strings.HasPrefix(trimmed, "[") {
+			return trimmed
+		}
+	}
+	return "[]"
 }
 
 func formatNullableTime(value *time.Time) any {
