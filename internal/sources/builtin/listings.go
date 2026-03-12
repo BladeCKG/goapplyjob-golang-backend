@@ -13,11 +13,6 @@ const (
 	PayloadType = "delta"
 )
 
-type ImportRow struct {
-	URL      string
-	PostDate time.Time
-}
-
 var publishedDateRegex = regexp.MustCompile(`(?is)\{[^{}]*['"]published_date['"]\s*:\s*['"]([^'"]+)['"][^{}]*\}`)
 
 func ExtractJobListings(htmlText string) []map[string]any {
@@ -139,12 +134,12 @@ func normalizePostDate(value string) string {
 	return value
 }
 
-func ParseImportRows(payloadText string) ([]ImportRow, int) {
+func ParseImportRows(payloadText string) ([]map[string]any, int) {
 	var payload []map[string]any
 	if err := json.Unmarshal([]byte(payloadText), &payload); err != nil {
 		return nil, 1
 	}
-	rows := make([]ImportRow, 0, len(payload))
+	rows := make([]map[string]any, 0, len(payload))
 	skipped := 0
 	for _, item := range payload {
 		rowURL, _ := item["url"].(string)
@@ -161,22 +156,17 @@ func ParseImportRows(payloadText string) ([]ImportRow, int) {
 			skipped++
 			continue
 		}
-		rows = append(rows, ImportRow{URL: rowURL, PostDate: postDate.UTC()})
+		rows = append(rows, map[string]any{"url": rowURL, "post_date": postDate.UTC()})
 	}
 	return rows, skipped
 }
 
-func SerializeImportRows(rows []ImportRow) string {
+func SerializeImportRows(rows []map[string]any) string {
 	payload := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		payload = append(payload, map[string]any{
-			"url":          row.URL,
-			"post_date":    row.PostDate.UTC().Format(time.RFC3339Nano),
-			"is_ready":     false,
-			"is_skippable": false,
-			"is_parsed":    false,
-			"retry_count":  0,
-			"raw_json":     nil,
+			"url":       row["url"],
+			"post_date": row["post_date"].(time.Time).UTC().Format(time.RFC3339Nano),
 		})
 	}
 	body, _ := json.Marshal(payload)

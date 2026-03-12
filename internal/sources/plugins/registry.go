@@ -1,8 +1,6 @@
 package plugins
 
 import (
-	"time"
-
 	"goapplyjob-golang-backend/internal/sources/builtin"
 	"goapplyjob-golang-backend/internal/sources/dailyremote"
 	"goapplyjob-golang-backend/internal/sources/hiringcafe"
@@ -46,22 +44,8 @@ var registry = map[string]SourcePlugin{
 		ParseRawHTML: func(htmlText, sourceURL string) map[string]any {
 			return builtin.ExtractJobFromHTML(htmlText, sourceURL)
 		},
-		ParseImportRows: func(bodyText string) ([]map[string]any, int) {
-			rows, skipped := builtin.ParseImportRows(bodyText)
-			out := make([]map[string]any, 0, len(rows))
-			for _, row := range rows {
-				out = append(out, map[string]any{"url": row.URL, "post_date": row.PostDate})
-			}
-			return out, skipped
-		},
-		SerializeImportRows: func(rows []map[string]any) string {
-			items := make([]builtin.ImportRow, 0, len(rows))
-			for _, row := range rows {
-				postDate, _ := row["post_date"].(time.Time)
-				items = append(items, builtin.ImportRow{URL: valueString(row["url"]), PostDate: postDate})
-			}
-			return builtin.SerializeImportRows(items)
-		},
+		ParseImportRows:      builtin.ParseImportRows,
+		SerializeImportRows:  builtin.SerializeImportRows,
 		UseExternalCompanyID: false,
 		UseCompanyMatchKeys:  true,
 		RunDuplicateCheck:    true,

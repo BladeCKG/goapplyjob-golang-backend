@@ -113,7 +113,7 @@ func ParseImportRows(payloadText string) ([]map[string]any, int) {
 			skipped++
 			continue
 		}
-		rawDate := firstNonEmpty(stringValue(item["scrapt_Date"]), stringValue(item["scraped_at"]))
+		rawDate := stringValue(item["scrapt_Date"])
 		postDate, err := normalizeTime(rawDate)
 		if err != nil {
 			skipped++

@@ -42,9 +42,11 @@ type Stats struct {
 }
 
 type SitemapRow struct {
-	URL      string
-	PostDate time.Time
-	RawJSON  map[string]any
+	URL       string
+	PostDate  time.Time
+	RawJSON   map[string]any
+	ExtraJSON map[string]any
+	Payload   map[string]any
 }
 
 type Config struct {
@@ -62,8 +64,8 @@ type Service struct {
 	Config Config
 }
 
-const sourceName = "remoterocketship"
 const (
+	sourceRemoterocketship  = "remoterocketship"
 	sourceBuiltin           = "builtin"
 	sourceRemotive          = "remotive"
 	sourceDailyremote       = "dailyremote"
@@ -104,49 +106,6 @@ func iterSitemapRowsText(xmlText string) [][2]string {
 		}
 	}
 	return rows
-}
-
-func parseRowsFromXMLText(xmlText string) ([]SitemapRow, int) {
-	rows := iterSitemapRowsText(xmlText)
-	parsed := make([]SitemapRow, 0, len(rows))
-	skippedInvalid := 0
-	for _, row := range rows {
-		postDate, err := normalizeDBDatetime(row[1])
-		if err != nil {
-			skippedInvalid++
-			continue
-		}
-		parsed = append(parsed, SitemapRow{URL: row[0], PostDate: postDate})
-	}
-	return parsed, skippedInvalid
-}
-
-func ParseRowsForImport(xmlText string) ([]SitemapRow, int) {
-	return parseRowsFromXMLText(xmlText)
-}
-
-func ParseRowsForBuiltinPayload(payloadText string) ([]SitemapRow, int) {
-	var payload []map[string]any
-	if err := json.Unmarshal([]byte(payloadText), &payload); err != nil {
-		return nil, 1
-	}
-	rows := make([]SitemapRow, 0, len(payload))
-	skipped := 0
-	for _, item := range payload {
-		rowURL, _ := item["url"].(string)
-		postDateRaw, _ := item["post_date"].(string)
-		if strings.TrimSpace(rowURL) == "" || strings.TrimSpace(postDateRaw) == "" {
-			skipped++
-			continue
-		}
-		postDate, err := normalizeDBDatetime(postDateRaw)
-		if err != nil {
-			skipped++
-			continue
-		}
-		rows = append(rows, SitemapRow{URL: rowURL, PostDate: postDate})
-	}
-	return rows, skipped
 }
 
 func ParseRowsForWorkablePayload(payloadText string) ([]SitemapRow, int) {
@@ -192,21 +151,8 @@ func ParseRowsForDailyremotePayload(payloadText string) ([]SitemapRow, int) {
 }
 
 func ParseRowsForSourcePayload(source, payloadType, payloadText string) ([]SitemapRow, int, bool) {
-	trimmedSource := strings.TrimSpace(source)
-	trimmedPayloadType := strings.TrimSpace(payloadType)
-	if trimmedPayloadType == payloadTypeXML {
-		rows, skipped := ParseRowsForImport(payloadText)
-		return rows, skipped, true
-	}
-	if trimmedSource == sourceBuiltin && trimmedPayloadType == payloadTypeJSON {
-		rows, skipped := ParseRowsForBuiltinPayload(payloadText)
-		return rows, skipped, true
-	}
-	plugin, ok := plugins.Get(trimmedSource)
-	if !ok || plugin.ParseImportRows == nil || strings.TrimSpace(plugin.PayloadType) == "" {
-		return nil, 0, false
-	}
-	if trimmedPayloadType != plugin.PayloadType {
+	plugin, ok := plugins.Get(source)
+	if !ok || plugin.ParseImportRows == nil {
 		return nil, 0, false
 	}
 	parsedRows, skipped := plugin.ParseImportRows(payloadText)
@@ -332,11 +278,12 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 		defer tx.Rollback()
 
 		type pendingUpdate struct {
-			url         string
-			row         SitemapRow
-			existingID  int64
-			isReady     bool
-			rawJSONText any
+			url           string
+			row           SitemapRow
+			existingID    int64
+			isReady       bool
+			rawJSONText   any
+			extraJSONText any
 		}
 		pendingUpdates := make([]pendingUpdate, 0, len(buffer))
 
@@ -358,8 +305,13 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 				rawJSONText = string(body)
 				isReady = true
 			}
+			extraJSONText := any(nil)
+			if row.ExtraJSON != nil {
+				body, _ := json.Marshal(row.ExtraJSON)
+				extraJSONText = string(body)
+			}
 			if errors.Is(err, sql.ErrNoRows) {
-				if _, err := tx.Exec(`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, retry_count, raw_json) VALUES (?, ?, ?, ?, false, 0, ?)`, source, url, postDate.Format(time.RFC3339), isReady, rawJSONText); err != nil {
+				if _, err := tx.Exec(`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, retry_count, extra_json, raw_json) VALUES (?, ?, ?, ?, false, 0, ?, ?)`, source, url, postDate.Format(time.RFC3339), isReady, extraJSONText, rawJSONText); err != nil {
 					failedDB++
 					failedRows[url] = row
 					continue
@@ -374,11 +326,12 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 				continue
 			}
 			pendingUpdates = append(pendingUpdates, pendingUpdate{
-				url:         url,
-				row:         row,
-				existingID:  existingID,
-				isReady:     isReady,
-				rawJSONText: rawJSONText,
+				url:           url,
+				row:           row,
+				existingID:    existingID,
+				isReady:       isReady,
+				rawJSONText:   rawJSONText,
+				extraJSONText: extraJSONText,
 			})
 		}
 
@@ -426,11 +379,13 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 				     is_skippable = false,
 				     is_parsed = false,
 				     retry_count = 0,
+				     extra_json = ?,
 				     raw_json = ?
 				 WHERE id = ?`,
 				source,
 				candidate.row.PostDate.Format(time.RFC3339),
 				candidate.isReady,
+				candidate.extraJSONText,
 				candidate.rawJSONText,
 				candidate.existingID,
 			); err != nil {
@@ -461,35 +416,12 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 	return inserted, updated, failedDB, failedRows
 }
 
-func (s *Service) ImportRawUSJobs(xmlPath string, batchSize int) (Stats, map[string]time.Time, map[string]time.Time, error) {
-	if _, err := os.Stat(xmlPath); err != nil {
-		return Stats{}, nil, nil, err
-	}
-	raw, err := os.ReadFile(xmlPath)
-	if err != nil {
-		return Stats{}, nil, nil, err
-	}
-	return s.ImportRawUSJobsText(string(raw), batchSize)
-}
-
-func (s *Service) ImportRawUSJobsText(xmlText string, batchSize int) (Stats, map[string]time.Time, map[string]time.Time, error) {
-	rows, skippedInvalid := parseRowsFromXMLText(xmlText)
-	stats, failedRows, succeededRows, err := s.ImportRawUSJobsRows(rows, batchSize)
-	if err != nil {
-		return stats, flattenImportRowDates(failedRows), flattenImportRowDates(succeededRows), err
-	}
-	stats.SkippedInvalid = skippedInvalid
-	return stats, flattenImportRowDates(failedRows), flattenImportRowDates(succeededRows), nil
-}
-
-func (s *Service) ImportRawUSJobsRows(rows []SitemapRow, batchSize int, source ...string) (Stats, map[string]SitemapRow, map[string]SitemapRow, error) {
+func (s *Service) ImportRawUSJobsRows(rows []SitemapRow, batchSize int, source string) (Stats, map[string]SitemapRow, map[string]SitemapRow, error) {
 	if batchSize <= 0 {
 		batchSize = 100
 	}
-	rowSource := sourceName
-	if len(source) > 0 && strings.TrimSpace(source[0]) != "" {
-		rowSource = strings.TrimSpace(source[0])
-	}
+	rowSource := source
+
 	log.Printf("raw-import-worker import_rows_start source=%s rows=%d batch_size=%d", rowSource, len(rows), batchSize)
 
 	stats := Stats{}
@@ -723,31 +655,6 @@ func flattenImportRowDates(rows map[string]SitemapRow) map[string]time.Time {
 	return out
 }
 
-func (s *Service) ProcessImportFile(xmlPath, importDir, importedPrefix string, batchSize int) (Stats, string, error) {
-	stats, failedRows, succeededRows, err := s.ImportRawUSJobs(xmlPath, batchSize)
-	if err != nil {
-		return stats, "", err
-	}
-	if len(failedRows) > 0 {
-		var importedPath string
-		if len(succeededRows) > 0 {
-			importedPath = newImportedPath(importDir, importedPrefix)
-			if err := writeRowsFile(importedPath, succeededRows); err != nil {
-				return stats, importedPath, err
-			}
-		}
-		if err := writeRowsFile(xmlPath, failedRows); err != nil {
-			return stats, importedPath, err
-		}
-		return stats, importedPath, nil
-	}
-	renamed := newImportedPath(importDir, importedPrefix)
-	if err := os.Rename(xmlPath, renamed); err != nil {
-		return stats, "", err
-	}
-	return stats, renamed, nil
-}
-
 func MarshalRows(rows map[string]time.Time) string {
 	payload, _ := json.Marshal(rows)
 	return string(payload)
@@ -767,14 +674,46 @@ func parseGenericImportRow(row map[string]any, requireRawPayload bool) (SitemapR
 	if !ok || postDate.IsZero() {
 		return SitemapRow{}, false
 	}
+	extraPayload, _ := row["extra_payload"].(map[string]any)
+	if extraPayload == nil {
+		extraPayload, _ = row["extra_json"].(map[string]any)
+	}
 	if !requireRawPayload {
-		return SitemapRow{URL: rowURL, PostDate: postDate}, true
+		return SitemapRow{
+			URL:       rowURL,
+			PostDate:  postDate,
+			ExtraJSON: extraPayload,
+			Payload:   row,
+		}, true
 	}
 	rawPayload, ok := row["raw_payload"].(map[string]any)
 	if !ok || rawPayload == nil {
 		return SitemapRow{}, false
 	}
-	return SitemapRow{URL: rowURL, PostDate: postDate, RawJSON: rawPayload}, true
+	return SitemapRow{
+		URL:       rowURL,
+		PostDate:  postDate,
+		RawJSON:   rawPayload,
+		ExtraJSON: extraPayload,
+		Payload:   row,
+	}, true
+}
+
+func serializeRowForSource(row SitemapRow) map[string]any {
+	if row.Payload != nil {
+		return row.Payload
+	}
+	serialized := map[string]any{
+		"url":       row.URL,
+		"post_date": row.PostDate,
+	}
+	if row.RawJSON != nil {
+		serialized["raw_payload"] = row.RawJSON
+	}
+	if row.ExtraJSON != nil {
+		serialized["extra_payload"] = row.ExtraJSON
+	}
+	return serialized
 }
 
 func (s *Service) RunOnce() error {
@@ -823,15 +762,11 @@ func (s *Service) RunOnce() error {
 
 		if len(remainingRows) > 0 {
 			var err error
-			if payload.PayloadType == "delta" && payload.Source == "builtin" {
-				err = s.ReplaceBuiltinPayloadRows(payload.ID, remainingRows)
-			} else {
-				serializedRows := make([]map[string]any, 0, len(remainingRows))
-				for _, row := range remainingRows {
-					serializedRows = append(serializedRows, map[string]any{"url": row.URL, "post_date": row.PostDate})
-				}
-				err = s.ReplaceSourcePayloadRows(payload.ID, payload.Source, serializedRows)
+			serializedRows := make([]map[string]any, 0, len(remainingRows))
+			for _, row := range remainingRows {
+				serializedRows = append(serializedRows, serializeRowForSource(row))
 			}
+			err = s.ReplaceSourcePayloadRows(payload.ID, payload.Source, serializedRows)
 			if err != nil {
 				log.Printf("raw-import-worker payload_update_failed payload_id=%d source=%s error=%v", payload.ID, payload.Source, err)
 				continue

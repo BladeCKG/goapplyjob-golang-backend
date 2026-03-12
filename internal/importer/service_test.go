@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"goapplyjob-golang-backend/internal/database"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -94,137 +92,6 @@ func TestIterSitemapRowsReturnsOnlyCompleteURLTags(t *testing.T) {
 	}
 }
 
-func TestProcessImportFileKeepsFailedRowsAndExportsSuccesses(t *testing.T) {
-	dir := t.TempDir()
-	requirePostgresTestDB(t)
-	db, err := database.Open(testDatabaseURL(t, "test_importer_success"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	svc := New(Config{}, db)
-
-	importFile := filepath.Join(dir, "latest_delta.xml")
-	xml := `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://example.com/a</loc><lastmod>2026-02-12T18:00:00+00:00</lastmod></url>
-  <url><loc>https://example.com/b</loc><lastmod>2026-02-12T17:00:00+00:00</lastmod></url>
-</urlset>`
-	if err := os.WriteFile(importFile, []byte(xml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	stats, importedPath, err := svc.ProcessImportFile(importFile, dir, "imported", 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stats.Inserted != 2 || stats.FailedDB != 0 {
-		t.Fatalf("unexpected success stats %#v", stats)
-	}
-	if _, err := os.Stat(importFile); !os.IsNotExist(err) {
-		t.Fatalf("expected original file to be renamed")
-	}
-	importedFiles, err := filepath.Glob(filepath.Join(dir, "imported*.xml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(importedFiles) != 1 {
-		t.Fatalf("expected one imported file, got %d: %#v", len(importedFiles), importedFiles)
-	}
-	importedRaw, err := os.ReadFile(importedPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(importedRaw), "https://example.com/a") || !strings.Contains(string(importedRaw), "https://example.com/b") {
-		t.Fatalf("unexpected imported file %s", string(importedRaw))
-	}
-}
-
-func TestImportRawUSJobsReturnsFailedRowsAndSuccessesSeparately(t *testing.T) {
-	dir := t.TempDir()
-	requirePostgresTestDB(t)
-	db, err := database.Open(testDatabaseURL(t, "test_importer_fail"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	svc := New(Config{}, db)
-
-	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (1, 'https://example.com/b', ?, true, false, true, 0, '{}')`, time.Date(2026, 2, 12, 16, 0, 0, 0, time.UTC).Format(time.RFC3339))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, created_at_source, updated_at, url) VALUES (1, 'Old Role', ?, ?, 'https://example.com/b')`, time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339Nano))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.SQL.Exec(`ALTER TABLE raw_us_jobs RENAME TO raw_us_jobs_disabled`); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _, _ = db.SQL.Exec(`ALTER TABLE raw_us_jobs_disabled RENAME TO raw_us_jobs`) }()
-
-	xmlPath := filepath.Join(dir, "latest_delta.xml")
-	xml := `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://example.com/a</loc><lastmod>2026-02-12T18:00:00+00:00</lastmod></url>
-  <url><loc>https://example.com/b</loc><lastmod>2026-02-12T17:00:00+00:00</lastmod></url>
-</urlset>`
-	if err := os.WriteFile(xmlPath, []byte(xml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	stats, failedRows, succeededRows, err := svc.ImportRawUSJobs(xmlPath, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stats.FailedDB != 2 || len(failedRows) != 2 || len(succeededRows) != 0 {
-		t.Fatalf("unexpected failure split stats=%#v failed=%#v succeeded=%#v", stats, failedRows, succeededRows)
-	}
-}
-
-func TestImportRawUSJobsTextProcessesWatcherPayloadBody(t *testing.T) {
-	requirePostgresTestDB(t)
-	db, err := database.Open(testDatabaseURL(t, "test_importer_payloads"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	svc := New(Config{}, db)
-
-	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO watcher_payloads (source_url, payload_type, body_text, created_at) VALUES (?, 'delta_xml', ?, ?)`,
-		"https://example.com/jobs.xml",
-		`<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://example.com/a</loc><lastmod>2026-02-12T18:00:00+00:00</lastmod></url>
-</urlset>`,
-		time.Now().UTC().Format(time.RFC3339Nano),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	payloads, err := svc.PickUnconsumedPayloads(1, map[string]struct{}{sourceName: {}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(payloads) != 1 {
-		t.Fatalf("expected one payload, got %d", len(payloads))
-	}
-	if payloads[0].PayloadType != "delta_xml" {
-		t.Fatalf("expected delta_xml payload, got %#v", payloads[0].PayloadType)
-	}
-	stats, failedRows, succeededRows, err := svc.ImportRawUSJobsText(payloads[0].BodyText, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stats.Inserted != 1 || len(failedRows) != 0 || len(succeededRows) != 1 {
-		t.Fatalf("unexpected payload import results stats=%#v failed=%#v succeeded=%#v", stats, failedRows, succeededRows)
-	}
-	if err := svc.DeletePayload(payloads[0].ID); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestPickUnconsumedPayloadsReturnsNewestFirst(t *testing.T) {
 	requirePostgresTestDB(t)
 	db, err := database.Open(testDatabaseURL(t, "test_importer_order"))
@@ -246,7 +113,7 @@ func TestPickUnconsumedPayloadsReturnsNewestFirst(t *testing.T) {
 		}
 	}
 
-	payloads, err := svc.PickUnconsumedPayloads(2, map[string]struct{}{sourceName: {}, sourceBuiltin: {}})
+	payloads, err := svc.PickUnconsumedPayloads(2, map[string]struct{}{sourceRemoterocketship: {}, sourceBuiltin: {}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,19 +122,6 @@ func TestPickUnconsumedPayloadsReturnsNewestFirst(t *testing.T) {
 	}
 	if payloads[0].ID <= payloads[1].ID {
 		t.Fatalf("expected newest payload first, got ids %d then %d", payloads[0].ID, payloads[1].ID)
-	}
-}
-
-func TestParseRowsForBuiltinPayload(t *testing.T) {
-	rows, skipped := ParseRowsForBuiltinPayload(`[
-		{"url":"https://builtin.com/job/a/1","post_date":"2026-02-12T18:00:00Z"},
-		{"url":"https://builtin.com/job/b/2","post_date":"2026-02-12T17:00:00Z"}
-	]`)
-	if skipped != 0 || len(rows) != 2 {
-		t.Fatalf("unexpected builtin rows skipped=%d rows=%#v", skipped, rows)
-	}
-	if rows[0].URL != "https://builtin.com/job/a/1" {
-		t.Fatalf("unexpected first builtin row %#v", rows[0])
 	}
 }
 
