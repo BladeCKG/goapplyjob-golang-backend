@@ -4,14 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/sources/remotive"
 	"net/url"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
-
-	"goapplyjob-golang-backend/internal/database"
-	"goapplyjob-golang-backend/internal/sources/remotive"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -80,6 +79,14 @@ func buildService(t *testing.T) *Service {
 	}, db)
 }
 
+type stubFetcher struct {
+	fn func(context.Context, string) (string, int, error)
+}
+
+func (s stubFetcher) ReadHTML(ctx context.Context, rawURL string) (string, int, error) {
+	return s.fn(ctx, rawURL)
+}
+
 func TestDeltaNewerThanLastmodReturnsOnlyNewerURLBlocks(t *testing.T) {
 	service := buildService(t)
 	fullData := []byte(`<?xml version="1.0" encoding="UTF-8"?>
@@ -130,8 +137,8 @@ func TestRunOnceSkipsDeltaFileWhenDeltaIsEmpty(t *testing.T) {
 <url><loc>https://example.com/a</loc><lastmod>2026-02-12T10:00:00+00:00</lastmod></url>
 </urlset>`)
 
-	service.RemoteRocketShipUSJobsSitemapFetchSample = func() ([]byte, error) { return sample, nil }
-	service.RemoteRocketShipUSJobsSitemapFetchFull = func() ([]byte, error) { return fullData, nil }
+	service.RemoteRocketShipUSJobsSitemapFetchSample = func(context.Context) ([]byte, error) { return sample, nil }
+	service.RemoteRocketShipUSJobsSitemapFetchFull = func(context.Context) ([]byte, error) { return fullData, nil }
 	if _, err := service.DB.SQL.ExecContext(context.Background(), `INSERT INTO watcher_states (source, state_json, updated_at) VALUES (?, ?, ?)`, "remoterocketship", `{"source_url":"https://example.com/jobs.xml","sample_hash":"old-hash","first_lastmod":"2026-02-12T10:00:00+00:00"}`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
@@ -156,8 +163,8 @@ func TestRunOnceUsesSampleDeltaWithoutFullFetch(t *testing.T) {
 <url><loc>https://example.com/old</loc><lastmod>2026-02-12T10:00:00+00:00</lastmod></url>
 </urlset>`)
 
-	service.RemoteRocketShipUSJobsSitemapFetchSample = func() ([]byte, error) { return sample, nil }
-	service.RemoteRocketShipUSJobsSitemapFetchFull = func() ([]byte, error) { return nil, errors.New("full fetch should not be called") }
+	service.RemoteRocketShipUSJobsSitemapFetchSample = func(context.Context) ([]byte, error) { return sample, nil }
+	service.RemoteRocketShipUSJobsSitemapFetchFull = func(context.Context) ([]byte, error) { return nil, errors.New("full fetch should not be called") }
 	if _, err := service.DB.SQL.ExecContext(context.Background(), `INSERT INTO watcher_states (source, state_json, updated_at) VALUES (?, ?, ?)`, "remoterocketship", `{"source_url":"https://example.com/jobs.xml","sample_hash":"old-hash","first_lastmod":"2026-02-12T10:00:00+00:00"}`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
@@ -183,11 +190,11 @@ func TestRunForeverRunOnceExecutesSingleCycle(t *testing.T) {
 	sample := []byte(`<urlset><url><loc>https://example.com/a</loc><lastmod>2026-02-12T10:00:00+00:00</lastmod></url></urlset>`)
 	sampleCalls := 0
 	fullCalls := 0
-	service.RemoteRocketShipUSJobsSitemapFetchSample = func() ([]byte, error) {
+	service.RemoteRocketShipUSJobsSitemapFetchSample = func(context.Context) ([]byte, error) {
 		sampleCalls++
 		return sample, nil
 	}
-	service.RemoteRocketShipUSJobsSitemapFetchFull = func() ([]byte, error) {
+	service.RemoteRocketShipUSJobsSitemapFetchFull = func(context.Context) ([]byte, error) {
 		fullCalls++
 		return sample, nil
 	}
@@ -212,29 +219,29 @@ func TestBuiltinScansNextPagesThenUpperPages(t *testing.T) {
 	service.Config.BuiltinMaxPage = 1000
 	service.Config.BuiltinPagesPerCycle = 4
 	service.Config.EnabledSources = map[string]struct{}{sourceBuiltin: {}}
-	service.FetchText = func(rawURL string) (string, error) {
+	service.Fetcher = stubFetcher{fn: func(ctx context.Context, rawURL string) (string, int, error) {
 		page := rawURL[strings.LastIndex(rawURL, "=")+1:]
 		switch page {
 		case "11":
-			return builtinPageHTML("https://builtin.com/job/new-a/11111", 11111, "2026-02-18T00:00:00+00:00"), nil
+			return builtinPageHTML("https://builtin.com/job/new-a/11111", 11111, "2026-02-18T00:00:00+00:00"), 200, nil
 		case "12":
-			return builtinPageHTML("https://builtin.com/job/marker/12121", 12121, "2026-02-17T00:00:00+00:00"), nil
+			return builtinPageHTML("https://builtin.com/job/marker/12121", 12121, "2026-02-17T00:00:00+00:00"), 200, nil
 		case "10":
-			return builtinPageHTML("https://builtin.com/job/up-10/10101", 10101, "2026-02-16T00:00:00+00:00"), nil
+			return builtinPageHTML("https://builtin.com/job/up-10/10101", 10101, "2026-02-16T00:00:00+00:00"), 200, nil
 		case "9":
-			return builtinPageHTML("https://builtin.com/job/up-9/9090", 9090, "2026-02-15T00:00:00+00:00"), nil
+			return builtinPageHTML("https://builtin.com/job/up-9/9090", 9090, "2026-02-15T00:00:00+00:00"), 200, nil
 		default:
-			return "No job results", nil
+			return "No job results", 200, nil
 		}
-	}
-	if err := service.saveStatePayload(sourceBuiltin, map[string]any{
+	}}
+	if err := service.saveStatePayload(context.Background(), sourceBuiltin, map[string]any{
 		"next_page":      10,
 		"last_job_url":   "https://builtin.com/job/marker/12121",
 		"last_post_date": "2026-02-17T00:00:00Z",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.runOnceBuiltin(); err != nil {
+	if err := service.runOnceBuiltin(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -260,7 +267,7 @@ func TestBuiltinScansNextPagesThenUpperPages(t *testing.T) {
 	if strings.Join(got, ",") != strings.Join(expected, ",") {
 		t.Fatalf("payload pages=%v expected=%v", got, expected)
 	}
-	state, err := service.loadStatePayload(sourceBuiltin)
+	state, err := service.loadStatePayload(context.Background(), sourceBuiltin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,22 +282,22 @@ func TestBuiltinKeepsNextPageAtOneAfterFullScan(t *testing.T) {
 	service.Config.BuiltinMaxPage = 2
 	service.Config.BuiltinPagesPerCycle = 5
 	service.Config.EnabledSources = map[string]struct{}{sourceBuiltin: {}}
-	service.FetchText = func(rawURL string) (string, error) {
+	service.Fetcher = stubFetcher{fn: func(ctx context.Context, rawURL string) (string, int, error) {
 		page := rawURL[strings.LastIndex(rawURL, "=")+1:]
 		switch page {
 		case "2":
-			return builtinPageHTML("https://builtin.com/job/two/2", 2, "2026-02-18T00:00:00+00:00"), nil
+			return builtinPageHTML("https://builtin.com/job/two/2", 2, "2026-02-18T00:00:00+00:00"), 200, nil
 		case "1":
-			return builtinPageHTML("https://builtin.com/job/one/1", 1, "2026-02-17T00:00:00+00:00"), nil
+			return builtinPageHTML("https://builtin.com/job/one/1", 1, "2026-02-17T00:00:00+00:00"), 200, nil
 		default:
-			return "No job results", nil
+			return "No job results", 200, nil
 		}
-	}
+	}}
 
-	if err := service.runOnceBuiltin(); err != nil {
+	if err := service.runOnceBuiltin(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	state, err := service.loadStatePayload(sourceBuiltin)
+	state, err := service.loadStatePayload(context.Background(), sourceBuiltin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,20 +318,20 @@ func TestRemotiveWatcherUsesJobIDCutoffAndNewestFirst(t *testing.T) {
   <url><loc>https://remotive.com/remote-jobs/software-dev/job-3803910</loc><lastmod>2026-02-01T00:00:00+00:00</lastmod></url>
   <url><loc>https://remotive.com/remote-jobs/software-dev/job-3803920</loc><lastmod>2026-02-01T00:00:00+00:00</lastmod></url>
 </urlset>`
-	if err := service.saveStatePayload(sourceRemotive, map[string]any{"latest_job_id": 3803900}); err != nil {
+	if err := service.saveStatePayload(context.Background(), sourceRemotive, map[string]any{"latest_job_id": 3803900}); err != nil {
 		t.Fatal(err)
 	}
-	service.FetchText = func(rawURL string) (string, error) {
+	service.Fetcher = stubFetcher{fn: func(ctx context.Context, rawURL string) (string, int, error) {
 		if rawURL != "https://remotive.com/sitemap-job-postings-8.xml" {
-			return "", errors.New("unexpected URL: " + rawURL)
+			return "", 500, errors.New("unexpected URL: " + rawURL)
 		}
-		return sitemap, nil
-	}
+		return sitemap, 200, nil
+	}}
 
-	if err := service.runOnceRemotive(); err != nil {
+	if err := service.runOnceRemotive(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	state, err := service.loadStatePayload(sourceRemotive)
+	state, err := service.loadStatePayload(context.Background(), sourceRemotive)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +371,7 @@ func TestRemotiveWatcherScansBackwardPartitionsUntilCrossingWatermark(t *testing
 	service.Config.RemotiveSitemapMaxIndex = 9
 	service.Config.RemotiveSitemapMinIndex = 1
 	service.Config.EnabledSources = map[string]struct{}{sourceRemotive: {}}
-	if err := service.saveStatePayload(sourceRemotive, map[string]any{"latest_job_id": 105}); err != nil {
+	if err := service.saveStatePayload(context.Background(), sourceRemotive, map[string]any{"latest_job_id": 105}); err != nil {
 		t.Fatal(err)
 	}
 	sitemap9 := `<?xml version="1.0" encoding="UTF-8"?>
@@ -378,18 +385,18 @@ func TestRemotiveWatcherScansBackwardPartitionsUntilCrossingWatermark(t *testing
   <url><loc>https://remotive.com/remote-jobs/software-dev/job-108</loc><lastmod>2026-01-31T00:00:00+00:00</lastmod></url>
 </urlset>`
 	fetchedPartitions := []int{}
-	service.FetchText = func(rawURL string) (string, error) {
+	service.Fetcher = stubFetcher{fn: func(ctx context.Context, rawURL string) (string, int, error) {
 		if strings.HasSuffix(rawURL, "-9.xml") {
-			return sitemap9, nil
+			return sitemap9, 200, nil
 		}
 		if strings.HasSuffix(rawURL, "-8.xml") {
 			fetchedPartitions = append(fetchedPartitions, 8)
-			return sitemap8, nil
+			return sitemap8, 200, nil
 		}
-		return "", errors.New("unexpected URL: " + rawURL)
-	}
+		return "", 500, errors.New("unexpected URL: " + rawURL)
+	}}
 
-	if err := service.runOnceRemotive(); err != nil {
+	if err := service.runOnceRemotive(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	var body string
@@ -414,7 +421,7 @@ func TestRemotiveWatcherScansBackwardPartitionsUntilCrossingWatermark(t *testing
 	if len(fetchedPartitions) != 1 || fetchedPartitions[0] != 8 {
 		t.Fatalf("unexpected fetched partitions %#v", fetchedPartitions)
 	}
-	state, err := service.loadStatePayload(sourceRemotive)
+	state, err := service.loadStatePayload(context.Background(), sourceRemotive)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +437,7 @@ func TestRemotiveWatcherUsesNowForDateOnlyLastmodWhenToday(t *testing.T) {
 	service.Config.RemotiveSitemapMaxIndex = 10
 	service.Config.RemotiveSitemapMinIndex = 1
 	service.Config.EnabledSources = map[string]struct{}{sourceRemotive: {}}
-	if err := service.saveStatePayload(sourceRemotive, map[string]any{"latest_job_id": 4_999_999}); err != nil {
+	if err := service.saveStatePayload(context.Background(), sourceRemotive, map[string]any{"latest_job_id": 4_999_999}); err != nil {
 		t.Fatal(err)
 	}
 	today := time.Now().UTC().Format("2006-01-02")
@@ -441,15 +448,15 @@ func TestRemotiveWatcherUsesNowForDateOnlyLastmodWhenToday(t *testing.T) {
   <url><loc>https://remotive.com/remote-jobs/software-dev/job-5000001</loc><lastmod>` + today + `</lastmod></url>
   <url><loc>https://remotive.com/remote-jobs/software-dev/job-5000000</loc><lastmod>` + yesterday + `</lastmod></url>
 </urlset>`
-	service.FetchText = func(rawURL string) (string, error) {
+	service.Fetcher = stubFetcher{fn: func(ctx context.Context, rawURL string) (string, int, error) {
 		if rawURL != "https://remotive.com/sitemap-job-postings-10.xml" {
-			return "", errors.New("unexpected URL: " + rawURL)
+			return "", 500, errors.New("unexpected URL: " + rawURL)
 		}
-		return sitemap, nil
-	}
+		return sitemap, 200, nil
+	}}
 
 	beforeRun := time.Now().UTC()
-	if err := service.runOnceRemotive(); err != nil {
+	if err := service.runOnceRemotive(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	afterRun := time.Now().UTC()
@@ -486,22 +493,22 @@ func TestRemotiveWatcherUsesNowFallbackWhenLastmodInvalid(t *testing.T) {
 	service.Config.RemotiveSitemapMaxIndex = 10
 	service.Config.RemotiveSitemapMinIndex = 1
 	service.Config.EnabledSources = map[string]struct{}{sourceRemotive: {}}
-	if err := service.saveStatePayload(sourceRemotive, map[string]any{"latest_job_id": 5_999_999}); err != nil {
+	if err := service.saveStatePayload(context.Background(), sourceRemotive, map[string]any{"latest_job_id": 5_999_999}); err != nil {
 		t.Fatal(err)
 	}
 	sitemap := `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://remotive.com/remote-jobs/software-dev/job-6000001</loc><lastmod>not-a-date</lastmod></url>
 </urlset>`
-	service.FetchText = func(rawURL string) (string, error) {
+	service.Fetcher = stubFetcher{fn: func(ctx context.Context, rawURL string) (string, int, error) {
 		if rawURL != "https://remotive.com/sitemap-job-postings-10.xml" {
-			return "", errors.New("unexpected URL: " + rawURL)
+			return "", 500, errors.New("unexpected URL: " + rawURL)
 		}
-		return sitemap, nil
-	}
+		return sitemap, 200, nil
+	}}
 
 	beforeRun := time.Now().UTC()
-	if err := service.runOnceRemotive(); err != nil {
+	if err := service.runOnceRemotive(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	afterRun := time.Now().UTC()
@@ -535,16 +542,16 @@ func TestHiringCafeWatcherUpsertsJobsWithoutImporter(t *testing.T) {
 	service.Config.HiringCafeTotalCountURL = "https://hiring.cafe/api/search-jobs/get-total-count?s=abc"
 	service.Config.HiringCafePageSize = 1
 	service.Config.EnabledSources = map[string]struct{}{sourceHiringCafe: {}}
-	service.FetchText = func(rawURL string) (string, error) {
+	service.Fetcher = stubFetcher{fn: func(ctx context.Context, rawURL string) (string, int, error) {
 		switch rawURL {
 		case "https://hiring.cafe/api/search-jobs/get-total-count?s=abc":
-			return `{"total":1}`, nil
+			return `{"total":1}`, 200, nil
 		case "https://hiring.cafe/api/search-jobs?page=0&s=abc&size=1":
-			return `{"results":[{"requisition_id":"abc123","v5_processed_job_data":{"estimated_publish_date":"2026-02-20T20:14:34Z","job_title_raw":"Software Engineer","commitment":["Full Time"]},"apply_url":"https://hiring.cafe/viewjob/abc123"}]}`, nil
+			return `{"results":[{"requisition_id":"abc123","v5_processed_job_data":{"estimated_publish_date":"2026-02-20T20:14:34Z","job_title_raw":"Software Engineer","commitment":["Full Time"]},"apply_url":"https://hiring.cafe/viewjob/abc123"}]}`, 200, nil
 		default:
-			return "", errors.New("unexpected URL: " + rawURL)
+			return "", 500, errors.New("unexpected URL: " + rawURL)
 		}
-	}
+	}}
 
 	if err := service.RunOnce(); err != nil {
 		t.Fatal(err)
@@ -564,12 +571,12 @@ func TestWorkableWatcherUpsertsJobsWithoutImporter(t *testing.T) {
 	service.Config.WorkableAPIURL = "https://jobs.workable.com/api/v1/jobs?location=United%20States&workplace=remote&day_range=1"
 	service.Config.WorkablePageLimit = 100
 	service.Config.EnabledSources = map[string]struct{}{sourceWorkable: {}}
-	service.FetchText = func(rawURL string) (string, error) {
+	service.Fetcher = stubFetcher{fn: func(ctx context.Context, rawURL string) (string, int, error) {
 		if !strings.Contains(rawURL, "jobs.workable.com/api/v1/jobs") {
-			return "", errors.New("unexpected URL: " + rawURL)
+			return "", 500, errors.New("unexpected URL: " + rawURL)
 		}
-		return `{"jobs":[{"id":"w1","url":"https://jobs.workable.com/view/abc123","title":"Software Engineer","created":"2026-02-20T20:14:34Z","updated":"2026-02-20T20:14:34Z","employmentType":"full-time","workplace":"remote","language":"en","description":"Role","requirementsSection":"Req","benefitsSection":"Ben","socialSharingDescription":"Summary","company":{"id":"c1","title":"Acme","website":"https://acme.example","image":"https://acme.example/logo.png"},"location":{"city":"New York","subregion":"New York","countryName":"United States"},"locations":["New York, United States"]}]}`, nil
-	}
+		return `{"jobs":[{"id":"w1","url":"https://jobs.workable.com/view/abc123","title":"Software Engineer","created":"2026-02-20T20:14:34Z","updated":"2026-02-20T20:14:34Z","employmentType":"full-time","workplace":"remote","language":"en","description":"Role","requirementsSection":"Req","benefitsSection":"Ben","socialSharingDescription":"Summary","company":{"id":"c1","title":"Acme","website":"https://acme.example","image":"https://acme.example/logo.png"},"location":{"city":"New York","subregion":"New York","countryName":"United States"},"locations":["New York, United States"]}]}`, 200, nil
+	}}
 
 	if err := service.RunOnce(); err != nil {
 		t.Fatal(err)
@@ -598,13 +605,13 @@ func TestDailyremoteWatcherCreatesDeltaPayload(t *testing.T) {
 	service.Config.DailyRemoteMaxPage = 2
 	service.Config.DailyRemotePagesPerCycle = 2
 	service.Config.EnabledSources = map[string]struct{}{sourceDailyremote: {}}
-	service.FetchText = func(rawURL string) (string, error) {
+	service.Fetcher = stubFetcher{fn: func(ctx context.Context, rawURL string) (string, int, error) {
 		if strings.Contains(rawURL, "page=1") {
-			return `<article class="card js-card"><h2 class="job-position"><a href="/remote-job/backend-engineer-1001">Backend Engineer</a></h2><span>1 hour ago</span></article>`, nil
+			return `<article class="card js-card"><h2 class="job-position"><a href="/remote-job/backend-engineer-1001">Backend Engineer</a></h2><span>1 hour ago</span></article>`, 200, nil
 		}
-		return "", nil
-	}
-	if err := service.saveStatePayload(sourceDailyremote, map[string]any{"latest_external_id": 1000}); err != nil {
+		return "", 200, nil
+	}}
+	if err := service.saveStatePayload(context.Background(), sourceDailyremote, map[string]any{"latest_external_id": 1000}); err != nil {
 		t.Fatal(err)
 	}
 

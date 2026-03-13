@@ -1,6 +1,7 @@
 package dailyremote
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"html"
@@ -299,7 +300,7 @@ func resolveRedirectURLDailyRemote(rawURL string) string {
 	if err != nil {
 		return trimmed
 	}
-	finalURL, _, err := fetcher.ResolveFinalURL(trimmed)
+	finalURL, _, err := fetcher.ResolveFinalURL(context.Background(), trimmed)
 	if err != nil {
 		return trimmed
 	}

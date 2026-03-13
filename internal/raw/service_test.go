@@ -77,7 +77,7 @@ func TestProcessPendingSkipsRemainingSourceJobsAfter429(t *testing.T) {
 	svc := New(Config{}, db)
 	svc.EnabledSources = map[string]struct{}{"remoterocketship": {}}
 	fetchCount := 0
-	svc.ReadHTML = func(targetURL string) (string, int, error) {
+	svc.ReadHTML = func(ctx context.Context, targetURL string) (string, int, error) {
 		fetchCount++
 		return "", 429, nil
 	}
@@ -128,7 +128,7 @@ func TestProcessPendingMarks404AsTerminalSkip(t *testing.T) {
 
 	svc := New(Config{}, db)
 	svc.EnabledSources = map[string]struct{}{"remoterocketship": {}}
-	svc.ReadHTML = func(targetURL string) (string, int, error) {
+	svc.ReadHTML = func(ctx context.Context, targetURL string) (string, int, error) {
 		return "", 404, nil
 	}
 	processed, err := svc.ProcessPending(context.Background(), 10)
@@ -178,7 +178,7 @@ func TestProcessPendingMarksDailyRemote410GoneAsTerminalSkip(t *testing.T) {
 
 	svc := New(Config{}, db)
 	svc.EnabledSources = map[string]struct{}{"dailyremote": {}}
-	svc.ReadHTML = func(targetURL string) (string, int, error) {
+	svc.ReadHTML = func(ctx context.Context, targetURL string) (string, int, error) {
 		_ = targetURL
 		return "<html><body>Job No Longer Available</body></html>", 410, nil
 	}
@@ -230,7 +230,7 @@ func TestProcessPendingBuiltinRemovedIsTerminalSkipWithoutRetryIncrement(t *test
 
 	svc := New(Config{}, db)
 	svc.EnabledSources = map[string]struct{}{"builtin": {}}
-	svc.ReadHTML = func(targetURL string) (string, int, error) {
+	svc.ReadHTML = func(ctx context.Context, targetURL string) (string, int, error) {
 		return "<html><body>Sorry, this job was removed.</body></html>", 200, nil
 	}
 	processed, err := svc.ProcessPending(context.Background(), 10)
@@ -281,7 +281,7 @@ func TestProcessPendingSkipsWhenEnabledSourcesEmpty(t *testing.T) {
 	svc := New(Config{}, db)
 	svc.EnabledSources = map[string]struct{}{}
 	called := false
-	svc.ReadHTML = func(targetURL string) (string, int, error) {
+	svc.ReadHTML = func(ctx context.Context, targetURL string) (string, int, error) {
 		called = true
 		return "<html></html>", 200, nil
 	}
@@ -317,7 +317,7 @@ func TestProcessPendingDoesNotParseNon2xxResponse(t *testing.T) {
 	svc := New(Config{}, db)
 	svc.EnabledSources = map[string]struct{}{"remoterocketship": {}}
 	parsedCalled := false
-	svc.ReadHTML = func(targetURL string) (string, int, error) {
+	svc.ReadHTML = func(ctx context.Context, targetURL string) (string, int, error) {
 		return "<html><body>upstream error page</body></html>", 500, nil
 	}
 

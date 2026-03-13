@@ -2,11 +2,7 @@ package main
 
 import (
 	"context"
-	"io"
-	"log"
-	"net/http"
-	"time"
-
+	"errors"
 	"goapplyjob-golang-backend/internal/app"
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
@@ -16,6 +12,8 @@ import (
 	"goapplyjob-golang-backend/internal/scraper"
 	"goapplyjob-golang-backend/internal/watcher"
 	"goapplyjob-golang-backend/internal/workerlog"
+	"log"
+	"time"
 )
 
 func main() {
@@ -128,45 +126,83 @@ func main() {
 		}, db)
 		parsedSvc.EnabledSources = enabledSources
 
+		stepTimeoutSeconds := config.GetenvInt("WORKER_CHAIN_STEP_TIMEOUT_SECONDS", 900)
+		if stepTimeoutSeconds < 0 {
+			stepTimeoutSeconds = 0
+		}
+
+		runChain := func() {
+			for {
+				log.Printf("worker-chain cycle_start")
+				if err := runStepWithTimeout("watcher", time.Duration(stepTimeoutSeconds)*time.Second, func(ctx context.Context) error {
+					return watcherSvc.RunOnceWithContext(ctx)
+				}); err != nil {
+					log.Printf("worker-chain watcher_failed error=%v", err)
+					if runOnce {
+						return
+					}
+					time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
+					continue
+				}
+				log.Printf("worker-chain watcher_done")
+				if err := runStepWithTimeout("importer", time.Duration(stepTimeoutSeconds)*time.Second, func(ctx context.Context) error {
+					return importerSvc.RunOnceWithContext(ctx)
+				}); err != nil {
+					log.Printf("worker-chain importer_failed error=%v", err)
+					if runOnce {
+						return
+					}
+					time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
+					continue
+				}
+				log.Printf("worker-chain importer_done")
+				rawCount, err := runCountStepWithTimeout(time.Duration(stepTimeoutSeconds)*time.Second, func(ctx context.Context) (int, error) {
+					return rawSvc.RunOnce(ctx)
+				})
+				if err != nil {
+					log.Printf("worker-chain raw_failed error=%v", err)
+					if runOnce {
+						return
+					}
+					time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
+					continue
+				}
+				log.Printf("worker-chain raw_done processed=%d", rawCount)
+				parsedCount, err := runCountStepWithTimeout(time.Duration(stepTimeoutSeconds)*time.Second, func(ctx context.Context) (int, error) {
+					return parsedSvc.RunOnce(ctx)
+				})
+				if err != nil {
+					log.Printf("worker-chain parsed_failed error=%v", err)
+					if runOnce {
+						return
+					}
+					time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
+					continue
+				}
+				log.Printf("worker-chain parsed_done processed=%d", parsedCount)
+				log.Printf("worker-chain cycle_done")
+				if runOnce {
+					return
+				}
+				if chainSleepSeconds > 0 {
+					time.Sleep(time.Duration(chainSleepSeconds) * time.Second)
+				}
+			}
+		}
+
 		for {
-			if err := watcherSvc.RunOnce(); err != nil {
-				log.Printf("worker-chain watcher_failed error=%v", err)
-				if runOnce {
-					return
-				}
-				time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
-				continue
-			}
-			if err := importerSvc.RunOnce(); err != nil {
-				log.Printf("worker-chain importer_failed error=%v", err)
-				if runOnce {
-					return
-				}
-				time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
-				continue
-			}
-			if _, err := rawSvc.RunOnce(context.Background()); err != nil {
-				log.Printf("worker-chain raw_failed error=%v", err)
-				if runOnce {
-					return
-				}
-				time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
-				continue
-			}
-			if _, err := parsedSvc.RunOnce(context.Background()); err != nil {
-				log.Printf("worker-chain parsed_failed error=%v", err)
-				if runOnce {
-					return
-				}
-				time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
-				continue
-			}
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("worker-chain panic_recovered error=%v", r)
+					}
+				}()
+				runChain()
+			}()
 			if runOnce {
 				return
 			}
-			if chainSleepSeconds > 0 {
-				time.Sleep(time.Duration(chainSleepSeconds) * time.Second)
-			}
+			time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
 		}
 	}()
 
@@ -176,46 +212,65 @@ func main() {
 	}
 }
 
+func runStepWithTimeout(name string, timeout time.Duration, fn func(context.Context) error) error {
+	if timeout <= 0 {
+		return fn(context.Background())
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- fn(ctx)
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		log.Printf("worker-chain step_timeout step=%s timeout=%s", name, timeout)
+		return ctx.Err()
+	}
+}
+
+func runCountStepWithTimeout(timeout time.Duration, fn func(context.Context) (int, error)) (int, error) {
+	if timeout <= 0 {
+		return fn(context.Background())
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	type result struct {
+		count int
+		err   error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		count, err := fn(ctx)
+		ch <- result{count: count, err: err}
+	}()
+	select {
+	case res := <-ch:
+		return res.count, res.err
+	case <-ctx.Done():
+		log.Printf("worker-chain step_timeout timeout=%s", timeout)
+		return 0, ctx.Err()
+	}
+}
+
 func makeReadHTMLWith429Retry(max429Retries int, retryDelay time.Duration) raw.ReadHTMLFunc {
 	fetcher, err := scraper.NewCloudscraperFetcher(scraper.CloudscraperConfig{
 		Timeout: 30 * time.Second,
 	})
 	if err != nil {
-		log.Printf("worker-chain cloudscraper init failed, fallback to net/http: %v", err)
-		return makeReadHTMLWithHTTP429Retry(max429Retries, retryDelay)
-	}
-	return func(targetURL string) (string, int, error) {
-		return fetcher.ReadHTMLWith429Retry(targetURL, max429Retries, retryDelay)
-	}
-}
-
-func makeReadHTMLWithHTTP429Retry(max429Retries int, retryDelay time.Duration) raw.ReadHTMLFunc {
-	userAgent := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	return func(targetURL string) (string, int, error) {
-		attempt := 0
-		for {
-			req, err := http.NewRequest(http.MethodGet, targetURL, nil)
-			if err != nil {
-				return "", 0, err
+		log.Printf("worker-chain cloudscraper init failed: %v", err)
+		return func(ctx context.Context, targetURL string) (string, int, error) {
+			if ctx == nil {
+				ctx = context.Background()
 			}
-			req.Header.Set("User-Agent", userAgent)
-			resp, err := httpClient.Do(req)
-			if err != nil {
-				return "", -1, nil
-			}
-			body, readErr := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
-			_ = resp.Body.Close()
-			if readErr != nil {
-				return "", -1, nil
-			}
-			if resp.StatusCode != 429 || attempt >= max429Retries {
-				return string(body), resp.StatusCode, nil
-			}
-			attempt++
-			if retryDelay > 0 {
-				time.Sleep(retryDelay)
-			}
+			return "", -1, errors.New("cloudscraper unavailable")
 		}
+	}
+	return func(ctx context.Context, targetURL string) (string, int, error) {
+		return fetcher.ReadHTMLWith429Retry(ctx, targetURL, max429Retries, retryDelay)
 	}
 }

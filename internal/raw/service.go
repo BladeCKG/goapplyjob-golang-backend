@@ -31,7 +31,7 @@ const (
 )
 
 type (
-	ReadHTMLFunc func(string) (string, int, error)
+	ReadHTMLFunc func(context.Context, string) (string, int, error)
 )
 
 type Service struct {
@@ -57,7 +57,7 @@ func New(cfg Config, db *database.DB) *Service {
 	return &Service{
 		DB:     db,
 		Config: cfg,
-		ReadHTML: func(string) (string, int, error) {
+		ReadHTML: func(context.Context, string) (string, int, error) {
 			return "", 0, errors.New("read html not configured")
 		},
 	}
@@ -265,7 +265,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		}
 		targetURL := toTargetJobURLForSource(job.source, job.url)
 		log.Printf("raw-us-job-worker fetch_start job_id=%d source=%s target_url=%s", job.id, job.source, targetURL)
-		html, statusCode, err := s.ReadHTML(targetURL)
+		html, statusCode, err := s.ReadHTML(ctx, targetURL)
 		if err != nil {
 			return processed, err
 		}

@@ -65,7 +65,7 @@ func main() {
 			continue
 		}
 
-		htmlText, status, err := fetcher.ReadHTML(row.URL)
+		htmlText, status, err := fetcher.ReadHTML(context.Background(), row.URL)
 		if err != nil || status < 200 || status >= 300 || strings.TrimSpace(htmlText) == "" {
 			log.Printf("skip raw_id=%d url=%s status=%d err=%v", row.RawID, row.URL, status, err)
 			skipped++

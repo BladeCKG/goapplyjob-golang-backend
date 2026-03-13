@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"encoding/xml"
@@ -470,7 +471,7 @@ func (s *Service) ImportRawUSJobsRows(rows []SitemapRow, batchSize int, source s
 	return stats, failedRows, succeededRows, nil
 }
 
-func (s *Service) PickUnconsumedPayloads(limit int, enabledSources map[string]struct{}) ([]struct {
+func (s *Service) PickUnconsumedPayloads(ctx context.Context, limit int, enabledSources map[string]struct{}) ([]struct {
 	ID          int64
 	Source      string
 	PayloadType string
@@ -492,7 +493,7 @@ func (s *Service) PickUnconsumedPayloads(limit int, enabledSources map[string]st
 	var rows *sql.Rows
 	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
 		var queryErr error
-		rows, queryErr = s.DB.SQL.Query(query, args...)
+		rows, queryErr = s.DB.SQL.QueryContext(ctx, query, args...)
 		return queryErr
 	})
 	if err != nil {
@@ -717,19 +718,33 @@ func serializeRowForSource(row SitemapRow) map[string]any {
 }
 
 func (s *Service) RunOnce() error {
+	return s.RunOnceWithContext(context.Background())
+}
+
+func (s *Service) RunOnceWithContext(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	batchSize := s.Config.BatchSize
 	payloadsPerCycle := s.Config.PayloadsPerCycle
 	enabledSources := s.Config.EnabledSources
 	errorBackoffSeconds := s.Config.ErrorBackoffSeconds
 
-	payloads, err := s.PickUnconsumedPayloads(payloadsPerCycle, enabledSources)
+	payloads, err := s.PickUnconsumedPayloads(ctx, payloadsPerCycle, enabledSources)
 	if err != nil {
 		log.Printf("raw-import-worker cycle_failed error=%v", err)
-		time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Duration(errorBackoffSeconds) * time.Second):
+		}
 		return nil
 	}
 	remainingRowsBudget := batchSize
 	for _, payload := range payloads {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if remainingRowsBudget <= 0 {
 			break
 		}
@@ -785,6 +800,10 @@ func (s *Service) RunOnce() error {
 }
 
 func (s *Service) RunForever() error {
+	return s.RunForeverWithContext(context.Background())
+}
+
+func (s *Service) RunForeverWithContext(ctx context.Context) error {
 	sleepDuration := s.Config.SleepDuration
 	runOnce := s.Config.RunOnce
 
@@ -795,12 +814,16 @@ func (s *Service) RunForever() error {
 	}
 
 	for {
-		if err := s.RunOnce(); err != nil {
+		if err := s.RunOnceWithContext(ctx); err != nil {
 			return err
 		}
 		if runOnce {
 			return nil
 		}
-		time.Sleep(sleepDuration)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(sleepDuration):
+		}
 	}
 }

@@ -113,7 +113,7 @@ func TestPickUnconsumedPayloadsReturnsNewestFirst(t *testing.T) {
 		}
 	}
 
-	payloads, err := svc.PickUnconsumedPayloads(2, map[string]struct{}{sourceRemoterocketship: {}, sourceBuiltin: {}})
+	payloads, err := svc.PickUnconsumedPayloads(context.Background(), 2, map[string]struct{}{sourceRemoterocketship: {}, sourceBuiltin: {}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,16 +1,15 @@
 package main
 
 import (
-	"io"
-	"log"
-	"net/http"
-	"time"
-
+	"context"
+	"errors"
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/raw"
 	"goapplyjob-golang-backend/internal/scraper"
 	"goapplyjob-golang-backend/internal/workerlog"
+	"log"
+	"time"
 )
 
 func main() {
@@ -56,41 +55,15 @@ func makeReadHTMLWith429Retry(max429Retries int, retryDelay time.Duration) raw.R
 		Timeout: 30 * time.Second,
 	})
 	if err != nil {
-		log.Printf("rawjobworker cloudscraper init failed, fallback to net/http: %v", err)
-		return makeReadHTMLWithHTTP429Retry(max429Retries, retryDelay)
-	}
-	return func(targetURL string) (string, int, error) {
-		return fetcher.ReadHTMLWith429Retry(targetURL, max429Retries, retryDelay)
-	}
-}
-
-func makeReadHTMLWithHTTP429Retry(max429Retries int, retryDelay time.Duration) raw.ReadHTMLFunc {
-	userAgent := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-	httpClient := &http.Client{Timeout: 30 * time.Second}
-	return func(targetURL string) (string, int, error) {
-		attempt := 0
-		for {
-			req, err := http.NewRequest(http.MethodGet, targetURL, nil)
-			if err != nil {
-				return "", 0, err
+		log.Printf("rawjobworker cloudscraper init failed: %v", err)
+		return func(ctx context.Context, targetURL string) (string, int, error) {
+			if ctx == nil {
+				ctx = context.Background()
 			}
-			req.Header.Set("User-Agent", userAgent)
-			resp, err := httpClient.Do(req)
-			if err != nil {
-				return "", -1, nil
-			}
-			body, readErr := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
-			_ = resp.Body.Close()
-			if readErr != nil {
-				return "", -1, nil
-			}
-			if resp.StatusCode != 429 || attempt >= max429Retries {
-				return string(body), resp.StatusCode, nil
-			}
-			attempt++
-			if retryDelay > 0 {
-				time.Sleep(retryDelay)
-			}
+			return "", -1, errors.New("cloudscraper unavailable")
 		}
+	}
+	return func(ctx context.Context, targetURL string) (string, int, error) {
+		return fetcher.ReadHTMLWith429Retry(ctx, targetURL, max429Retries, retryDelay)
 	}
 }

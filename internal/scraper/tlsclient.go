@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"context"
 	"errors"
 	"io"
 	"math/rand"
@@ -56,87 +57,133 @@ func (f *TLSClientFetcher) Close() error {
 	return nil
 }
 
-func (f *TLSClientFetcher) ReadHTML(targetURL string) (string, int, error) {
+func (f *TLSClientFetcher) ReadHTML(ctx context.Context, targetURL string) (string, int, error) {
 	if f == nil {
 		return "", 0, errors.New("tls-client fetcher is nil")
 	}
-	req, err := fhttp.NewRequest("GET", targetURL, nil)
-	if err != nil {
-		return "", 0, err
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	req.Header = fhttp.Header{
-		"User-Agent":                {UserAgents[rand.Intn(len(UserAgents))]},
-		"Accept":                    {"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"},
-		"Accept-Language":           {"en-US,en;q=0.9"},
-		"Accept-Encoding":           {"gzip, deflate, br"},
-		"Cache-Control":             {"no-cache"},
-		"Pragma":                    {"no-cache"},
-		"Upgrade-Insecure-Requests": {"1"},
-		"Sec-Fetch-Dest":            {"document"},
-		"Sec-Fetch-Mode":            {"navigate"},
-		"Sec-Fetch-Site":            {"none"},
-		"Sec-Fetch-User":            {"?1"},
-		"Referer":                   {"https://www.google.com/"},
+	type result struct {
+		body   string
+		status int
+		err    error
 	}
+	ch := make(chan result, 1)
+	go func() {
+		req, err := fhttp.NewRequest("GET", targetURL, nil)
+		if err != nil {
+			ch <- result{body: "", status: 0, err: err}
+			return
+		}
+		req.Header = fhttp.Header{
+			"User-Agent":                {UserAgents[rand.Intn(len(UserAgents))]},
+			"Accept":                    {"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"},
+			"Accept-Language":           {"en-US,en;q=0.9"},
+			"Accept-Encoding":           {"gzip, deflate, br"},
+			"Cache-Control":             {"no-cache"},
+			"Pragma":                    {"no-cache"},
+			"Upgrade-Insecure-Requests": {"1"},
+			"Sec-Fetch-Dest":            {"document"},
+			"Sec-Fetch-Mode":            {"navigate"},
+			"Sec-Fetch-Site":            {"none"},
+			"Sec-Fetch-User":            {"?1"},
+			"Referer":                   {"https://www.google.com/"},
+		}
 
-	resp, err := f.client.Do(req)
-	if err != nil {
-		return "", -1, err
+		resp, err := f.client.Do(req)
+		if err != nil {
+			ch <- result{body: "", status: -1, err: err}
+			return
+		}
+		if resp.Body == nil {
+			ch <- result{body: "", status: -1, err: nil}
+			return
+		}
+		defer resp.Body.Close()
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			ch <- result{body: "", status: -1, err: readErr}
+			return
+		}
+		ch <- result{body: string(body), status: resp.StatusCode, err: nil}
+	}()
+	select {
+	case <-ctx.Done():
+		return "", -1, ctx.Err()
+	case res := <-ch:
+		return res.body, res.status, res.err
 	}
-	if resp.Body == nil {
-		return "", -1, nil
-	}
-	defer resp.Body.Close()
-	body, readErr := io.ReadAll(resp.Body)
-	if readErr != nil {
-		return "", -1, nil
-	}
-	return string(body), resp.StatusCode, nil
 }
 
-func (f *TLSClientFetcher) ResolveFinalURL(targetURL string) (string, int, error) {
+func (f *TLSClientFetcher) ResolveFinalURL(ctx context.Context, targetURL string) (string, int, error) {
 	if f == nil {
 		return "", 0, errors.New("tls-client fetcher is nil")
 	}
-	req, err := fhttp.NewRequest("GET", targetURL, nil)
-	if err != nil {
-		return "", 0, err
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	req.Header = fhttp.Header{
-		"User-Agent":                {UserAgents[rand.Intn(len(UserAgents))]},
-		"Accept":                    {"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"},
-		"Accept-Language":           {"en-US,en;q=0.9"},
-		"Accept-Encoding":           {"gzip, deflate, br"},
-		"Cache-Control":             {"no-cache"},
-		"Pragma":                    {"no-cache"},
-		"Upgrade-Insecure-Requests": {"1"},
-		"Sec-Fetch-Dest":            {"document"},
-		"Sec-Fetch-Mode":            {"navigate"},
-		"Sec-Fetch-Site":            {"none"},
-		"Sec-Fetch-User":            {"?1"},
-		"Referer":                   {"https://www.google.com/"},
+	type result struct {
+		url    string
+		status int
+		err    error
 	}
+	ch := make(chan result, 1)
+	go func() {
+		req, err := fhttp.NewRequest("GET", targetURL, nil)
+		if err != nil {
+			ch <- result{url: "", status: 0, err: err}
+			return
+		}
+		req.Header = fhttp.Header{
+			"User-Agent":                {UserAgents[rand.Intn(len(UserAgents))]},
+			"Accept":                    {"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"},
+			"Accept-Language":           {"en-US,en;q=0.9"},
+			"Accept-Encoding":           {"gzip, deflate, br"},
+			"Cache-Control":             {"no-cache"},
+			"Pragma":                    {"no-cache"},
+			"Upgrade-Insecure-Requests": {"1"},
+			"Sec-Fetch-Dest":            {"document"},
+			"Sec-Fetch-Mode":            {"navigate"},
+			"Sec-Fetch-Site":            {"none"},
+			"Sec-Fetch-User":            {"?1"},
+			"Referer":                   {"https://www.google.com/"},
+		}
 
-	resp, err := f.client.Do(req)
-	if err != nil {
-		return "", -1, nil
+		resp, err := f.client.Do(req)
+		if err != nil {
+			ch <- result{url: "", status: -1, err: err}
+			return
+		}
+		if resp.Body == nil {
+			ch <- result{url: "", status: -1, err: nil}
+			return
+		}
+		defer resp.Body.Close()
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+		finalURL := targetURL
+		if resp.Request != nil && resp.Request.URL != nil {
+			finalURL = resp.Request.URL.String()
+		}
+		ch <- result{url: finalURL, status: resp.StatusCode, err: nil}
+	}()
+	select {
+	case <-ctx.Done():
+		return "", -1, ctx.Err()
+	case res := <-ch:
+		return res.url, res.status, res.err
 	}
-	if resp.Body == nil {
-		return "", -1, nil
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
-	finalURL := targetURL
-	if resp.Request != nil && resp.Request.URL != nil {
-		finalURL = resp.Request.URL.String()
-	}
-	return finalURL, resp.StatusCode, nil
 }
 
-func (f *TLSClientFetcher) ReadHTMLWith429Retry(targetURL string, max429Retries int, retryDelay time.Duration) (string, int, error) {
+func (f *TLSClientFetcher) ReadHTMLWith429Retry(ctx context.Context, targetURL string, max429Retries int, retryDelay time.Duration) (string, int, error) {
 	attempt := 0
 	for {
-		html, status, err := f.ReadHTML(targetURL)
+		if ctx != nil {
+			if err := ctx.Err(); err != nil {
+				return "", -1, err
+			}
+		}
+		html, status, err := f.ReadHTML(ctx, targetURL)
 		if err != nil {
 			return "", 0, err
 		}
@@ -145,7 +192,11 @@ func (f *TLSClientFetcher) ReadHTMLWith429Retry(targetURL string, max429Retries 
 		}
 		attempt++
 		if retryDelay > 0 {
-			time.Sleep(retryDelay)
+			select {
+			case <-ctx.Done():
+				return "", -1, ctx.Err()
+			case <-time.After(retryDelay):
+			}
 		}
 	}
 }

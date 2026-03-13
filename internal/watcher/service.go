@@ -8,17 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
-	"log"
-	"math"
-	"net/http"
-	"net/url"
-	"regexp"
-	"sort"
-	"strconv"
-	"strings"
-	"time"
-
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/scraper"
 	"goapplyjob-golang-backend/internal/sources/builtin"
@@ -26,6 +15,14 @@ import (
 	"goapplyjob-golang-backend/internal/sources/hiringcafe"
 	"goapplyjob-golang-backend/internal/sources/remotive"
 	"goapplyjob-golang-backend/internal/sources/workable"
+	"log"
+	"math"
+	"net/url"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
 )
 
 const (
@@ -76,17 +73,20 @@ type Config struct {
 }
 
 type (
-	FetchSampleFunc func() ([]byte, error)
-	FetchFullFunc   func() ([]byte, error)
+	FetchSampleFunc func(context.Context) ([]byte, error)
+	FetchFullFunc   func(context.Context) ([]byte, error)
 )
+
+type HTMLFetcher interface {
+	ReadHTML(context.Context, string) (string, int, error)
+}
 
 type Service struct {
 	Config                                   Config
 	DB                                       *database.DB
 	RemoteRocketShipUSJobsSitemapFetchSample FetchSampleFunc
 	RemoteRocketShipUSJobsSitemapFetchFull   FetchFullFunc
-	FetchText                                func(string) (string, error)
-	Cloudscraper                             *scraper.CloudscraperFetcher
+	Fetcher                                  HTMLFetcher
 	status                                   map[string]any
 }
 
@@ -96,9 +96,9 @@ func New(config Config, db *database.DB) *Service {
 		Timeout: 30 * time.Second,
 	})
 	if err != nil {
-		log.Printf("watcher cloudscraper init failed, fallback to net/http: %v", err)
+		log.Printf("watcher cloudscraper init failed: %v", err)
 	} else {
-		svc.Cloudscraper = cloudFetcher
+		svc.Fetcher = cloudFetcher
 	}
 	svc.status = map[string]any{
 		"enabled":                       config.Enabled,
@@ -128,73 +128,25 @@ func New(config Config, db *database.DB) *Service {
 		"last_previous_first_lastmod":   nil,
 		"last_delta_payload_id":         nil,
 	}
-	timeoutSeconds := config.TimeoutSeconds
-	if timeoutSeconds <= 0 {
-		timeoutSeconds = 30
-	}
-	httpClient := &http.Client{Timeout: time.Duration(timeoutSeconds * float64(time.Second))}
-	userAgent := "goapplyjob-backend/watcher"
-	readBody := func(resp *http.Response, limitBytes int64) ([]byte, error) {
-		if limitBytes <= 0 {
-			limitBytes = 25 * 1024 * 1024
-		}
-		defer resp.Body.Close()
-		return io.ReadAll(io.LimitReader(resp.Body, limitBytes))
-	}
-	var doFetchBytes func(rawURL string, rangeHeader string) ([]byte, error)
-	doFetchBytes = func(rawURL string, rangeHeader string) ([]byte, error) {
-		if strings.TrimSpace(rawURL) == "" {
-			return nil, errors.New("empty url")
-		}
-		req, err := http.NewRequest(http.MethodGet, rawURL, nil)
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("User-Agent", userAgent)
-		if strings.TrimSpace(rangeHeader) != "" {
-			req.Header.Set("Range", rangeHeader)
-		}
-		resp, err := httpClient.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			if resp.StatusCode == http.StatusRequestedRangeNotSatisfiable && rangeHeader != "" {
-				_ = resp.Body.Close()
-				return doFetchBytes(rawURL, "")
-			}
-			bodyPreview, _ := readBody(resp, 1024)
-			return nil, errors.New("http status " + strconv.Itoa(resp.StatusCode) + " body=" + strings.TrimSpace(string(bodyPreview)))
-		}
-		return readBody(resp, 25*1024*1024)
-	}
-	svc.RemoteRocketShipUSJobsSitemapFetchSample = func() ([]byte, error) {
+
+	svc.RemoteRocketShipUSJobsSitemapFetchSample = func(ctx context.Context) ([]byte, error) {
 		sampleBytes := int64(max(config.SampleKB, 1) * 1024)
-		if svc.Cloudscraper != nil {
-			if data, err := svc.fetchBytesWithCloudscraper(config.RemoteRocketshipUSJobSitemapURL); err == nil {
-				if int64(len(data)) <= sampleBytes {
-					return data, nil
-				}
-				return data[:sampleBytes], nil
-			}
-		}
-		return doFetchBytes(config.RemoteRocketshipUSJobSitemapURL, "bytes=0-"+strconv.FormatInt(sampleBytes-1, 10))
-	}
-	svc.RemoteRocketShipUSJobsSitemapFetchFull = func() ([]byte, error) {
-		if svc.Cloudscraper != nil {
-			if data, err := svc.fetchBytesWithCloudscraper(config.RemoteRocketshipUSJobSitemapURL); err == nil {
+		if data, err := svc.fetchBytesWithScraper(ctx, config.RemoteRocketshipUSJobSitemapURL); err == nil {
+			if int64(len(data)) <= sampleBytes {
 				return data, nil
 			}
+			return data[:sampleBytes], nil
 		}
-		return doFetchBytes(config.RemoteRocketshipUSJobSitemapURL, "")
+
+		return nil, errors.New("scraper fetch failed")
 	}
-	svc.FetchText = func(rawURL string) (string, error) {
-		data, err := doFetchBytes(rawURL, "")
-		if err != nil {
-			return "", err
+	svc.RemoteRocketShipUSJobsSitemapFetchFull = func(ctx context.Context) ([]byte, error) {
+		if data, err := svc.fetchBytesWithScraper(ctx, config.RemoteRocketshipUSJobSitemapURL); err == nil {
+			return data, nil
 		}
-		return string(data), nil
+		return nil, errors.New("scraper fetch failed")
 	}
+
 	return svc
 }
 
@@ -212,11 +164,11 @@ func (s *Service) setStatus(values map[string]any) {
 	}
 }
 
-func (s *Service) fetchBytesWithCloudscraper(rawURL string) ([]byte, error) {
-	if s.Cloudscraper == nil {
-		return nil, errors.New("cloudscraper not available")
+func (s *Service) fetchBytesWithScraper(ctx context.Context, rawURL string) ([]byte, error) {
+	if s.Fetcher == nil {
+		return nil, errors.New("scraper not available")
 	}
-	htmlText, status, err := s.Cloudscraper.ReadHTML(rawURL)
+	htmlText, status, err := s.Fetcher.ReadHTML(ctx, rawURL)
 	if err != nil {
 		return nil, err
 	}
@@ -226,24 +178,26 @@ func (s *Service) fetchBytesWithCloudscraper(rawURL string) ([]byte, error) {
 	return []byte(htmlText), nil
 }
 
-func (s *Service) fetchTextWithCloudscraper(rawURL string) (string, error) {
-	data, err := s.fetchBytesWithCloudscraper(rawURL)
+func (s *Service) fetchTextWithScraper(ctx context.Context, rawURL string) (string, error) {
+	data, err := s.fetchBytesWithScraper(ctx, rawURL)
 	if err != nil {
 		return "", err
 	}
 	return string(data), nil
 }
 
-func (s *Service) fetchTextForDailyRemote(rawURL string) (string, error) {
-	if s.Cloudscraper != nil {
-		if text, err := s.fetchTextWithCloudscraper(rawURL); err == nil {
-			return text, nil
-		}
+func (s *Service) fetchTextForDailyRemote(ctx context.Context, rawURL string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
-	return s.FetchText(rawURL)
+	return s.fetchTextWithScraper(ctx, rawURL)
 }
 
 func (s *Service) RunForever(runOnce bool) error {
+	return s.RunForeverWithContext(context.Background(), runOnce)
+}
+
+func (s *Service) RunForeverWithContext(ctx context.Context, runOnce bool) error {
 	if !s.Config.Enabled {
 		s.setStatus(map[string]any{"last_error": nil})
 		return nil
@@ -257,7 +211,7 @@ func (s *Service) RunForever(runOnce bool) error {
 	defer s.setStatus(map[string]any{"running": false})
 
 	for {
-		if err := s.RunOnce(); err != nil {
+		if err := s.RunOnceWithContext(ctx); err != nil {
 			return err
 		}
 		if runOnce {
@@ -267,15 +221,26 @@ func (s *Service) RunForever(runOnce bool) error {
 		if sleepSeconds < 1 {
 			sleepSeconds = 1
 		}
-		time.Sleep(time.Duration(sleepSeconds * float64(time.Second)))
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Duration(sleepSeconds * float64(time.Second))):
+		}
 	}
 }
 
 func (s *Service) RunOnce() error {
+	return s.RunOnceWithContext(context.Background())
+}
+
+func (s *Service) RunOnceWithContext(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	log.Printf("watcher cycle_start enabled_sources=%v", sortedSourceNames(s.Config.EnabledSources))
 	if strings.TrimSpace(s.Config.RemoteRocketshipUSJobSitemapURL) != "" && s.isSourceEnabled(sourceRemoterocketship) {
 		log.Printf("watcher source_start source=%s runner=runOnceRemoteRocketship", sourceRemoterocketship)
-		if err := s.runOnceRemoteRocketship(); err != nil {
+		if err := s.runOnceRemoteRocketship(ctx); err != nil {
 			log.Printf("watcher source_failed source=%s runner=runOnceRemoteRocketship error=%v", sourceRemoterocketship, err)
 			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
 		} else {
@@ -284,7 +249,7 @@ func (s *Service) RunOnce() error {
 	}
 	if s.isRemotiveConfigured() && s.isSourceEnabled(sourceRemotive) {
 		log.Printf("watcher source_start source=%s runner=runOnceRemotive", sourceRemotive)
-		if err := s.runOnceRemotive(); err != nil {
+		if err := s.runOnceRemotive(ctx); err != nil {
 			log.Printf("watcher source_failed source=%s runner=runOnceRemotive error=%v", sourceRemotive, err)
 			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
 		} else {
@@ -293,7 +258,7 @@ func (s *Service) RunOnce() error {
 	}
 	if strings.TrimSpace(s.Config.WorkableAPIURL) != "" && s.isSourceEnabled("workable") {
 		log.Printf("watcher source_start source=workable runner=runOnceWorkable")
-		if err := s.runOnceWorkable(); err != nil {
+		if err := s.runOnceWorkable(ctx); err != nil {
 			log.Printf("watcher source_failed source=workable runner=runOnceWorkable error=%v", err)
 			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
 		} else {
@@ -302,7 +267,7 @@ func (s *Service) RunOnce() error {
 	}
 	if strings.TrimSpace(s.Config.DailyRemoteBaseURL) != "" && strings.Contains(s.Config.DailyRemoteBaseURL, "{page}") && s.Config.DailyRemoteMaxPage >= 1 && s.Config.DailyRemotePagesPerCycle >= 1 && s.isSourceEnabled(sourceDailyremote) {
 		log.Printf("watcher source_start source=%s runner=runOnceDailyremote", sourceDailyremote)
-		if err := s.runOnceDailyremote(); err != nil {
+		if err := s.runOnceDailyremote(ctx); err != nil {
 			log.Printf("watcher source_failed source=%s runner=runOnceDailyremote error=%v", sourceDailyremote, err)
 			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
 		} else {
@@ -311,7 +276,7 @@ func (s *Service) RunOnce() error {
 	}
 	if strings.TrimSpace(s.Config.BuiltinBaseURL) != "" && s.isSourceEnabled(sourceBuiltin) {
 		log.Printf("watcher source_start source=%s runner=runOnceBuiltin", sourceBuiltin)
-		if err := s.runOnceBuiltin(); err != nil {
+		if err := s.runOnceBuiltin(ctx); err != nil {
 			log.Printf("watcher source_failed source=%s runner=runOnceBuiltin error=%v", sourceBuiltin, err)
 			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
 		} else {
@@ -320,7 +285,7 @@ func (s *Service) RunOnce() error {
 	}
 	if strings.TrimSpace(s.Config.HiringCafeSearchAPIURL) != "" && strings.TrimSpace(s.Config.HiringCafeTotalCountURL) != "" && s.isSourceEnabled(sourceHiringCafe) {
 		log.Printf("watcher source_start source=%s runner=runOnceHiringCafe", sourceHiringCafe)
-		if err := s.runOnceHiringCafe(); err != nil {
+		if err := s.runOnceHiringCafe(ctx); err != nil {
 			log.Printf("watcher source_failed source=%s runner=runOnceHiringCafe error=%v", sourceHiringCafe, err)
 			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
 		} else {
@@ -330,8 +295,11 @@ func (s *Service) RunOnce() error {
 	return nil
 }
 
-func (s *Service) runOnceDailyremote() error {
-	statePayload, err := s.loadStatePayload(sourceDailyremote)
+func (s *Service) runOnceDailyremote(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	statePayload, err := s.loadStatePayload(ctx, sourceDailyremote)
 	if err != nil {
 		return err
 	}
@@ -341,9 +309,12 @@ func (s *Service) runOnceDailyremote() error {
 	payloadRows := make([]map[string]any, 0)
 
 	for page := 1; page <= s.Config.DailyRemoteMaxPage && pagesScanned < s.Config.DailyRemotePagesPerCycle; page++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		pageURL := strings.ReplaceAll(s.Config.DailyRemoteBaseURL, "{page}", strconv.Itoa(page))
 		log.Printf("DailyRemote fetch_start page=%d url=%s", page, pageURL)
-		htmlText, err := s.fetchTextForDailyRemote(pageURL)
+		htmlText, err := s.fetchTextForDailyRemote(ctx, pageURL)
 		if err != nil {
 			return err
 		}
@@ -386,6 +357,7 @@ func (s *Service) runOnceDailyremote() error {
 	var payloadID any
 	if len(payloadRows) > 0 {
 		savedID, err := s.saveDeltaPayloadForSource(
+			ctx,
 			sourceDailyremote,
 			strings.ReplaceAll(s.Config.DailyRemoteBaseURL, "{page}", "1"),
 			dailyremote.PayloadType,
@@ -405,7 +377,7 @@ func (s *Service) runOnceDailyremote() error {
 		latestExternalIDValue = previousLatestExternalID
 	}
 
-	return s.saveStatePayload(sourceDailyremote, map[string]any{
+	return s.saveStatePayload(ctx, sourceDailyremote, map[string]any{
 		"latest_external_id":       latestExternalIDValue,
 		"pages_scanned_last_cycle": pagesScanned,
 		"latest_delta_count":       len(payloadRows),
@@ -413,15 +385,18 @@ func (s *Service) runOnceDailyremote() error {
 	})
 }
 
-func (s *Service) runOnceRemoteRocketship() error {
-	sample, err := s.RemoteRocketShipUSJobsSitemapFetchSample()
+func (s *Service) runOnceRemoteRocketship(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	sample, err := s.RemoteRocketShipUSJobsSitemapFetchSample(ctx)
 	if err != nil {
 		s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
 		return err
 	}
 
 	currentHash := sha256Hex(sample)
-	previousHash, previousFirstLastmod, _ := s.loadRemoteRocketshipState(context.Background())
+	previousHash, previousFirstLastmod, _ := s.loadRemoteRocketshipState(ctx)
 	currentFirstLastmod := s.ExtractFirstLastmod(sample)
 
 	s.setStatus(map[string]any{
@@ -431,7 +406,7 @@ func (s *Service) runOnceRemoteRocketship() error {
 	})
 
 	if currentHash == previousHash {
-		_ = s.saveRemoteRocketshipState(context.Background(), currentHash, firstNonEmpty(currentFirstLastmod, previousFirstLastmod))
+		_ = s.saveRemoteRocketshipState(ctx, currentHash, firstNonEmpty(currentFirstLastmod, previousFirstLastmod))
 		s.setStatus(map[string]any{"last_overlap_bytes": len(sample)})
 		return nil
 	}
@@ -455,7 +430,7 @@ func (s *Service) runOnceRemoteRocketship() error {
 		deltaSource = "sample_lastmod_window"
 		overlapBytes = max(len(sample)-len(deltaData), 0)
 		if len(deltaData) == 0 {
-			_ = s.saveRemoteRocketshipState(context.Background(), currentHash, firstNonEmpty(currentFirstLastmod, previousFirstLastmod))
+			_ = s.saveRemoteRocketshipState(ctx, currentHash, firstNonEmpty(currentFirstLastmod, previousFirstLastmod))
 			s.setStatus(map[string]any{
 				"last_change_at":              utcNowISO(),
 				"last_overlap_bytes":          overlapBytes,
@@ -467,7 +442,7 @@ func (s *Service) runOnceRemoteRocketship() error {
 			return nil
 		}
 	} else {
-		fullData, err = s.RemoteRocketShipUSJobsSitemapFetchFull()
+		fullData, err = s.RemoteRocketShipUSJobsSitemapFetchFull(ctx)
 		if err != nil {
 			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
 			return err
@@ -483,11 +458,11 @@ func (s *Service) runOnceRemoteRocketship() error {
 	if len(fullData) > 0 && currentFirstLastmod == "" {
 		currentFirstLastmod = s.ExtractFirstLastmod(fullData)
 	}
-	_ = s.saveRemoteRocketshipState(context.Background(), currentHash, firstNonEmpty(currentFirstLastmod, previousFirstLastmod))
+	_ = s.saveRemoteRocketshipState(ctx, currentHash, firstNonEmpty(currentFirstLastmod, previousFirstLastmod))
 
 	var payloadID any
 	if len(deltaData) > 0 {
-		saved, err := s.saveRemoteRocketshipDeltaPayload(context.Background(), string(deltaData))
+		saved, err := s.saveRemoteRocketshipDeltaPayload(ctx, string(deltaData))
 		if err != nil {
 			return err
 		}
@@ -506,8 +481,11 @@ func (s *Service) runOnceRemoteRocketship() error {
 	return nil
 }
 
-func (s *Service) runOnceBuiltin() error {
-	statePayload, err := s.loadStatePayload(sourceBuiltin)
+func (s *Service) runOnceBuiltin(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	statePayload, err := s.loadStatePayload(ctx, sourceBuiltin)
 	if err != nil {
 		return err
 	}
@@ -535,7 +513,7 @@ func (s *Service) runOnceBuiltin() error {
 		if nextSavedPage < 1 {
 			nextSavedPage = 1
 		}
-		return s.saveStatePayload(sourceBuiltin, map[string]any{
+		return s.saveStatePayload(ctx, sourceBuiltin, map[string]any{
 			"next_page":                   nextSavedPage,
 			"last_post_date":              valueOrNil(lastPostDate),
 			"last_job_url":                valueOrNil(lastJobURL),
@@ -548,9 +526,12 @@ func (s *Service) runOnceBuiltin() error {
 	if (lastJobURL != "" || lastPostDateDT != nil) && currentPage < s.Config.BuiltinMaxPage {
 		probePage := currentPage + 1
 		for probePage <= s.Config.BuiltinMaxPage && pagesScanned < s.Config.BuiltinPagesPerCycle {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			pageURL := strings.ReplaceAll(s.Config.BuiltinBaseURL, "{page}", strconv.Itoa(probePage))
 			log.Printf("Builtin phase1 fetch_start page=%d url=%s", probePage, pageURL)
-			htmlText := s.fetchBuiltinPageText(pageURL, probePage, "next-page")
+			htmlText := s.fetchBuiltinPageText(ctx, pageURL, probePage, "next-page")
 			pagesScanned++
 			if strings.TrimSpace(htmlText) == "" {
 				probePage++
@@ -564,7 +545,7 @@ func (s *Service) runOnceBuiltin() error {
 			if len(listings) == 0 {
 				break
 			}
-			if _, err := s.saveDeltaPayloadForSource(sourceBuiltin, pageURL, payloadTypeDelta, mustMarshalJSON(listings)); err != nil {
+			if _, err := s.saveDeltaPayloadForSource(ctx, sourceBuiltin, pageURL, payloadTypeDelta, mustMarshalJSON(listings)); err != nil {
 				return err
 			}
 			payloadsCreated++
@@ -583,9 +564,12 @@ func (s *Service) runOnceBuiltin() error {
 
 	skipPhase2UntilBoundary := !phase1BoundaryMatched && (lastJobURL != "" || lastPostDateDT != nil)
 	for currentPage >= 1 && pagesScanned < s.Config.BuiltinPagesPerCycle {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		pageURL := strings.ReplaceAll(s.Config.BuiltinBaseURL, "{page}", strconv.Itoa(currentPage))
 		log.Printf("Builtin phase2 fetch_start page=%d url=%s", currentPage, pageURL)
-		htmlText := s.fetchBuiltinPageText(pageURL, currentPage, "upper-page")
+		htmlText := s.fetchBuiltinPageText(ctx, pageURL, currentPage, "upper-page")
 		pagesScanned++
 		if strings.TrimSpace(htmlText) == "" {
 			currentPage--
@@ -606,7 +590,7 @@ func (s *Service) runOnceBuiltin() error {
 			continue
 		}
 		if len(listings) > 0 {
-			if _, err := s.saveDeltaPayloadForSource(sourceBuiltin, pageURL, payloadTypeDelta, mustMarshalJSON(listings)); err != nil {
+			if _, err := s.saveDeltaPayloadForSource(ctx, sourceBuiltin, pageURL, payloadTypeDelta, mustMarshalJSON(listings)); err != nil {
 				return err
 			}
 			payloadsCreated++
@@ -628,7 +612,7 @@ func (s *Service) runOnceBuiltin() error {
 	return saveCheckpoint(currentPage)
 }
 
-func (s *Service) fetchBuiltinPageText(pageURL string, pageNo int, phase string) string {
+func (s *Service) fetchBuiltinPageText(ctx context.Context, pageURL string, pageNo int, phase string) string {
 	maxRetries := max(s.Config.Builtin429RetryCount, 0)
 	backoff := s.Config.Builtin429BackoffSeconds
 	if backoff < 0 {
@@ -640,9 +624,16 @@ func (s *Service) fetchBuiltinPageText(pageURL string, pageNo int, phase string)
 	}
 	attempt := 0
 	for {
-		htmlText, err := s.FetchText(pageURL)
+		if err := ctx.Err(); err != nil {
+			return ""
+		}
+		htmlText, err := s.fetchTextWithScraper(ctx, pageURL)
 		if pauseSeconds > 0 {
-			time.Sleep(time.Duration(pauseSeconds * float64(time.Second)))
+			select {
+			case <-ctx.Done():
+				return ""
+			case <-time.After(time.Duration(pauseSeconds * float64(time.Second))):
+			}
 		}
 		if err == nil {
 			return htmlText
@@ -652,7 +643,11 @@ func (s *Service) fetchBuiltinPageText(pageURL string, pageNo int, phase string)
 			waitSeconds := backoff * math.Pow(2, float64(attempt))
 			log.Printf("Builtin %s fetch rate-limited page=%d url=%s attempt=%d/%d wait_seconds=%.1f", phase, pageNo, pageURL, attempt+1, maxRetries+1, waitSeconds)
 			if waitSeconds > 0 {
-				time.Sleep(time.Duration(waitSeconds * float64(time.Second)))
+				select {
+				case <-ctx.Done():
+					return ""
+				case <-time.After(time.Duration(waitSeconds * float64(time.Second))):
+				}
 			}
 			attempt++
 			continue
@@ -662,8 +657,11 @@ func (s *Service) fetchBuiltinPageText(pageURL string, pageNo int, phase string)
 	}
 }
 
-func (s *Service) runOnceWorkable() error {
-	statePayload, err := s.loadStatePayload(sourceWorkable)
+func (s *Service) runOnceWorkable(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	statePayload, err := s.loadStatePayload(ctx, sourceWorkable)
 	if err != nil {
 		return err
 	}
@@ -681,10 +679,13 @@ func (s *Service) runOnceWorkable() error {
 	log.Printf("Workable watcher cycle_start previous_first_job_post_date=%s page_limit=%d", previousFirstJobPostDate, s.Config.WorkablePageLimit)
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		pageURL := workable.BuildAPIURL(s.Config.WorkableAPIURL, nextToken, max(s.Config.WorkablePageLimit, 1))
 		log.Printf("Workable fetch_start token=%s url=%s", valueOrNil(nextToken), pageURL)
 
-		bodyText, err := s.FetchText(pageURL)
+		bodyText, err := s.fetchTextWithScraper(ctx, pageURL)
 		if err != nil {
 			return err
 		}
@@ -738,7 +739,7 @@ func (s *Service) runOnceWorkable() error {
 					urls = append(urls, rowURL)
 				}
 			}
-			existingURLs, err := s.findExistingSourceURLs(sourceWorkable, urls)
+			existingURLs, err := s.findExistingSourceURLs(ctx, sourceWorkable, urls)
 			if err != nil {
 				return err
 			}
@@ -758,7 +759,7 @@ func (s *Service) runOnceWorkable() error {
 		}
 
 		if len(toUpsert) > 0 {
-			inserted, updated, err := s.upsertWorkableJobs(toUpsert)
+			inserted, updated, err := s.upsertWorkableJobs(ctx, toUpsert)
 			if err != nil {
 				return err
 			}
@@ -778,17 +779,20 @@ func (s *Service) runOnceWorkable() error {
 	if firstPageLatestPostDate != nil {
 		firstJobPostDate = firstPageLatestPostDate.UTC().Format(time.RFC3339Nano)
 	}
-	return s.saveStatePayload(sourceWorkable, map[string]any{
+	return s.saveStatePayload(ctx, sourceWorkable, map[string]any{
 		"first_job_post_date": firstJobPostDate,
 		"first_job_url":       valueOrNil(firstPageFirstURL),
 	})
 }
 
-func (s *Service) runOnceRemotive() error {
+func (s *Service) runOnceRemotive(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if !s.isRemotiveConfigured() {
 		return nil
 	}
-	statePayload, err := s.loadStatePayload(sourceRemotive)
+	statePayload, err := s.loadStatePayload(ctx, sourceRemotive)
 	if err != nil {
 		return err
 	}
@@ -797,9 +801,9 @@ func (s *Service) runOnceRemotive() error {
 		previousLatestJobID = 0
 	}
 
-	latestIndex, latestURL, xmlText := s.fetchRemotiveLatestSitemapXML()
+	latestIndex, latestURL, xmlText := s.fetchRemotiveLatestSitemapXML(ctx)
 	if strings.TrimSpace(xmlText) == "" || strings.TrimSpace(latestURL) == "" {
-		return s.saveStatePayload(sourceRemotive, map[string]any{
+		return s.saveStatePayload(ctx, sourceRemotive, map[string]any{
 			"latest_job_id": previousLatestJobID,
 			"last_scan_at":  utcNowISO(),
 		})
@@ -864,11 +868,14 @@ func (s *Service) runOnceRemotive() error {
 		_ = processRows(rows)
 	} else {
 		for _, partition := range partitionsToScan {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			var partitionXML string
 			if partition == latestIndex {
 				partitionXML = xmlText
 			} else {
-				fetchedPartition, fetchedURL, fetchedXML := s.fetchRemotiveSitemapXMLByPartition(partition)
+				fetchedPartition, fetchedURL, fetchedXML := s.fetchRemotiveSitemapXMLByPartition(ctx, partition)
 				if fetchedPartition <= 0 || strings.TrimSpace(fetchedURL) == "" || strings.TrimSpace(fetchedXML) == "" {
 					continue
 				}
@@ -887,7 +894,7 @@ func (s *Service) runOnceRemotive() error {
 
 	var payloadID any
 	if len(deltaRows) > 0 {
-		if savedID, err := s.saveDeltaPayloadForSource(sourceRemotive, latestURL, remotive.PayloadType, remotive.SerializeImportRows(deltaRows)); err != nil {
+		if savedID, err := s.saveDeltaPayloadForSource(ctx, sourceRemotive, latestURL, remotive.PayloadType, remotive.SerializeImportRows(deltaRows)); err != nil {
 			return err
 		} else {
 			payloadID = savedID
@@ -907,7 +914,7 @@ func (s *Service) runOnceRemotive() error {
 		sitemapURLCount = len(deltaRows)
 	}
 
-	return s.saveStatePayload(sourceRemotive, map[string]any{
+	return s.saveStatePayload(ctx, sourceRemotive, map[string]any{
 		"sitemap_url":                    latestURL,
 		"latest_sitemap_index":           latestIndex,
 		"latest_sitemap_url":             latestURL,
@@ -933,9 +940,12 @@ func (s *Service) isRemotiveConfigured() bool {
 	return s.Config.RemotiveSitemapMaxIndex >= s.Config.RemotiveSitemapMinIndex
 }
 
-func (s *Service) fetchRemotiveLatestSitemapXML() (int, string, string) {
+func (s *Service) fetchRemotiveLatestSitemapXML(ctx context.Context) (int, string, string) {
 	for partition := s.Config.RemotiveSitemapMaxIndex; partition >= s.Config.RemotiveSitemapMinIndex; partition-- {
-		fetchedPartition, sitemapURL, xmlText := s.fetchRemotiveSitemapXMLByPartition(partition)
+		if err := ctx.Err(); err != nil {
+			return 0, "", ""
+		}
+		fetchedPartition, sitemapURL, xmlText := s.fetchRemotiveSitemapXMLByPartition(ctx, partition)
 		if fetchedPartition > 0 && strings.TrimSpace(sitemapURL) != "" && strings.TrimSpace(xmlText) != "" {
 			return fetchedPartition, sitemapURL, xmlText
 		}
@@ -943,12 +953,12 @@ func (s *Service) fetchRemotiveLatestSitemapXML() (int, string, string) {
 	return 0, "", ""
 }
 
-func (s *Service) fetchRemotiveSitemapXMLByPartition(partition int) (int, string, string) {
+func (s *Service) fetchRemotiveSitemapXMLByPartition(ctx context.Context, partition int) (int, string, string) {
 	sitemapURL := buildRemotiveSitemapURL(s.Config.RemotiveSitemapURLTemplate, partition)
 	if strings.TrimSpace(sitemapURL) == "" {
 		return 0, sitemapURL, ""
 	}
-	xmlText, err := s.FetchText(sitemapURL)
+	xmlText, err := s.fetchTextWithScraper(ctx, sitemapURL)
 	if err != nil {
 		return 0, sitemapURL, ""
 	}
@@ -986,8 +996,11 @@ func buildRemotiveSitemapURL(currentURL string, partition int) string {
 	return strings.ReplaceAll(currentURL, "{partition}", strconv.Itoa(partition))
 }
 
-func (s *Service) runOnceHiringCafe() error {
-	statePayload, err := s.loadStatePayload(sourceHiringCafe)
+func (s *Service) runOnceHiringCafe(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	statePayload, err := s.loadStatePayload(ctx, sourceHiringCafe)
 	if err != nil {
 		return err
 	}
@@ -995,13 +1008,13 @@ func (s *Service) runOnceHiringCafe() error {
 	previousFirstJobURL, _ := statePayload["first_job_url"].(string)
 	previousFirstDT := parseISOTime(previousFirstJobPostDate)
 
-	totalCountPayload, err := s.fetchJSON(s.Config.HiringCafeTotalCountURL)
+	totalCountPayload, err := s.fetchJSON(ctx, s.Config.HiringCafeTotalCountURL)
 	if err != nil {
 		return err
 	}
 	totalCount := hiringcafe.ParseTotalCount(totalCountPayload)
 	if totalCount <= 0 {
-		return s.saveStatePayload(sourceHiringCafe, map[string]any{
+		return s.saveStatePayload(ctx, sourceHiringCafe, map[string]any{
 			"search_api_url":           s.Config.HiringCafeSearchAPIURL,
 			"total_count_url":          s.Config.HiringCafeTotalCountURL,
 			"first_job_post_date":      valueOrNil(previousFirstJobPostDate),
@@ -1023,8 +1036,11 @@ func (s *Service) runOnceHiringCafe() error {
 	isBootstrap := previousFirstDT == nil
 
 	for page := 0; page < totalPages; page++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		pageURL := hiringcafe.BuildSearchAPIURL(s.Config.HiringCafeSearchAPIURL, page, s.Config.HiringCafePageSize)
-		response, err := s.fetchJSON(pageURL)
+		response, err := s.fetchJSON(ctx, pageURL)
 		if err != nil {
 			return err
 		}
@@ -1052,7 +1068,7 @@ func (s *Service) runOnceHiringCafe() error {
 			for _, row := range rows {
 				urls = append(urls, row.URL)
 			}
-			existingURLs, err := s.findExistingSourceURLs(sourceHiringCafe, urls)
+			existingURLs, err := s.findExistingSourceURLs(ctx, sourceHiringCafe, urls)
 			if err != nil {
 				return err
 			}
@@ -1067,7 +1083,7 @@ func (s *Service) runOnceHiringCafe() error {
 		if len(toUpsert) == 0 {
 			continue
 		}
-		inserted, updated, err := s.upsertHiringCafeJobs(toUpsert)
+		inserted, updated, err := s.upsertHiringCafeJobs(ctx, toUpsert)
 		if err != nil {
 			return err
 		}
@@ -1078,7 +1094,7 @@ func (s *Service) runOnceHiringCafe() error {
 	if firstPageLatestPostDate != nil {
 		firstPageLatestPostDateISO = firstPageLatestPostDate.UTC().Format(time.RFC3339Nano)
 	}
-	return s.saveStatePayload(sourceHiringCafe, map[string]any{
+	return s.saveStatePayload(ctx, sourceHiringCafe, map[string]any{
 		"search_api_url":           s.Config.HiringCafeSearchAPIURL,
 		"total_count_url":          s.Config.HiringCafeTotalCountURL,
 		"first_job_post_date":      firstPageLatestPostDateISO,
@@ -1195,14 +1211,14 @@ func (s *Service) saveRemoteRocketshipDeltaPayload(ctx context.Context, bodyText
 	return payloadID, nil
 }
 
-func (s *Service) saveDeltaPayloadForSource(source, sourceURL, payloadType, bodyText string) (int64, error) {
+func (s *Service) saveDeltaPayloadForSource(ctx context.Context, source, sourceURL, payloadType, bodyText string) (int64, error) {
 	if s.DB == nil {
 		return 0, nil
 	}
 	var existingID sql.NullInt64
 	var existingBody sql.NullString
 	err := s.DB.SQL.QueryRowContext(
-		context.Background(),
+		ctx,
 		`SELECT id, COALESCE(body_text, '')
 		 FROM watcher_payloads
 		 WHERE source = ? AND source_url = ? AND payload_type = ? AND consumed_at IS NULL
@@ -1221,7 +1237,7 @@ func (s *Service) saveDeltaPayloadForSource(source, sourceURL, payloadType, body
 
 	var payloadID int64
 	err = s.DB.SQL.QueryRowContext(
-		context.Background(),
+		ctx,
 		`INSERT INTO watcher_payloads (source, source_url, payload_type, body_text, created_at)
 		 VALUES (?, ?, ?, ?, ?)
 		 RETURNING id`,
@@ -1237,9 +1253,9 @@ func (s *Service) saveDeltaPayloadForSource(source, sourceURL, payloadType, body
 	return payloadID, nil
 }
 
-func (s *Service) loadStatePayload(source string) (map[string]any, error) {
+func (s *Service) loadStatePayload(ctx context.Context, source string) (map[string]any, error) {
 	var stateJSON sql.NullString
-	err := s.DB.SQL.QueryRowContext(context.Background(), `SELECT COALESCE(state_json::text, '') FROM watcher_states WHERE source = ? ORDER BY updated_at DESC, id DESC LIMIT 1`, source).Scan(&stateJSON)
+	err := s.DB.SQL.QueryRowContext(ctx, `SELECT COALESCE(state_json::text, '') FROM watcher_states WHERE source = ? ORDER BY updated_at DESC, id DESC LIMIT 1`, source).Scan(&stateJSON)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return map[string]any{}, nil
@@ -1253,8 +1269,7 @@ func (s *Service) loadStatePayload(source string) (map[string]any, error) {
 	return payload, nil
 }
 
-func (s *Service) saveStatePayload(source string, payload map[string]any) error {
-	ctx := context.Background()
+func (s *Service) saveStatePayload(ctx context.Context, source string, payload map[string]any) error {
 	stateJSON := mustMarshalJSON(payload)
 	updatedAt := utcNowISO()
 	updateResult, err := s.DB.SQL.ExecContext(ctx,
@@ -1285,12 +1300,12 @@ func (s *Service) saveStatePayload(source string, payload map[string]any) error 
 	return err
 }
 
-func (s *Service) findExistingSourceURLs(source string, urls []string) (map[string]struct{}, error) {
+func (s *Service) findExistingSourceURLs(ctx context.Context, source string, urls []string) (map[string]struct{}, error) {
 	if len(urls) == 0 {
 		return map[string]struct{}{}, nil
 	}
 	rows, err := s.DB.SQL.QueryContext(
-		context.Background(),
+		ctx,
 		`SELECT url
 		   FROM raw_us_jobs
 		  WHERE source = ?
@@ -1313,11 +1328,11 @@ func (s *Service) findExistingSourceURLs(source string, urls []string) (map[stri
 	return out, rows.Err()
 }
 
-func (s *Service) upsertWorkableJobs(rows []map[string]any) (int, int, error) {
+func (s *Service) upsertWorkableJobs(ctx context.Context, rows []map[string]any) (int, int, error) {
 	if len(rows) == 0 {
 		return 0, 0, nil
 	}
-	tx, err := s.DB.SQL.Begin()
+	tx, err := s.DB.SQL.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -1334,11 +1349,12 @@ func (s *Service) upsertWorkableJobs(rows []map[string]any) (int, int, error) {
 		var existingSource string
 		var existingPostDateRaw string
 		var existingRawJSON sql.NullString
-		err := tx.QueryRow(`SELECT id, source, post_date, raw_json FROM raw_us_jobs WHERE url = ? LIMIT 1`, rowURL).Scan(&existingID, &existingSource, &existingPostDateRaw, &existingRawJSON)
+		err := tx.QueryRowContext(ctx, `SELECT id, source, post_date, raw_json FROM raw_us_jobs WHERE url = ? LIMIT 1`, rowURL).Scan(&existingID, &existingSource, &existingPostDateRaw, &existingRawJSON)
 		rawPayloadText := mustMarshalJSON(rawPayload)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				if _, execErr := tx.Exec(
+				if _, execErr := tx.ExecContext(
+					ctx,
 					`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
 					 VALUES (?, ?, ?, true, false, false, 0, ?)`,
 					sourceWorkable,
@@ -1362,7 +1378,8 @@ func (s *Service) upsertWorkableJobs(rows []map[string]any) (int, int, error) {
 		if !needsUpdate {
 			continue
 		}
-		if _, execErr := tx.Exec(
+		if _, execErr := tx.ExecContext(
+			ctx,
 			`UPDATE raw_us_jobs
 			 SET post_date = ?, is_ready = true, is_skippable = false, is_parsed = false, retry_count = 0, raw_json = ?
 			 WHERE id = ?`,
@@ -1380,8 +1397,8 @@ func (s *Service) upsertWorkableJobs(rows []map[string]any) (int, int, error) {
 	return inserted, updated, nil
 }
 
-func (s *Service) fetchJSON(rawURL string) (map[string]any, error) {
-	text, err := s.FetchText(rawURL)
+func (s *Service) fetchJSON(ctx context.Context, rawURL string) (map[string]any, error) {
+	text, err := s.fetchTextWithScraper(ctx, rawURL)
 	if err != nil {
 		return nil, err
 	}
@@ -1392,11 +1409,11 @@ func (s *Service) fetchJSON(rawURL string) (map[string]any, error) {
 	return payload, nil
 }
 
-func (s *Service) upsertHiringCafeJobs(jobs []hiringcafe.NormalizedJob) (int, int, error) {
+func (s *Service) upsertHiringCafeJobs(ctx context.Context, jobs []hiringcafe.NormalizedJob) (int, int, error) {
 	if len(jobs) == 0 {
 		return 0, 0, nil
 	}
-	tx, err := s.DB.SQL.Begin()
+	tx, err := s.DB.SQL.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -1406,11 +1423,11 @@ func (s *Service) upsertHiringCafeJobs(jobs []hiringcafe.NormalizedJob) (int, in
 	for _, row := range jobs {
 		var existingID int64
 		var existingPostDateRaw string
-		err := tx.QueryRow(`SELECT id, post_date FROM raw_us_jobs WHERE source = ? AND url = ? LIMIT 1`, sourceHiringCafe, row.URL).Scan(&existingID, &existingPostDateRaw)
+		err := tx.QueryRowContext(ctx, `SELECT id, post_date FROM raw_us_jobs WHERE source = ? AND url = ? LIMIT 1`, sourceHiringCafe, row.URL).Scan(&existingID, &existingPostDateRaw)
 		payloadRaw, _ := json.Marshal(row.RawPayload)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				if _, execErr := tx.Exec(`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, true, false, false, 0, ?)`,
+				if _, execErr := tx.ExecContext(ctx, `INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, true, false, false, 0, ?)`,
 					sourceHiringCafe, row.URL, row.PostDate.UTC().Format(time.RFC3339Nano), string(payloadRaw)); execErr != nil {
 					return 0, 0, execErr
 				}
@@ -1423,7 +1440,7 @@ func (s *Service) upsertHiringCafeJobs(jobs []hiringcafe.NormalizedJob) (int, in
 		if existingPostDate != nil && !row.PostDate.After(*existingPostDate) {
 			continue
 		}
-		if _, execErr := tx.Exec(`UPDATE raw_us_jobs SET post_date = ?, is_ready = true, is_skippable = false, is_parsed = false, retry_count = 0, raw_json = ? WHERE id = ?`,
+		if _, execErr := tx.ExecContext(ctx, `UPDATE raw_us_jobs SET post_date = ?, is_ready = true, is_skippable = false, is_parsed = false, retry_count = 0, raw_json = ? WHERE id = ?`,
 			row.PostDate.UTC().Format(time.RFC3339Nano), string(payloadRaw), existingID); execErr != nil {
 			return 0, 0, execErr
 		}
