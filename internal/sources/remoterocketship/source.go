@@ -79,7 +79,6 @@ func ParseRawHTML(htmlText, sourceUrl string) map[string]any {
 	if country := normalizeCountryToken(stringValue(jobData["location"])); country != "" {
 		jobData["locationCountries"] = []string{country}
 	}
-	jobData["url"] = sourceUrl
 	return jobData
 }
 
