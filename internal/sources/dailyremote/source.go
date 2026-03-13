@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"html"
-	"math"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -496,28 +495,18 @@ func parseSalaryRangeFromText(value string) any {
 	}
 	// currencyCode already derived via currency.Detect above.
 	payload := map[string]any{
-		"min":                     normalizeSalaryValue(minValue),
-		"max":                     normalizeSalaryValue(maxValue),
+		"min":                     minValue,
+		"max":                     maxValue,
 		"salaryType":              salaryType,
 		"currencyCode":            currencyCode,
 		"currencySymbol":          currencySymbol,
 		"salaryHumanReadableText": raw,
 	}
 	if currencyCode == "USD" {
-		payload["minSalaryAsUSD"] = normalizeSalaryValue(minValue)
-		payload["maxSalaryAsUSD"] = normalizeSalaryValue(maxValue)
+		payload["minSalaryAsUSD"] = minValue
+		payload["maxSalaryAsUSD"] = maxValue
 	}
 	return payload
-}
-
-func normalizeSalaryValue(value float64) any {
-	if value == 0 {
-		return 0
-	}
-	if value == float64(int64(value)) {
-		return int64(value)
-	}
-	return math.Round(value*100) / 100
 }
 
 func parseAmount(numberText, suffix string) float64 {

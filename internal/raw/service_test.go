@@ -3,7 +3,6 @@ package raw
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"testing"
 
@@ -30,59 +29,6 @@ func TestToTargetJobURLPreservesQueryAndFragment(t *testing.T) {
 	expected := "https://www.remoterocketship.com/company/acme/jobs/dev/?x=1#top"
 	if toTargetJobURL(rawURL) != expected {
 		t.Fatalf("expected normalized URL %s", expected)
-	}
-}
-
-func TestProcessPendingUsesNormalizedURLForFetchAndKeepsOriginalPayloadURL(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_raw_process_pending"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
-	jobURL := "https://www.remoterocketship.com/us/company/acme/jobs/dev/"
-	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES ('remoterocketship', ?, '2026-02-12T10:00:00Z', false, false, false, 0, NULL)`, jobURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	svc := New(Config{}, db)
-	svc.EnabledSources = map[string]struct{}{"remoterocketship": {}}
-	fetchedURLs := []string{}
-	svc.ReadHTML = func(targetURL string) (string, int, error) {
-		fetchedURLs = append(fetchedURLs, targetURL)
-		return "<html></html>", 200, nil
-	}
-	svc.ParseHTML = func(html string) (map[string]any, error) {
-		return map[string]any{"roleTitle": "Backend Engineer"}, nil
-	}
-
-	processed, err := svc.ProcessPending(context.Background(), 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if processed != 1 {
-		t.Fatalf("expected one processed job, got %d", processed)
-	}
-	expectedTargetURL := "https://www.remoterocketship.com/company/acme/jobs/dev/"
-	if len(fetchedURLs) != 1 || fetchedURLs[0] != expectedTargetURL {
-		t.Fatalf("expected fetch to use normalized URL, got %#v", fetchedURLs)
-	}
-
-	var isReady bool
-	var rawJSONText string
-	if err := db.SQL.QueryRowContext(context.Background(), `SELECT is_ready, raw_json FROM raw_us_jobs WHERE url = ?`, jobURL).Scan(&isReady, &rawJSONText); err != nil {
-		t.Fatal(err)
-	}
-	if !isReady {
-		t.Fatalf("expected job to become ready, got %t", isReady)
-	}
-	payload := map[string]any{}
-	if err := json.Unmarshal([]byte(rawJSONText), &payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload["url"] != jobURL {
-		t.Fatalf("expected payload url %s, got %#v", jobURL, payload["url"])
 	}
 }
 
@@ -131,9 +77,6 @@ func TestProcessPendingSkipsReadyWhenParserRequestsRetry(t *testing.T) {
 	svc.ReadHTML = func(targetURL string) (string, int, error) {
 		return "<html></html>", 200, nil
 	}
-	svc.ParseHTML = func(html string) (map[string]any, error) {
-		return map[string]any{"_skip_for_retry": true, "_skip_reason": "test"}, nil
-	}
 
 	processed, err := svc.ProcessPending(context.Background(), 10)
 	if err != nil {
@@ -158,66 +101,6 @@ func TestProcessPendingSkipsReadyWhenParserRequestsRetry(t *testing.T) {
 	}
 	if rawJSON.Valid {
 		t.Fatalf("expected raw_json to stay NULL, got %#v", rawJSON.String)
-	}
-}
-
-func TestProcessPendingSkipsNonUSAndMarksRowSkippable(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_raw_non_us_skip"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
-	_, err = db.SQL.ExecContext(
-		context.Background(),
-		`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, extra_json, raw_json)
-		 VALUES ('remoterocketship', 'https://remote.example/job/non-us', '2026-02-12T10:00:00Z', false, false, false, 0, '{"foo":"bar"}', NULL)`,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	svc := New(Config{}, db)
-	svc.EnabledSources = map[string]struct{}{"remoterocketship": {}}
-	svc.ReadHTML = func(targetURL string) (string, int, error) {
-		return "<html></html>", 200, nil
-	}
-	svc.ParseHTML = func(html string) (map[string]any, error) {
-		return map[string]any{
-			"_skip_for_non_us":  true,
-			"locationCountries": []string{"Canada"},
-		}, nil
-	}
-
-	processed, err := svc.ProcessPending(context.Background(), 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if processed != 1 {
-		t.Fatalf("expected one processed job, got %d", processed)
-	}
-
-	var isReady, isSkippable, isParsed bool
-	var retryCount int
-	var rawJSON, extraJSON sql.NullString
-	if err := db.SQL.QueryRowContext(
-		context.Background(),
-		`SELECT is_ready, is_skippable, is_parsed, retry_count, raw_json, extra_json
-		 FROM raw_us_jobs WHERE url = 'https://remote.example/job/non-us'`,
-	).Scan(&isReady, &isSkippable, &isParsed, &retryCount, &rawJSON, &extraJSON); err != nil {
-		t.Fatal(err)
-	}
-	if !isReady || !isSkippable {
-		t.Fatalf("expected row ready+skippable, got is_ready=%t is_skippable=%t", isReady, isSkippable)
-	}
-	if isParsed {
-		t.Fatalf("expected row not parsed")
-	}
-	if retryCount != 0 {
-		t.Fatalf("expected retry_count unchanged, got %d", retryCount)
-	}
-	if rawJSON.Valid || extraJSON.Valid {
-		t.Fatalf("expected raw_json/extra_json cleared, got raw_json=%#v extra_json=%#v", rawJSON, extraJSON)
 	}
 }
 
@@ -480,10 +363,6 @@ func TestProcessPendingDoesNotParseNon2xxResponse(t *testing.T) {
 	parsedCalled := false
 	svc.ReadHTML = func(targetURL string) (string, int, error) {
 		return "<html><body>upstream error page</body></html>", 500, nil
-	}
-	svc.ParseHTML = func(html string) (map[string]any, error) {
-		parsedCalled = true
-		return map[string]any{"roleTitle": "ShouldNotParse"}, nil
 	}
 
 	processed, err := svc.ProcessPending(context.Background(), 10)

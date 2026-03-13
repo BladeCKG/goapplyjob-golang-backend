@@ -1574,71 +1574,8 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		log.Printf("parsed-job-worker upsert_start raw_job_id=%d source=%s", row.id, row.source)
 		sourceCreatedAt := parseDT(payload["created_at"])
 		normalizedTechStack := normalizeTechStack(payload["techStack"])
-		plugin, pluginOK := plugins.Get(strings.TrimSpace(row.source))
-		inferCategories := false
-		if pluginOK {
-			inferCategories = plugin.InferCategories
-		}
-		categorizedTitle := stringFromPayload(payload["categorizedJobTitle"])
-		categorizedFunction := stringFromPayload(payload["categorizedJobFunction"])
-		if title, ok := categorizedTitle.(string); ok && strings.TrimSpace(title) != "" && categorizedFunction == nil {
-			resolvedFunction, err := s.resolveJobFunctionForCategory(ctx, title)
-			if err != nil {
-				log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
-				skipped++
-				continue
-			}
-			if strings.TrimSpace(resolvedFunction) != "" {
-				categorizedFunction = resolvedFunction
-			}
-		}
-		if inferCategories && categorizedTitle == nil {
-			if len(normalizedTechStack) == 0 {
-				allowedCategories, _ := s.loadAllowedJobCategoriesForGroq(ctx)
-				if shouldUseGroqClassification(stringValue(payload["roleTitle"])) {
-					groqCategory, groqRequiredSkills := classifyJobTitleWithGroqSync(
-						stringValue(payload["roleTitle"]),
-						stringValue(payload["roleDescription"]),
-						allowedCategories,
-					)
-					if strings.TrimSpace(groqCategory) != "" {
-						categorizedTitle = strings.TrimSpace(groqCategory)
-					}
-					if len(groqRequiredSkills) > 0 {
-						normalizedTechStack = normalizeTechStack(groqRequiredSkills)
-					}
-				} else {
-					groqCategory := classifyJobCategoryWithGroqSync(
-						stringValue(payload["roleTitle"]),
-						allowedCategories,
-					)
-					if strings.TrimSpace(groqCategory) != "" {
-						categorizedTitle = strings.TrimSpace(groqCategory)
-					}
-				}
-			}
-			if categorizedTitle == nil {
-				inferredTitle, inferredFunction, err := s.findSimilarRemoteCategories(ctx, stringValue(payload["roleTitle"]), normalizedTechStack)
-				if err != nil {
-					log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
-					skipped++
-					continue
-				}
-				categorizedTitle = stringFromPayload(inferredTitle)
-				categorizedFunction = stringFromPayload(inferredFunction)
-			}
-		}
-		if title, ok := categorizedTitle.(string); ok && strings.TrimSpace(title) != "" && categorizedFunction == nil {
-			resolvedFunction, err := s.resolveJobFunctionForCategory(ctx, title)
-			if err != nil {
-				log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
-				skipped++
-				continue
-			}
-			if strings.TrimSpace(resolvedFunction) != "" {
-				categorizedFunction = resolvedFunction
-			}
-		}
+		plugin, pluginOK := plugins.Get(row.source)
+
 		_, normalizedLocationCity, normalizedUSStates := normalizeLocationFields(
 			payload["location"],
 			payload["locationCity"],
@@ -1646,19 +1583,22 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		)
 		normalizedLocationCountries := normalizeLocationCountries(payload["locationCountries"])
 		normalizedTechStackJSON := jsonStringOrNil(normalizedTechStack)
-		companyID, companyErr := s.upsertCompanyFromPayload(ctx, payload, plugin, pluginOK)
+		companyID, companyErr := s.upsertCompanyFromPayload(ctx, payload, plugin)
 		if companyErr != nil {
 			log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, companyErr)
 			skipped++
 			continue
 		}
 		createdAtSourceValue := formatNullableTime(sourceCreatedAt)
-		if duplicateID, isDuplicate, duplicateErr := s.findDuplicateCrossSourceParsedJob(ctx, row.id, row.source, payload, companyID); duplicateErr != nil {
+		duplicateID, isDuplicate, duplicateErr := s.findDuplicateCrossSourceParsedJob(ctx, row.id, row.source, payload, companyID)
+		if duplicateErr != nil {
 			log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, duplicateErr)
 			skipped++
 			continue
-		} else if isDuplicate {
-			if strings.EqualFold(strings.TrimSpace(row.source), sourceRemoteRocketship) {
+		}
+
+		if isDuplicate {
+			if strings.EqualFold(row.source, sourceRemoteRocketship) {
 				var previousCreatedAt sql.NullTime
 				if err := s.DB.SQL.QueryRowContext(ctx, `SELECT created_at_source FROM parsed_jobs WHERE id = ? LIMIT 1`, duplicateID).Scan(&previousCreatedAt); err != nil {
 					log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
@@ -1701,6 +1641,50 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				continue
 			}
 		}
+
+		inferCategories := false
+		if pluginOK {
+			inferCategories = plugin.InferCategories
+		}
+		categorizedTitle := stringFromPayload(payload["categorizedJobTitle"])
+		categorizedFunction := stringFromPayload(payload["categorizedJobFunction"])
+		if inferCategories && categorizedTitle == nil {
+			if len(normalizedTechStack) == 0 {
+				allowedCategories, _ := s.loadAllowedJobCategoriesForGroq(ctx)
+				if shouldUseGroqClassification(stringValue(payload["roleTitle"])) {
+					groqCategory, groqRequiredSkills := classifyJobTitleWithGroqSync(
+						stringValue(payload["roleTitle"]),
+						stringValue(payload["roleDescription"]),
+						allowedCategories,
+					)
+					if strings.TrimSpace(groqCategory) != "" {
+						categorizedTitle = strings.TrimSpace(groqCategory)
+					}
+					if len(groqRequiredSkills) > 0 {
+						normalizedTechStack = normalizeTechStack(groqRequiredSkills)
+					}
+				} else {
+					groqCategory := classifyJobCategoryWithGroqSync(
+						stringValue(payload["roleTitle"]),
+						allowedCategories,
+					)
+					if strings.TrimSpace(groqCategory) != "" {
+						categorizedTitle = strings.TrimSpace(groqCategory)
+					}
+				}
+			}
+			if categorizedTitle == nil {
+				inferredTitle, inferredFunction, err := s.findSimilarRemoteCategories(ctx, stringValue(payload["roleTitle"]), normalizedTechStack)
+				if err != nil {
+					log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
+					skipped++
+					continue
+				}
+				categorizedTitle = stringFromPayload(inferredTitle)
+				categorizedFunction = stringFromPayload(inferredFunction)
+			}
+		}
+
 		retries, retryDelay := parsedLockRetryConfig()
 		err = database.RetryLocked(retries, retryDelay, func() error {
 			_, execErr := s.DB.SQL.ExecContext(
@@ -1948,64 +1932,14 @@ func linkedinIdentityFromURL(rawURL string) string {
 	return host + "/" + path
 }
 
-func buildCompanyMatchKeysFromPayload(companyPayload map[string]any) map[string]struct{} {
-	keys := map[string]struct{}{}
-	linkedinURL := stringValue(companyPayload["linkedInURL"])
-	if linkedinURL != "" {
-		dom := domainFromURL(linkedinURL)
-		if dom != "" {
-			path := ""
-			if parsed, err := url.Parse(linkedinURL); err == nil {
-				path = strings.Trim(strings.ToLower(parsed.Path), "/")
-			}
-			if path != "" {
-				keys["linkedin:"+dom+"/"+path] = struct{}{}
-			} else {
-				keys["linkedin:"+dom] = struct{}{}
-			}
-		}
-	}
-	homePageURL := stringValue(companyPayload["homePageURL"])
-	if homePageURL != "" {
-		dom := domainFromURL(homePageURL)
-		host := hostFromURL(homePageURL)
-		if dom != "" {
-			keys["domain:"+dom] = struct{}{}
-		}
-		if host != "" && host != dom {
-			keys["subdomain:"+host] = struct{}{}
-		}
-	}
-	if normalizedName := normalizeNameForKey(stringValue(companyPayload["name"])); normalizedName != "" {
-		keys["name:"+normalizedName] = struct{}{}
-	}
-	if normalizedSlug := normalizeNameForKey(stringValue(companyPayload["slug"])); normalizedSlug != "" {
-		keys["slug:"+normalizedSlug] = struct{}{}
-	}
-	return keys
-}
-
-func buildCompanyMatchKeysFromRow(name, slug, linkedinURL, homePageURL string) map[string]struct{} {
-	return buildCompanyMatchKeysFromPayload(map[string]any{
-		"name":        name,
-		"slug":        slug,
-		"linkedInURL": linkedinURL,
-		"homePageURL": homePageURL,
-	})
-}
-
 func (s *Service) findExistingCompanyByMatchKeys(ctx context.Context, companyPayload map[string]any) (sql.NullInt64, error) {
-	incomingKeys := buildCompanyMatchKeysFromPayload(companyPayload)
-	if len(incomingKeys) == 0 {
-		return sql.NullInt64{}, nil
-	}
-	incomingSlug := strings.TrimSpace(stringValue(companyPayload["slug"]))
-	incomingName := strings.TrimSpace(stringValue(companyPayload["name"]))
-	homePageURL := strings.TrimSpace(stringValue(companyPayload["homePageURL"]))
-	linkedinURL := strings.TrimSpace(stringValue(companyPayload["linkedInURL"]))
+	incomingSlug := stringValue(companyPayload["slug"])
+	incomingName := stringValue(companyPayload["name"])
+	homePageURL := stringValue(companyPayload["homePageURL"])
+	linkedinURL := stringValue(companyPayload["linkedInURL"])
 	incomingLinkedinIdentity := linkedinIdentityFromURL(linkedinURL)
 	homeDomain := domainFromURL(homePageURL)
-	linkedinDomain := domainFromURL(linkedinURL)
+	incommingHost := hostFromURL(homePageURL)
 
 	rows, err := s.DB.SQL.QueryContext(
 		ctx,
@@ -2020,7 +1954,7 @@ func (s *Service) findExistingCompanyByMatchKeys(ctx context.Context, companyPay
 		incomingSlug, incomingSlug,
 		incomingName, incomingName,
 		homeDomain, "%"+homeDomain+"%",
-		linkedinDomain, "%"+linkedinDomain+"%",
+		incomingLinkedinIdentity, "%"+incomingLinkedinIdentity+"%",
 	)
 	if err != nil {
 		return sql.NullInt64{}, err
@@ -2039,28 +1973,39 @@ func (s *Service) findExistingCompanyByMatchKeys(ctx context.Context, companyPay
 		if incomingLinkedinIdentity != "" && candidateLinkedinIdentity != "" && incomingLinkedinIdentity != candidateLinkedinIdentity {
 			continue
 		}
-		linkedinExactMatch := incomingLinkedinIdentity != "" && candidateLinkedinIdentity != "" && incomingLinkedinIdentity == candidateLinkedinIdentity
-		candidateKeys := buildCompanyMatchKeysFromRow(name, slug, candidateLinkedinURL, candidateHomePageURL)
+		linkedinExactMatch := incomingLinkedinIdentity != "" && incomingLinkedinIdentity == candidateLinkedinIdentity
+
+		candidateDomain := domainFromURL(candidateHomePageURL)
+		candidateHost := hostFromURL(candidateHomePageURL)
 		overlap := 0
-		for key := range incomingKeys {
-			if _, ok := candidateKeys[key]; ok {
-				overlap++
+
+		if incomingName != "" && strings.EqualFold(incomingName, name) {
+			overlap++
+		}
+		if incomingSlug != "" && strings.EqualFold(incomingSlug, slug) {
+			overlap++
+		}
+		if homeDomain != "" && strings.EqualFold(homeDomain, candidateDomain) {
+			overlap++
+		}
+		if incommingHost != "" && strings.EqualFold(incommingHost, candidateHost) {
+			overlap++
+		}
+
+		// linkedin match always wins
+		if linkedinExactMatch {
+			if !bestLinkedinMatch || overlap > bestOverlap {
+				best = sql.NullInt64{Int64: id, Valid: true}
+				bestOverlap = overlap
+				bestLinkedinMatch = true
 			}
-		}
-		if linkedinExactMatch && !bestLinkedinMatch {
-			best = sql.NullInt64{Int64: id, Valid: true}
-			bestOverlap = overlap
-			bestLinkedinMatch = true
 			continue
 		}
-		if linkedinExactMatch && bestLinkedinMatch && overlap > bestOverlap {
-			best = sql.NullInt64{Int64: id, Valid: true}
-			bestOverlap = overlap
+
+		if bestLinkedinMatch {
 			continue
 		}
-		if !linkedinExactMatch && bestLinkedinMatch {
-			continue
-		}
+
 		if overlap > bestOverlap {
 			best = sql.NullInt64{Int64: id, Valid: true}
 			bestOverlap = overlap
@@ -2076,15 +2021,15 @@ func (s *Service) findExistingCompanyByMatchKeys(ctx context.Context, companyPay
 	return sql.NullInt64{}, nil
 }
 
-func (s *Service) upsertCompanyFromPayload(ctx context.Context, payload map[string]any, plugin plugins.SourcePlugin, pluginOK bool) (any, error) {
+func (s *Service) upsertCompanyFromPayload(ctx context.Context, payload map[string]any, plugin plugins.SourcePlugin) (any, error) {
 	companyPayload, _ := payload["company"].(map[string]any)
 	if len(companyPayload) == 0 {
 		return nil, nil
 	}
 
-	externalCompanyID := strings.TrimSpace(stringValue(_normalizeNullStringToNone(companyPayload["id"])))
-	useExternalID := pluginOK && plugin.UseExternalCompanyID
-	useMatchKeys := !pluginOK || plugin.UseCompanyMatchKeys
+	externalCompanyID := stringValue(_normalizeNullStringToNone(companyPayload["id"]))
+	useExternalID := plugin.UseExternalCompanyID
+	useMatchKeys := plugin.UseCompanyMatchKeys
 	var companyID sql.NullInt64
 
 	if externalCompanyID != "" {

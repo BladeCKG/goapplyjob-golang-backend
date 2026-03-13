@@ -142,9 +142,7 @@ func ExtractJobFromHTML(htmlText string, fallbackJobURL string) map[string]any {
 	if len(payload) == 0 {
 		return payload
 	}
-	if strings.TrimSpace(stringValue(payload["url"])) == "" && strings.TrimSpace(fallbackJobURL) != "" {
-		payload["url"] = fallbackJobURL
-	}
+	payload["url"] = fallbackJobURL
 	if company, _ := payload["company"].(map[string]any); company == nil || len(company) == 0 {
 		jobPosting := findJobPostingLD(htmlText)
 		payload["company"] = toRawCompanyShape(fallbackCompanyFromJobPosting(jobPosting, htmlText))

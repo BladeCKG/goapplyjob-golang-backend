@@ -176,28 +176,6 @@ type jobSitemapItem struct {
 	CreatedAtSource  *string `json:"created_at_source"`
 }
 
-type companySitemapItem struct {
-	Slug              string  `json:"slug"`
-	Name              *string `json:"name"`
-	LatestJobPostedAt *string `json:"latest_job_posted_at"`
-}
-
-type companyProfileItem struct {
-	ID                 int64    `json:"id"`
-	Slug               string   `json:"slug"`
-	Name               *string  `json:"name"`
-	Tagline            *string  `json:"tagline"`
-	ProfilePicURL      *string  `json:"profile_pic_url"`
-	HomePageURL        *string  `json:"home_page_url"`
-	LinkedInURL        *string  `json:"linkedin_url"`
-	EmployeeRange      *string  `json:"employee_range"`
-	FoundedYear        *string  `json:"founded_year"`
-	SponsorsH1B        *bool    `json:"sponsors_h1b"`
-	IndustrySpecialies []string `json:"industry_specialities"`
-	TotalJobs          int64    `json:"total_jobs"`
-	LatestJobPostedAt  *string  `json:"latest_job_posted_at"`
-}
-
 func NewHandler(cfg config.Config, db *database.DB, authHandler *auth.Handler) *Handler {
 	return &Handler{
 		cfg:                       cfg,
@@ -220,8 +198,6 @@ func (h *Handler) Register(router gin.IRouter) {
 	router.GET("/jobs/related-categories", h.relatedCategories)
 	router.GET("/jobs/top-categories", h.topCategories)
 	router.GET("/jobs/sitemap", h.sitemap)
-	router.GET("/companies/sitemap", h.companiesSitemap)
-	router.GET("/companies/:companySlug", h.companyProfile)
 	router.GET("/job/:jobID", h.jobDetail)
 	router.GET("/jobs/:jobID", h.jobDetail)
 	router.GET("/jobs", h.listJobs)
@@ -1239,82 +1215,6 @@ func (h *Handler) sitemap(c *gin.Context) {
 		"total":    totalCount,
 		"items":    items,
 	})
-}
-
-func (h *Handler) companiesSitemap(c *gin.Context) {
-	page := max(parseIntDefault(c.Query("page"), 1), 1)
-	perPage := max(parseIntDefault(c.Query("per_page"), 500), 1)
-	if perPage > 50000 {
-		perPage = 50000
-	}
-	offset := (page - 1) * perPage
-	totalCount, err := h.q.CountCompaniesWithJobsForSitemap(c.Request.Context())
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load companies sitemap"})
-		return
-	}
-	rows, err := h.q.ListCompanySitemapPage(c.Request.Context(), gensqlc.ListCompanySitemapPageParams{
-		Limit:  int32(perPage),
-		Offset: int32(offset),
-	})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load companies sitemap"})
-		return
-	}
-	items := []companySitemapItem{}
-	for _, row := range rows {
-		slugValue := strings.TrimSpace(pgTextString(row.Slug))
-		if slugValue == "" {
-			continue
-		}
-		items = append(items, companySitemapItem{
-			Slug:              slugValue,
-			Name:              pgTextPtr(row.Name),
-			LatestJobPostedAt: timestamptzStringPtr(row.LatestJobPostedAt),
-		})
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"page":     page,
-		"per_page": perPage,
-		"total":    totalCount,
-		"items":    items,
-	})
-}
-
-func (h *Handler) companyProfile(c *gin.Context) {
-	slug := strings.ToLower(strings.TrimSpace(c.Param("companySlug")))
-	if slug == "" {
-		c.JSON(http.StatusNotFound, gin.H{"detail": "Company not found"})
-		return
-	}
-	row, err := h.q.GetCompanyProfileBySlug(c.Request.Context(), pgtype.Text{String: slug, Valid: true})
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"detail": "Company not found"})
-		return
-	}
-	item := companyProfileItem{
-		ID:            int64(row.ID),
-		Slug:          strings.TrimSpace(pgTextString(row.Slug)),
-		Name:          pgTextPtr(row.Name),
-		Tagline:       pgTextPtr(row.Tagline),
-		ProfilePicURL: pgTextPtr(row.ProfilePicUrl),
-		HomePageURL:   pgTextPtr(row.HomePageUrl),
-		LinkedInURL:   pgTextPtr(row.LinkedinUrl),
-		EmployeeRange: pgTextPtr(row.EmployeeRange),
-		FoundedYear:   pgTextPtr(row.FoundedYear),
-		SponsorsH1B:   pgBoolPtr(row.SponsorsH1b),
-	}
-	if len(row.IndustrySpecialities) > 0 {
-		_ = json.Unmarshal(row.IndustrySpecialities, &item.IndustrySpecialies)
-	}
-	stats, err := h.q.GetCompanyProfileStats(c.Request.Context(), pgtype.Int4{Int32: row.ID, Valid: true})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load company profile"})
-		return
-	}
-	item.TotalJobs = stats.TotalJobs
-	item.LatestJobPostedAt = timestamptzStringPtr(stats.LatestJobPostedAt)
-	c.JSON(http.StatusOK, item)
 }
 
 func (h *Handler) relatedCategories(c *gin.Context) {

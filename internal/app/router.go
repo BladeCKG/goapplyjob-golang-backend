@@ -9,6 +9,7 @@ import (
 	"goapplyjob-golang-backend/internal/admin"
 	"goapplyjob-golang-backend/internal/auth"
 	"goapplyjob-golang-backend/internal/config"
+	"goapplyjob-golang-backend/internal/companies"
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/employer"
 	"goapplyjob-golang-backend/internal/jobactions"
@@ -26,6 +27,7 @@ func NewRouter(cfg config.Config, db *database.DB) *gin.Engine {
 	authHandler := auth.NewHandler(cfg, db)
 	adminHandler := admin.NewHandler(db, authHandler)
 	jobsHandler := jobs.NewHandler(cfg, db, authHandler)
+	companiesHandler := companies.NewHandler(cfg, db, authHandler)
 	if err := jobsHandler.WarmFilterCache(context.Background()); err != nil {
 		log.Printf("failed to warm jobs filter cache: %v", err)
 	}
@@ -39,6 +41,7 @@ func NewRouter(cfg config.Config, db *database.DB) *gin.Engine {
 	employerHandler.Register(router)
 	jobActionsHandler.Register(router)
 	jobsHandler.Register(router)
+	companiesHandler.Register(router)
 	pricingHandler.Register(router)
 
 	return router

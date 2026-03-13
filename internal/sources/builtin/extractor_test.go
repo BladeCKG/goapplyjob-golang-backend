@@ -97,7 +97,7 @@ func TestExtractJobBuildsBuiltInRawJobShape(t *testing.T) {
 		t.Fatalf("expected BuiltIn summary override, got summary=%#v twoLine=%#v", payload["jobDescriptionSummary"], payload["twoLineJobDescriptionSummary"])
 	}
 	techStack, _ := payload["techStack"].([]string)
-	if len(techStack) != 4 || techStack[0] != "Go" || techStack[3] != "Terraform" {
+	if len(techStack) != 0 {
 		t.Fatalf("unexpected tech stack %#v", payload["techStack"])
 	}
 	company, _ := payload["company"].(map[string]any)

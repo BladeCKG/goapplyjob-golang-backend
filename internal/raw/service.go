@@ -5,14 +5,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"goapplyjob-golang-backend/internal/database"
-	"goapplyjob-golang-backend/internal/sources/plugins"
 	"log"
 	"net/url"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
+
+	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/sources/plugins"
 )
 
 const (
@@ -30,14 +31,12 @@ const (
 )
 
 type (
-	ReadHTMLFunc  func(string) (string, int, error)
-	ParseHTMLFunc func(string) (map[string]any, error)
+	ReadHTMLFunc func(string) (string, int, error)
 )
 
 type Service struct {
 	DB             *database.DB
 	ReadHTML       ReadHTMLFunc
-	ParseHTML      ParseHTMLFunc
 	Status         StatusFunc
 	EnabledSources map[string]struct{}
 	Config         Config
@@ -60,27 +59,6 @@ func New(cfg Config, db *database.DB) *Service {
 		Config: cfg,
 		ReadHTML: func(string) (string, int, error) {
 			return "", 0, errors.New("read html not configured")
-		},
-		ParseHTML: func(html string) (map[string]any, error) {
-			blocks := scriptJSONBlockPattern.FindAllStringSubmatch(html, -1)
-			if len(blocks) == 0 {
-				return map[string]any{}, nil
-			}
-			lastBlock := strings.TrimSpace(blocks[len(blocks)-1][1])
-			if lastBlock == "" {
-				return map[string]any{}, nil
-			}
-			var data map[string]any
-			if err := json.Unmarshal([]byte(lastBlock), &data); err != nil {
-				return map[string]any{}, nil
-			}
-			props, _ := data["props"].(map[string]any)
-			pageProps, _ := props["pageProps"].(map[string]any)
-			jobData, _ := pageProps["jobOpening"].(map[string]any)
-			if jobData == nil {
-				return map[string]any{}, nil
-			}
-			return jobData, nil
 		},
 	}
 }
@@ -166,12 +144,8 @@ func parseHTMLForSource(source, html, sourceURL string) map[string]any {
 	if plugin, ok := plugins.Get(source); ok && plugin.ParseRawHTML != nil {
 		return plugin.ParseRawHTML(html, sourceURL)
 	}
-	parser := New(Config{}, nil).ParseHTML
-	payload, _ := parser(html)
-	if payload == nil {
-		return map[string]any{}
-	}
-	return payload
+
+	return map[string]any{}
 }
 
 func isRemovedBuiltinJobHTML(source, html string) bool {
@@ -349,16 +323,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			}
 		default:
 			log.Printf("raw-us-job-worker parse_start job_id=%d source=%s", job.id, job.source)
-			payload, err := s.ParseHTML(html)
-			if err != nil {
-				return processed, err
-			}
-			if source := strings.TrimSpace(job.source); source != "" && source != sourceRemoteRocketship {
-				payload = parseHTMLForSource(source, html, job.url)
-			}
-			if payload == nil {
-				payload = map[string]any{}
-			}
+			payload := parseHTMLForSource(job.source, html, job.url)
 			if skipRetry, _ := payload["_skip_for_retry"].(bool); skipRetry {
 				log.Printf("raw-us-job-worker parse_retry_later job_id=%d source=%s reason=%v", job.id, job.source, payload["_skip_reason"])
 				if err := setRetry(job.id); err != nil {

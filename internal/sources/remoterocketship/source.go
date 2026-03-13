@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
-	"goapplyjob-golang-backend/internal/locationnorm"
 	"html"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
+
+	"goapplyjob-golang-backend/internal/locationnorm"
 )
 
 const (
@@ -55,7 +56,7 @@ func ToTargetJobURL(rawURL string) string {
 	return parsed.String()
 }
 
-func ParseRawHTML(htmlText, _ string) map[string]any {
+func ParseRawHTML(htmlText, sourceUrl string) map[string]any {
 	blocks := jsonBlockPattern.FindAllStringSubmatch(htmlText, -1)
 	if len(blocks) == 0 {
 		return map[string]any{}
@@ -78,6 +79,7 @@ func ParseRawHTML(htmlText, _ string) map[string]any {
 	if country := normalizeCountryToken(stringValue(jobData["location"])); country != "" {
 		jobData["locationCountries"] = []string{country}
 	}
+	jobData["url"] = sourceUrl
 	return jobData
 }
 

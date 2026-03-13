@@ -4,10 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"goapplyjob-golang-backend/internal/database"
-	"goapplyjob-golang-backend/internal/sources/plugins"
 	"testing"
 	"time"
+
+	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/sources/plugins"
 )
 
 func TestSourceOlderThanPostDateReturnsTrue(t *testing.T) {
@@ -483,7 +484,7 @@ func TestUpsertCompanyFromPayloadUsesExternalCompanyIDForRemoteRocketship(t *tes
 			"homePageURL": "https://new.example",
 		},
 	}
-	companyID, err := svc.upsertCompanyFromPayload(context.Background(), payload, plugin, true)
+	companyID, err := svc.upsertCompanyFromPayload(context.Background(), payload, plugin)
 	if err != nil {
 		t.Fatal(err)
 	}
