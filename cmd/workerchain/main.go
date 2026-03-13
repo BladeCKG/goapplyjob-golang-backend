@@ -13,6 +13,7 @@ import (
 	"goapplyjob-golang-backend/internal/watcher"
 	"goapplyjob-golang-backend/internal/workerlog"
 	"log"
+	"strings"
 	"time"
 )
 
@@ -134,12 +135,14 @@ func main() {
 		runChain := func() {
 			for {
 				hadError := false
+				errorDetails := make([]string, 0, 4)
 				log.Printf("worker-chain cycle_start")
 				if err := runStepWithTimeout("watcher", time.Duration(stepTimeoutSeconds)*time.Second, func(ctx context.Context) error {
 					return watcherSvc.RunOnceWithContext(ctx)
 				}); err != nil {
 					log.Printf("worker-chain watcher_failed error=%v", err)
 					hadError = true
+					errorDetails = append(errorDetails, "watcher="+err.Error())
 				} else {
 					log.Printf("worker-chain watcher_done")
 				}
@@ -148,6 +151,7 @@ func main() {
 				}); err != nil {
 					log.Printf("worker-chain importer_failed error=%v", err)
 					hadError = true
+					errorDetails = append(errorDetails, "importer="+err.Error())
 				} else {
 					log.Printf("worker-chain importer_done")
 				}
@@ -157,6 +161,7 @@ func main() {
 				if err != nil {
 					log.Printf("worker-chain raw_failed error=%v", err)
 					hadError = true
+					errorDetails = append(errorDetails, "raw="+err.Error())
 				} else {
 					log.Printf("worker-chain raw_done processed=%d", rawCount)
 				}
@@ -166,10 +171,15 @@ func main() {
 				if err != nil {
 					log.Printf("worker-chain parsed_failed error=%v", err)
 					hadError = true
+					errorDetails = append(errorDetails, "parsed="+err.Error())
 				} else {
 					log.Printf("worker-chain parsed_done processed=%d", parsedCount)
 				}
-				log.Printf("worker-chain cycle_done had_error=%v", hadError)
+				if hadError {
+					log.Printf("worker-chain cycle_done had_error=true details=%s", strings.Join(errorDetails, " | "))
+				} else {
+					log.Printf("worker-chain cycle_done had_error=false")
+				}
 				if runOnce {
 					return
 				}
