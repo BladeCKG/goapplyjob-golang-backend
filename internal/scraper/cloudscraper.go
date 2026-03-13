@@ -46,11 +46,18 @@ func (f *CloudscraperFetcher) Close() error {
 }
 
 func (f *CloudscraperFetcher) ReadHTML(ctx context.Context, targetURL string) (string, int, error) {
+	return f.ReadHTMLWithLimit(ctx, targetURL, 0)
+}
+
+func (f *CloudscraperFetcher) ReadHTMLWithLimit(ctx context.Context, targetURL string, maxBytes int64) (string, int, error) {
 	if f == nil {
 		return "", 0, errors.New("cloudscraper fetcher is nil")
 	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if maxBytes <= 0 {
+		maxBytes = 5 * 1024 * 1024
 	}
 
 	type result struct {
@@ -70,7 +77,7 @@ func (f *CloudscraperFetcher) ReadHTML(ctx context.Context, targetURL string) (s
 			return
 		}
 		defer resp.Body.Close()
-		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
 		if readErr != nil {
 			ch <- result{body: "", status: -1, err: readErr}
 			return

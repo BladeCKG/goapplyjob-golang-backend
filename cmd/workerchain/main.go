@@ -55,33 +55,6 @@ func main() {
 		}
 		runOnce := config.GetenvBool("WORKER_CHAIN_RUN_ONCE", false)
 
-		watcherSvc := watcher.New(watcher.Config{
-			Enabled:                         config.GetenvBool("WATCH_ENABLED", true),
-			RemoteRocketshipUSJobSitemapURL: defaultRemoteRocketshipURL,
-			IntervalMinutes:                 config.GetenvFloat("WATCH_INTERVAL_MINUTES", 1),
-			SampleKB:                        config.GetenvInt("WATCH_SAMPLE_KB", 40),
-			TimeoutSeconds:                  config.GetenvFloat("WATCH_TIMEOUT_SECONDS", 30),
-			BuiltinBaseURL:                  defaultBuiltinBaseURL,
-			BuiltinMaxPage:                  config.GetenvInt("WATCH_BUILTIN_MAX_PAGE", 1000),
-			BuiltinPagesPerCycle:            config.GetenvInt("WATCH_BUILTIN_PAGES_PER_CYCLE", 25),
-			BuiltinCheckpointPages:          config.GetenvInt("WATCH_BUILTIN_STATE_CHECKPOINT_PAGES", 5),
-			BuiltinFetchIntervalSeconds:     config.GetenvFloat("WATCH_BUILTIN_FETCH_INTERVAL_SECONDS", 0),
-			Builtin429RetryCount:            config.GetenvInt("WATCH_BUILTIN_429_RETRY_COUNT", 3),
-			Builtin429BackoffSeconds:        config.GetenvFloat("WATCH_BUILTIN_429_BACKOFF_SECONDS", 10),
-			WorkableAPIURL:                  defaultWorkableAPIURL,
-			WorkablePageLimit:               config.GetenvInt("WATCH_WORKABLE_PAGE_LIMIT", 100),
-			RemotiveSitemapURLTemplate:      defaultRemotiveSitemapURLTemplate,
-			RemotiveSitemapMaxIndex:         config.GetenvInt("WATCH_REMOTIVE_SITEMAP_MAX_INDEX", defaultRemotiveSitemapMaxIndex),
-			RemotiveSitemapMinIndex:         config.GetenvInt("WATCH_REMOTIVE_SITEMAP_MIN_INDEX", defaultRemotiveSitemapMinIndex),
-			DailyRemoteBaseURL:              defaultDailyRemoteBaseURL,
-			DailyRemoteMaxPage:              config.GetenvInt("WATCH_DAILYREMOTE_MAX_PAGE", 5000),
-			DailyRemotePagesPerCycle:        config.GetenvInt("WATCH_DAILYREMOTE_PAGES_PER_CYCLE", 300),
-			HiringCafeSearchAPIURL:          defaultHiringCafeSearchURL,
-			HiringCafeTotalCountURL:         defaultHiringCafeCountURL,
-			HiringCafePageSize:              config.GetenvInt("WATCH_HIRINGCAFE_PAGE_SIZE", 200),
-			EnabledSources:                  enabledSources,
-		}, db)
-
 		importerInterval := config.GetenvFloat("RAW_IMPORT_INTERVAL_MINUTES", 1)
 		if importerInterval < 0 {
 			importerInterval = 1
@@ -90,25 +63,6 @@ func main() {
 		if importerSleep < time.Second {
 			importerSleep = time.Second
 		}
-		importerSvc := importer.New(importer.Config{
-			IntervalMinutes:     importerInterval,
-			SleepDuration:       importerSleep,
-			BatchSize:           config.GetenvInt("RAW_IMPORT_BATCH_SIZE", 1000),
-			PayloadsPerCycle:    config.GetenvInt("RAW_IMPORT_PAYLOADS_PER_CYCLE", 40),
-			EnabledSources:      enabledSources,
-			RunOnce:             true,
-			ErrorBackoffSeconds: errorBackoffSeconds,
-		}, db)
-
-		rawSvc := raw.New(raw.Config{
-			BatchSize:             config.GetenvInt("RAW_JOB_WORKER_BATCH_SIZE", 320),
-			PollSeconds:           config.GetenvInt("RAW_JOB_WORKER_POLL_SECONDS", 5),
-			RunOnce:               true,
-			ErrorBackoffSeconds:   errorBackoffSeconds,
-			RetentionDays:         config.GetenvInt("RAW_JOB_RETENTION_DAYS", 365),
-			RetentionCleanupBatch: config.GetenvInt("RAW_JOB_RETENTION_CLEANUP_BATCH", 5000),
-		}, db)
-		rawSvc.EnabledSources = enabledSources
 		retries429 := config.GetenvInt("RAW_JOB_HTTP_429_RETRIES", 3)
 		if retries429 < 0 {
 			retries429 = 0
@@ -117,16 +71,6 @@ func main() {
 		if retryDelaySeconds < 0 {
 			retryDelaySeconds = 0
 		}
-		rawSvc.ReadHTML = makeReadHTMLWith429Retry(retries429, time.Duration(retryDelaySeconds)*time.Second)
-
-		parsedSvc := parsed.New(parsed.Config{
-			BatchSize:           config.GetenvInt("PARSED_JOB_WORKER_BATCH_SIZE", 260),
-			PollSeconds:         config.GetenvFloat("PARSED_JOB_WORKER_POLL_SECONDS", 5),
-			RunOnce:             true,
-			ErrorBackoffSeconds: errorBackoffSeconds,
-		}, db)
-		parsedSvc.EnabledSources = enabledSources
-
 		stepTimeoutSeconds := config.GetenvInt("WORKER_CHAIN_STEP_TIMEOUT_SECONDS", 900)
 		if stepTimeoutSeconds < 0 {
 			stepTimeoutSeconds = 0
@@ -134,6 +78,62 @@ func main() {
 
 		runChain := func() {
 			for {
+				watcherSvc := watcher.New(watcher.Config{
+					Enabled:                         config.GetenvBool("WATCH_ENABLED", true),
+					RemoteRocketshipUSJobSitemapURL: defaultRemoteRocketshipURL,
+					IntervalMinutes:                 config.GetenvFloat("WATCH_INTERVAL_MINUTES", 1),
+					SampleKB:                        config.GetenvInt("WATCH_SAMPLE_KB", 40),
+					TimeoutSeconds:                  config.GetenvFloat("WATCH_TIMEOUT_SECONDS", 30),
+					BuiltinBaseURL:                  defaultBuiltinBaseURL,
+					BuiltinMaxPage:                  config.GetenvInt("WATCH_BUILTIN_MAX_PAGE", 1000),
+					BuiltinPagesPerCycle:            config.GetenvInt("WATCH_BUILTIN_PAGES_PER_CYCLE", 25),
+					BuiltinCheckpointPages:          config.GetenvInt("WATCH_BUILTIN_STATE_CHECKPOINT_PAGES", 5),
+					BuiltinFetchIntervalSeconds:     config.GetenvFloat("WATCH_BUILTIN_FETCH_INTERVAL_SECONDS", 0),
+					Builtin429RetryCount:            config.GetenvInt("WATCH_BUILTIN_429_RETRY_COUNT", 3),
+					Builtin429BackoffSeconds:        config.GetenvFloat("WATCH_BUILTIN_429_BACKOFF_SECONDS", 10),
+					WorkableAPIURL:                  defaultWorkableAPIURL,
+					WorkablePageLimit:               config.GetenvInt("WATCH_WORKABLE_PAGE_LIMIT", 100),
+					RemotiveSitemapURLTemplate:      defaultRemotiveSitemapURLTemplate,
+					RemotiveSitemapMaxIndex:         config.GetenvInt("WATCH_REMOTIVE_SITEMAP_MAX_INDEX", defaultRemotiveSitemapMaxIndex),
+					RemotiveSitemapMinIndex:         config.GetenvInt("WATCH_REMOTIVE_SITEMAP_MIN_INDEX", defaultRemotiveSitemapMinIndex),
+					DailyRemoteBaseURL:              defaultDailyRemoteBaseURL,
+					DailyRemoteMaxPage:              config.GetenvInt("WATCH_DAILYREMOTE_MAX_PAGE", 5000),
+					DailyRemotePagesPerCycle:        config.GetenvInt("WATCH_DAILYREMOTE_PAGES_PER_CYCLE", 300),
+					HiringCafeSearchAPIURL:          defaultHiringCafeSearchURL,
+					HiringCafeTotalCountURL:         defaultHiringCafeCountURL,
+					HiringCafePageSize:              config.GetenvInt("WATCH_HIRINGCAFE_PAGE_SIZE", 200),
+					EnabledSources:                  enabledSources,
+				}, db)
+
+				importerSvc := importer.New(importer.Config{
+					IntervalMinutes:     importerInterval,
+					SleepDuration:       importerSleep,
+					BatchSize:           config.GetenvInt("RAW_IMPORT_BATCH_SIZE", 1000),
+					PayloadsPerCycle:    config.GetenvInt("RAW_IMPORT_PAYLOADS_PER_CYCLE", 40),
+					EnabledSources:      enabledSources,
+					RunOnce:             true,
+					ErrorBackoffSeconds: errorBackoffSeconds,
+				}, db)
+
+				rawSvc := raw.New(raw.Config{
+					BatchSize:             config.GetenvInt("RAW_JOB_WORKER_BATCH_SIZE", 320),
+					PollSeconds:           config.GetenvInt("RAW_JOB_WORKER_POLL_SECONDS", 5),
+					RunOnce:               true,
+					ErrorBackoffSeconds:   errorBackoffSeconds,
+					RetentionDays:         config.GetenvInt("RAW_JOB_RETENTION_DAYS", 365),
+					RetentionCleanupBatch: config.GetenvInt("RAW_JOB_RETENTION_CLEANUP_BATCH", 5000),
+				}, db)
+				rawSvc.EnabledSources = enabledSources
+				rawSvc.ReadHTML = makeReadHTMLWith429Retry(retries429, time.Duration(retryDelaySeconds)*time.Second)
+
+				parsedSvc := parsed.New(parsed.Config{
+					BatchSize:           config.GetenvInt("PARSED_JOB_WORKER_BATCH_SIZE", 260),
+					PollSeconds:         config.GetenvFloat("PARSED_JOB_WORKER_POLL_SECONDS", 5),
+					RunOnce:             true,
+					ErrorBackoffSeconds: errorBackoffSeconds,
+				}, db)
+				parsedSvc.EnabledSources = enabledSources
+
 				hadError := false
 				errorDetails := make([]string, 0, 4)
 				log.Printf("worker-chain cycle_start")

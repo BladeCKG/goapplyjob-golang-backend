@@ -79,6 +79,7 @@ type (
 
 type HTMLFetcher interface {
 	ReadHTML(context.Context, string) (string, int, error)
+	ReadHTMLWithLimit(context.Context, string, int64) (string, int, error)
 }
 
 type Service struct {
@@ -131,7 +132,7 @@ func New(config Config, db *database.DB) *Service {
 
 	svc.RemoteRocketShipUSJobsSitemapFetchSample = func(ctx context.Context) ([]byte, error) {
 		sampleBytes := int64(max(config.SampleKB, 1) * 1024)
-		if data, err := svc.fetchBytesWithScraper(ctx, config.RemoteRocketshipUSJobSitemapURL); err == nil {
+		if data, err := svc.fetchBytesWithScraper(ctx, config.RemoteRocketshipUSJobSitemapURL, sampleBytes); err == nil {
 			if int64(len(data)) <= sampleBytes {
 				return data, nil
 			}
@@ -141,7 +142,7 @@ func New(config Config, db *database.DB) *Service {
 		return nil, errors.New("scraper fetch failed")
 	}
 	svc.RemoteRocketShipUSJobsSitemapFetchFull = func(ctx context.Context) ([]byte, error) {
-		if data, err := svc.fetchBytesWithScraper(ctx, config.RemoteRocketshipUSJobSitemapURL); err == nil {
+		if data, err := svc.fetchBytesWithScraper(ctx, config.RemoteRocketshipUSJobSitemapURL, 0); err == nil {
 			return data, nil
 		}
 		return nil, errors.New("scraper fetch failed")
@@ -164,11 +165,11 @@ func (s *Service) setStatus(values map[string]any) {
 	}
 }
 
-func (s *Service) fetchBytesWithScraper(ctx context.Context, rawURL string) ([]byte, error) {
+func (s *Service) fetchBytesWithScraper(ctx context.Context, rawURL string, maxBytes int64) ([]byte, error) {
 	if s.Fetcher == nil {
 		return nil, errors.New("scraper not available")
 	}
-	htmlText, status, err := s.Fetcher.ReadHTML(ctx, rawURL)
+	htmlText, status, err := s.Fetcher.ReadHTMLWithLimit(ctx, rawURL, maxBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +180,7 @@ func (s *Service) fetchBytesWithScraper(ctx context.Context, rawURL string) ([]b
 }
 
 func (s *Service) fetchTextWithScraper(ctx context.Context, rawURL string) (string, error) {
-	data, err := s.fetchBytesWithScraper(ctx, rawURL)
+	data, err := s.fetchBytesWithScraper(ctx, rawURL, 0)
 	if err != nil {
 		return "", err
 	}

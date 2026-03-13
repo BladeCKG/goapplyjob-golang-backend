@@ -87,6 +87,17 @@ func (s stubFetcher) ReadHTML(ctx context.Context, rawURL string) (string, int, 
 	return s.fn(ctx, rawURL)
 }
 
+func (s stubFetcher) ReadHTMLWithLimit(ctx context.Context, rawURL string, maxBytes int64) (string, int, error) {
+	body, status, err := s.ReadHTML(ctx, rawURL)
+	if err != nil || maxBytes <= 0 {
+		return body, status, err
+	}
+	if int64(len(body)) <= maxBytes {
+		return body, status, err
+	}
+	return body[:maxBytes], status, err
+}
+
 func TestDeltaNewerThanLastmodReturnsOnlyNewerURLBlocks(t *testing.T) {
 	service := buildService(t)
 	fullData := []byte(`<?xml version="1.0" encoding="UTF-8"?>
