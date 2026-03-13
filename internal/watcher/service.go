@@ -304,6 +304,7 @@ func (s *Service) runOnceDailyremote(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("DailyRemote state_loaded latest_external_id=%v", statePayload["latest_external_id"])
 	previousLatestExternalID := intFromAny(statePayload["latest_external_id"], 0)
 	newestExternalID := previousLatestExternalID
 	pagesScanned := 0
@@ -317,11 +318,14 @@ func (s *Service) runOnceDailyremote(ctx context.Context) error {
 		log.Printf("DailyRemote fetch_start page=%d url=%s", page, pageURL)
 		htmlText, err := s.fetchTextForDailyRemote(ctx, pageURL)
 		if err != nil {
+			log.Printf("DailyRemote fetch_failed page=%d url=%s error=%v", page, pageURL, err)
 			return err
 		}
+		log.Printf("DailyRemote fetch_done page=%d bytes=%d", page, len(htmlText))
 		pagesScanned++
 
 		listings := dailyremote.ExtractJobListings(htmlText, pageURL, time.Now().UTC())
+		log.Printf("DailyRemote listings_extracted page=%d count=%d", page, len(listings))
 		if len(listings) == 0 {
 			break
 		}
@@ -357,6 +361,7 @@ func (s *Service) runOnceDailyremote(ctx context.Context) error {
 
 	var payloadID any
 	if len(payloadRows) > 0 {
+		log.Printf("DailyRemote payload_build rows=%d newest_external_id=%d", len(payloadRows), newestExternalID)
 		savedID, err := s.saveDeltaPayloadForSource(
 			ctx,
 			sourceDailyremote,
@@ -365,9 +370,11 @@ func (s *Service) runOnceDailyremote(ctx context.Context) error {
 			dailyremote.SerializeImportRows(payloadRows),
 		)
 		if err != nil {
+			log.Printf("DailyRemote payload_save_failed rows=%d error=%v", len(payloadRows), err)
 			return err
 		}
 		payloadID = savedID
+		log.Printf("DailyRemote payload_saved payload_id=%v rows=%d", payloadID, len(payloadRows))
 	}
 
 	latestExternalIDValue := any(nil)
@@ -378,6 +385,7 @@ func (s *Service) runOnceDailyremote(ctx context.Context) error {
 		latestExternalIDValue = previousLatestExternalID
 	}
 
+	log.Printf("DailyRemote state_saving latest_external_id=%v pages_scanned=%d latest_delta_count=%d payload_id=%v", latestExternalIDValue, pagesScanned, len(payloadRows), payloadID)
 	return s.saveStatePayload(ctx, sourceDailyremote, map[string]any{
 		"latest_external_id":       latestExternalIDValue,
 		"pages_scanned_last_cycle": pagesScanned,
@@ -390,15 +398,19 @@ func (s *Service) runOnceRemoteRocketship(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	log.Printf("RemoteRocketship sample_fetch_start")
 	sample, err := s.RemoteRocketShipUSJobsSitemapFetchSample(ctx)
 	if err != nil {
+		log.Printf("RemoteRocketship sample_fetch_failed error=%v", err)
 		s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
 		return err
 	}
+	log.Printf("RemoteRocketship sample_fetch_done bytes=%d", len(sample))
 
 	currentHash := sha256Hex(sample)
 	previousHash, previousFirstLastmod, _ := s.loadRemoteRocketshipState(ctx)
 	currentFirstLastmod := s.ExtractFirstLastmod(sample)
+	log.Printf("RemoteRocketship sample_hash current=%s previous=%s", currentHash, previousHash)
 
 	s.setStatus(map[string]any{
 		"last_check_at":    utcNowISO(),
@@ -407,6 +419,7 @@ func (s *Service) runOnceRemoteRocketship(ctx context.Context) error {
 	})
 
 	if currentHash == previousHash {
+		log.Printf("RemoteRocketship sample_unchanged skip_delta")
 		_ = s.saveRemoteRocketshipState(ctx, currentHash, firstNonEmpty(currentFirstLastmod, previousFirstLastmod))
 		s.setStatus(map[string]any{"last_overlap_bytes": len(sample)})
 		return nil
@@ -430,7 +443,9 @@ func (s *Service) runOnceRemoteRocketship(ctx context.Context) error {
 		deltaData = s.DeltaNewerThanLastmod(sample, previousFirstLastmod)
 		deltaSource = "sample_lastmod_window"
 		overlapBytes = max(len(sample)-len(deltaData), 0)
+		log.Printf("RemoteRocketship delta_from_sample bytes=%d overlap=%d", len(deltaData), overlapBytes)
 		if len(deltaData) == 0 {
+			log.Printf("RemoteRocketship delta_empty skip_payload")
 			_ = s.saveRemoteRocketshipState(ctx, currentHash, firstNonEmpty(currentFirstLastmod, previousFirstLastmod))
 			s.setStatus(map[string]any{
 				"last_change_at":              utcNowISO(),
@@ -445,6 +460,7 @@ func (s *Service) runOnceRemoteRocketship(ctx context.Context) error {
 	} else {
 		fullData, err = s.RemoteRocketShipUSJobsSitemapFetchFull(ctx)
 		if err != nil {
+			log.Printf("RemoteRocketship full_fetch_failed error=%v", err)
 			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
 			return err
 		}
@@ -454,6 +470,7 @@ func (s *Service) runOnceRemoteRocketship(ctx context.Context) error {
 			overlapBytes = max(len(fullData)-len(deltaData), 0)
 			deltaSource = "full_lastmod_window"
 		}
+		log.Printf("RemoteRocketship full_fetch_done bytes=%d delta_bytes=%d overlap=%d", len(fullData), len(deltaData), overlapBytes)
 	}
 
 	if len(fullData) > 0 && currentFirstLastmod == "" {
@@ -463,11 +480,14 @@ func (s *Service) runOnceRemoteRocketship(ctx context.Context) error {
 
 	var payloadID any
 	if len(deltaData) > 0 {
+		log.Printf("RemoteRocketship payload_save_start bytes=%d", len(deltaData))
 		saved, err := s.saveRemoteRocketshipDeltaPayload(ctx, string(deltaData))
 		if err != nil {
+			log.Printf("RemoteRocketship payload_save_failed error=%v", err)
 			return err
 		}
 		payloadID = saved
+		log.Printf("RemoteRocketship payload_saved payload_id=%v", payloadID)
 	}
 
 	s.setStatus(map[string]any{
@@ -490,6 +510,7 @@ func (s *Service) runOnceBuiltin(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("Builtin state_loaded next_page=%v last_job_url=%v last_post_date=%v", statePayload["next_page"], statePayload["last_job_url"], statePayload["last_post_date"])
 	nextPage := intFromAny(statePayload["next_page"], s.Config.BuiltinMaxPage)
 	if nextPage <= 0 {
 		nextPage = s.Config.BuiltinMaxPage
@@ -514,6 +535,7 @@ func (s *Service) runOnceBuiltin(ctx context.Context) error {
 		if nextSavedPage < 1 {
 			nextSavedPage = 1
 		}
+		log.Printf("Builtin checkpoint_save next_page=%d pages_scanned=%d payloads_created=%d", nextSavedPage, pagesScanned, payloadsCreated)
 		return s.saveStatePayload(ctx, sourceBuiltin, map[string]any{
 			"next_page":                   nextSavedPage,
 			"last_post_date":              valueOrNil(lastPostDate),
@@ -534,6 +556,7 @@ func (s *Service) runOnceBuiltin(ctx context.Context) error {
 			log.Printf("Builtin phase1 fetch_start page=%d url=%s", probePage, pageURL)
 			htmlText := s.fetchBuiltinPageText(ctx, pageURL, probePage, "next-page")
 			pagesScanned++
+			log.Printf("Builtin phase1 fetch_done page=%d bytes=%d", probePage, len(htmlText))
 			if strings.TrimSpace(htmlText) == "" {
 				probePage++
 				continue
@@ -543,6 +566,7 @@ func (s *Service) runOnceBuiltin(ctx context.Context) error {
 				break
 			}
 			listings := builtin.ExtractJobListings(htmlText)
+			log.Printf("Builtin phase1 listings_extracted page=%d count=%d", probePage, len(listings))
 			if len(listings) == 0 {
 				break
 			}
@@ -572,6 +596,7 @@ func (s *Service) runOnceBuiltin(ctx context.Context) error {
 		log.Printf("Builtin phase2 fetch_start page=%d url=%s", currentPage, pageURL)
 		htmlText := s.fetchBuiltinPageText(ctx, pageURL, currentPage, "upper-page")
 		pagesScanned++
+		log.Printf("Builtin phase2 fetch_done page=%d bytes=%d", currentPage, len(htmlText))
 		if strings.TrimSpace(htmlText) == "" {
 			currentPage--
 			continue
@@ -582,6 +607,7 @@ func (s *Service) runOnceBuiltin(ctx context.Context) error {
 			continue
 		}
 		listings := builtin.ExtractJobListings(htmlText)
+		log.Printf("Builtin phase2 listings_extracted page=%d count=%d", currentPage, len(listings))
 		if skipPhase2UntilBoundary && len(listings) > 0 {
 			boundaryHit := containsListingURL(listings, lastJobURL) || allListingsOlderThan(listings, lastPostDateDT)
 			if boundaryHit {
@@ -666,6 +692,7 @@ func (s *Service) runOnceWorkable(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("Workable state_loaded first_job_post_date=%v", statePayload["first_job_post_date"])
 	previousFirstJobPostDate, _ := statePayload["first_job_post_date"].(string)
 	previousFirstDT := parseISOTime(previousFirstJobPostDate)
 	isBootstrap := previousFirstDT == nil
@@ -690,9 +717,11 @@ func (s *Service) runOnceWorkable(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		log.Printf("Workable fetch_done bytes=%d token=%s", len(bodyText), valueOrNil(nextToken))
 
 		var response map[string]any
 		if err := json.Unmarshal([]byte(bodyText), &response); err != nil || response == nil {
+			log.Printf("Workable parse_failed token=%s error=%v", valueOrNil(nextToken), err)
 			break
 		}
 		jobsRaw, _ := response["jobs"].([]any)
@@ -766,6 +795,7 @@ func (s *Service) runOnceWorkable(ctx context.Context) error {
 			}
 			insertedRows += inserted
 			updatedRows += updated
+			log.Printf("Workable upsert_done inserted=%d updated=%d token=%s", inserted, updated, valueOrNil(nextToken))
 		}
 
 		pagesScanned++
@@ -780,6 +810,7 @@ func (s *Service) runOnceWorkable(ctx context.Context) error {
 	if firstPageLatestPostDate != nil {
 		firstJobPostDate = firstPageLatestPostDate.UTC().Format(time.RFC3339Nano)
 	}
+	log.Printf("Workable state_saving first_job_post_date=%v first_job_url=%v pages_scanned=%d inserted=%d updated=%d", firstJobPostDate, valueOrNil(firstPageFirstURL), pagesScanned, insertedRows, updatedRows)
 	return s.saveStatePayload(ctx, sourceWorkable, map[string]any{
 		"first_job_post_date": firstJobPostDate,
 		"first_job_url":       valueOrNil(firstPageFirstURL),
@@ -797,6 +828,7 @@ func (s *Service) runOnceRemotive(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("Remotive state_loaded latest_job_id=%v", statePayload["latest_job_id"])
 	previousLatestJobID := intFromAny(statePayload["latest_job_id"], 0)
 	if previousLatestJobID <= 0 {
 		previousLatestJobID = 0
@@ -804,11 +836,13 @@ func (s *Service) runOnceRemotive(ctx context.Context) error {
 
 	latestIndex, latestURL, xmlText := s.fetchRemotiveLatestSitemapXML(ctx)
 	if strings.TrimSpace(xmlText) == "" || strings.TrimSpace(latestURL) == "" {
+		log.Printf("Remotive latest_sitemap_missing latest_index=%d latest_url=%s", latestIndex, latestURL)
 		return s.saveStatePayload(ctx, sourceRemotive, map[string]any{
 			"latest_job_id": previousLatestJobID,
 			"last_scan_at":  utcNowISO(),
 		})
 	}
+	log.Printf("Remotive latest_sitemap_loaded index=%d url=%s bytes=%d", latestIndex, latestURL, len(xmlText))
 
 	now := time.Now().UTC()
 	deltaRows := make([]map[string]any, 0)
@@ -866,6 +900,7 @@ func (s *Service) runOnceRemotive(ctx context.Context) error {
 
 	if len(partitionsToScan) == 0 {
 		rows, _ := remotive.ParseSitemapRows(xmlText)
+		log.Printf("Remotive sitemap_parsed index=%d rows=%d", latestIndex, len(rows))
 		_ = processRows(rows)
 	} else {
 		for _, partition := range partitionsToScan {
@@ -880,9 +915,11 @@ func (s *Service) runOnceRemotive(ctx context.Context) error {
 				if fetchedPartition <= 0 || strings.TrimSpace(fetchedURL) == "" || strings.TrimSpace(fetchedXML) == "" {
 					continue
 				}
+				log.Printf("Remotive sitemap_partition_loaded index=%d url=%s bytes=%d", fetchedPartition, fetchedURL, len(fetchedXML))
 				partitionXML = fetchedXML
 			}
 			rows, _ := remotive.ParseSitemapRows(partitionXML)
+			log.Printf("Remotive sitemap_parsed index=%d rows=%d", partition, len(rows))
 			if len(rows) == 0 {
 				continue
 			}
@@ -900,6 +937,7 @@ func (s *Service) runOnceRemotive(ctx context.Context) error {
 		} else {
 			payloadID = savedID
 		}
+		log.Printf("Remotive payload_saved payload_id=%v rows=%d", payloadID, len(deltaRows))
 	}
 
 	latestJobIDValue := any(nil)
@@ -915,6 +953,7 @@ func (s *Service) runOnceRemotive(ctx context.Context) error {
 		sitemapURLCount = len(deltaRows)
 	}
 
+	log.Printf("Remotive state_saving latest_job_id=%v scanned_indexes=%v delta_rows=%d payload_id=%v", latestJobIDValue, scannedIndexes, len(deltaRows), payloadID)
 	return s.saveStatePayload(ctx, sourceRemotive, map[string]any{
 		"sitemap_url":                    latestURL,
 		"latest_sitemap_index":           latestIndex,
@@ -1005,6 +1044,7 @@ func (s *Service) runOnceHiringCafe(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("HiringCafe state_loaded first_job_post_date=%v first_job_url=%v", statePayload["first_job_post_date"], statePayload["first_job_url"])
 	previousFirstJobPostDate, _ := statePayload["first_job_post_date"].(string)
 	previousFirstJobURL, _ := statePayload["first_job_url"].(string)
 	previousFirstDT := parseISOTime(previousFirstJobPostDate)
@@ -1014,6 +1054,7 @@ func (s *Service) runOnceHiringCafe(ctx context.Context) error {
 		return err
 	}
 	totalCount := hiringcafe.ParseTotalCount(totalCountPayload)
+	log.Printf("HiringCafe total_count_loaded count=%d", totalCount)
 	if totalCount <= 0 {
 		return s.saveStatePayload(ctx, sourceHiringCafe, map[string]any{
 			"search_api_url":           s.Config.HiringCafeSearchAPIURL,
@@ -1045,6 +1086,7 @@ func (s *Service) runOnceHiringCafe(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		log.Printf("HiringCafe fetch_done page=%d url=%s", page, pageURL)
 		pagesScanned++
 		rowsRaw, _ := response["results"].([]any)
 		results := make([]map[string]any, 0, len(rowsRaw))
@@ -1055,6 +1097,7 @@ func (s *Service) runOnceHiringCafe(ctx context.Context) error {
 			}
 		}
 		rows := hiringcafe.NormalizeJobs(results)
+		log.Printf("HiringCafe rows_normalized page=%d rows=%d", page, len(rows))
 		if len(rows) == 0 {
 			continue
 		}
@@ -1089,12 +1132,14 @@ func (s *Service) runOnceHiringCafe(ctx context.Context) error {
 			return err
 		}
 		rowsSaved += inserted + updated
+		log.Printf("HiringCafe upsert_done page=%d inserted=%d updated=%d", page, inserted, updated)
 	}
 
 	var firstPageLatestPostDateISO any
 	if firstPageLatestPostDate != nil {
 		firstPageLatestPostDateISO = firstPageLatestPostDate.UTC().Format(time.RFC3339Nano)
 	}
+	log.Printf("HiringCafe state_saving first_job_post_date=%v first_job_url=%v pages_scanned=%d rows_saved=%d", firstPageLatestPostDateISO, valueOrNil(firstPageFirstURL), pagesScanned, rowsSaved)
 	return s.saveStatePayload(ctx, sourceHiringCafe, map[string]any{
 		"search_api_url":           s.Config.HiringCafeSearchAPIURL,
 		"total_count_url":          s.Config.HiringCafeTotalCountURL,
