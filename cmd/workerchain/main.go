@@ -133,54 +133,43 @@ func main() {
 
 		runChain := func() {
 			for {
+				hadError := false
 				log.Printf("worker-chain cycle_start")
 				if err := runStepWithTimeout("watcher", time.Duration(stepTimeoutSeconds)*time.Second, func(ctx context.Context) error {
 					return watcherSvc.RunOnceWithContext(ctx)
 				}); err != nil {
 					log.Printf("worker-chain watcher_failed error=%v", err)
-					if runOnce {
-						return
-					}
-					time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
-					continue
+					hadError = true
+				} else {
+					log.Printf("worker-chain watcher_done")
 				}
-				log.Printf("worker-chain watcher_done")
 				if err := runStepWithTimeout("importer", time.Duration(stepTimeoutSeconds)*time.Second, func(ctx context.Context) error {
 					return importerSvc.RunOnceWithContext(ctx)
 				}); err != nil {
 					log.Printf("worker-chain importer_failed error=%v", err)
-					if runOnce {
-						return
-					}
-					time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
-					continue
+					hadError = true
+				} else {
+					log.Printf("worker-chain importer_done")
 				}
-				log.Printf("worker-chain importer_done")
 				rawCount, err := runCountStepWithTimeout(time.Duration(stepTimeoutSeconds)*time.Second, func(ctx context.Context) (int, error) {
 					return rawSvc.RunOnce(ctx)
 				})
 				if err != nil {
 					log.Printf("worker-chain raw_failed error=%v", err)
-					if runOnce {
-						return
-					}
-					time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
-					continue
+					hadError = true
+				} else {
+					log.Printf("worker-chain raw_done processed=%d", rawCount)
 				}
-				log.Printf("worker-chain raw_done processed=%d", rawCount)
 				parsedCount, err := runCountStepWithTimeout(time.Duration(stepTimeoutSeconds)*time.Second, func(ctx context.Context) (int, error) {
 					return parsedSvc.RunOnce(ctx)
 				})
 				if err != nil {
 					log.Printf("worker-chain parsed_failed error=%v", err)
-					if runOnce {
-						return
-					}
-					time.Sleep(time.Duration(errorBackoffSeconds) * time.Second)
-					continue
+					hadError = true
+				} else {
+					log.Printf("worker-chain parsed_done processed=%d", parsedCount)
 				}
-				log.Printf("worker-chain parsed_done processed=%d", parsedCount)
-				log.Printf("worker-chain cycle_done")
+				log.Printf("worker-chain cycle_done had_error=%v", hadError)
 				if runOnce {
 					return
 				}
