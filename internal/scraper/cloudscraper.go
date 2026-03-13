@@ -1,9 +1,13 @@
 package scraper
 
 import (
+	"bytes"
+	"compress/gzip"
+	"compress/zlib"
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"time"
 
 	cloudscraper "github.com/Advik-B/cloudscraper/lib"
@@ -77,12 +81,17 @@ func (f *CloudscraperFetcher) ReadHTMLWithLimit(ctx context.Context, targetURL s
 			return
 		}
 		defer resp.Body.Close()
-		body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+		rawBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
 		if readErr != nil {
 			ch <- result{body: "", status: -1, err: readErr}
 			return
 		}
-		ch <- result{body: string(body), status: resp.StatusCode, err: nil}
+		decoded, decodeErr := decodeCompressedBody(resp.Header.Get("Content-Encoding"), rawBody, maxBytes)
+		if decodeErr != nil {
+			ch <- result{body: "", status: -1, err: decodeErr}
+			return
+		}
+		ch <- result{body: string(decoded), status: resp.StatusCode, err: nil}
 	}()
 
 	select {
@@ -91,6 +100,47 @@ func (f *CloudscraperFetcher) ReadHTMLWithLimit(ctx context.Context, targetURL s
 	case res := <-ch:
 		return res.body, res.status, res.err
 	}
+}
+
+func decodeCompressedBody(encoding string, raw []byte, maxBytes int64) ([]byte, error) {
+	normalized := strings.ToLower(strings.TrimSpace(encoding))
+	switch {
+	case strings.Contains(normalized, "gzip"):
+		return decodeGzip(raw, maxBytes)
+	case strings.Contains(normalized, "deflate"):
+		return decodeZlib(raw, maxBytes)
+	}
+	if len(raw) >= 2 && raw[0] == 0x1f && raw[1] == 0x8b {
+		return decodeGzip(raw, maxBytes)
+	}
+	if len(raw) >= 2 && raw[0] == 0x78 {
+		return decodeZlib(raw, maxBytes)
+	}
+	return raw, nil
+}
+
+func decodeGzip(raw []byte, maxBytes int64) ([]byte, error) {
+	reader, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	if maxBytes <= 0 {
+		return io.ReadAll(reader)
+	}
+	return io.ReadAll(io.LimitReader(reader, maxBytes))
+}
+
+func decodeZlib(raw []byte, maxBytes int64) ([]byte, error) {
+	reader, err := zlib.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	if maxBytes <= 0 {
+		return io.ReadAll(reader)
+	}
+	return io.ReadAll(io.LimitReader(reader, maxBytes))
 }
 
 func (f *CloudscraperFetcher) ResolveFinalURL(ctx context.Context, targetURL string) (string, int, error) {
