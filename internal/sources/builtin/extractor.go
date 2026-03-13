@@ -3,14 +3,13 @@ package builtin
 import (
 	"encoding/json"
 	"errors"
+	"goapplyjob-golang-backend/internal/locationnorm"
 	"html"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-
-	"goapplyjob-golang-backend/internal/locationnorm"
 
 	nethtml "golang.org/x/net/html"
 )
@@ -38,12 +37,6 @@ func ExtractJob(htmlText, companyHTML string) map[string]any {
 
 	jobPostInit := extractJobPostInit(htmlText)
 	jobURL := stringValueFromMap(jobPostInit, "job", "howToApply")
-	if jobURL == "" {
-		jobURL = extractHowToApplyURL(htmlText)
-	}
-	if jobURL == "" {
-		jobURL = extractCanonicalURL(htmlText)
-	}
 	identifierValue := ""
 	if identifier, ok := jobPosting["identifier"].(map[string]any); ok {
 		identifierValue = stringValue(identifier["value"])
@@ -142,7 +135,6 @@ func ExtractJobFromHTML(htmlText string, fallbackJobURL string) map[string]any {
 	if len(payload) == 0 {
 		return payload
 	}
-	payload["url"] = fallbackJobURL
 	if company, _ := payload["company"].(map[string]any); company == nil || len(company) == 0 {
 		jobPosting := findJobPostingLD(htmlText)
 		payload["company"] = toRawCompanyShape(fallbackCompanyFromJobPosting(jobPosting, htmlText))
