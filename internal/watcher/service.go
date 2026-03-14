@@ -541,7 +541,7 @@ func (s *Service) runOnceRemoteDotCo(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	previousFirstLastmod, _ := statePayload["first_lastmod"].(string)
+	previousHash, _ := statePayload["sitemap_hash"].(string)
 
 	logf("sitemap_fetch_start url=%s", s.Config.RemoteDotCoSitemapURL)
 	xmlText, err := s.fetchTextWithScraper(ctx, s.Config.RemoteDotCoSitemapURL)
@@ -551,36 +551,26 @@ func (s *Service) runOnceRemoteDotCo(ctx context.Context) error {
 	}
 	logf("sitemap_fetch_done bytes=%d", len(xmlText))
 
-	firstLastmod := remotedotco.ExtractFirstLastmod([]byte(xmlText))
-	deltaText := xmlText
-	deltaSource := "full"
-	overlapBytes := 0
-	if strings.TrimSpace(previousFirstLastmod) != "" {
-		deltaBytes := remotedotco.DeltaNewerThanLastmod([]byte(xmlText), previousFirstLastmod)
-		overlapBytes = max(len(xmlText)-len(deltaBytes), 0)
-		deltaText = string(deltaBytes)
-		deltaSource = "lastmod_window"
-	}
-	if strings.TrimSpace(deltaText) == "" {
-		logf("delta_empty skip_payload previous_first_lastmod=%s", previousFirstLastmod)
+	currentHash := sha256Hex([]byte(xmlText))
+	logf("sitemap_hash current=%s previous=%s", currentHash, previousHash)
+	if currentHash == previousHash {
+		logf("sitemap_unchanged skip_payload")
 		return s.saveStatePayload(ctx, sourceRemotedotco, map[string]any{
-			"first_lastmod":         valueOrNil(firstLastmod),
+			"sitemap_hash":          currentHash,
 			"last_scan_at":          utcNowISO(),
 			"last_delta_count":      0,
 			"last_delta_payload_id": nil,
-			"last_delta_source":     deltaSource,
-			"last_overlap_bytes":    overlapBytes,
 		})
 	}
 
-	rows, _ := remotedotco.ParseImportRows(deltaText)
-	logf("delta_rows_ready count=%d source=%s overlap=%d", len(rows), deltaSource, overlapBytes)
+	rows, _ := remotedotco.ParseImportRows(xmlText)
+	logf("delta_rows_ready count=%d source=full", len(rows))
 	payloadID, err := s.saveDeltaPayloadForSource(
 		ctx,
 		sourceRemotedotco,
 		s.Config.RemoteDotCoSitemapURL,
 		remotedotco.PayloadType,
-		deltaText,
+		xmlText,
 	)
 	if err != nil {
 		logf("payload_save_failed error=%v", err)
@@ -588,12 +578,11 @@ func (s *Service) runOnceRemoteDotCo(ctx context.Context) error {
 	}
 	logf("payload_saved payload_id=%v rows=%d", payloadID, len(rows))
 	return s.saveStatePayload(ctx, sourceRemotedotco, map[string]any{
-		"first_lastmod":         valueOrNil(firstLastmod),
+		"sitemap_hash":          currentHash,
 		"last_scan_at":          utcNowISO(),
 		"last_delta_count":      len(rows),
 		"last_delta_payload_id": payloadID,
-		"last_delta_source":     deltaSource,
-		"last_overlap_bytes":    overlapBytes,
+		"last_delta_source":     "full",
 	})
 }
 

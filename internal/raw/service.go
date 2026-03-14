@@ -175,7 +175,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	}
 	var rows *sql.Rows
 	var err error
-	query := `SELECT id, url, COALESCE(source, ''), post_date, COALESCE(extra_json, '')
+	baseQuery := `SELECT id, url, COALESCE(source, ''), post_date, COALESCE(extra_json, '')
 	            FROM raw_us_jobs
 	           WHERE is_ready = false
 	             AND is_skippable = false
@@ -185,18 +185,28 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	query += ` ORDER BY post_date DESC, id DESC LIMIT ?`
-	for attempt := 0; attempt < 3; attempt++ {
-		rows, err = s.DB.SQL.QueryContext(ctx, query, names, batchSize)
-		if err == nil {
-			break
+	zeroRetryQuery := baseQuery + ` AND retry_count = 0 ORDER BY post_date DESC, id DESC LIMIT ?`
+	minRetryQuery := baseQuery + ` ORDER BY retry_count ASC, post_date DESC, id DESC LIMIT ?`
+
+	queryWithRetry := func(query string, args ...any) (*sql.Rows, error) {
+		var qErr error
+		for attempt := 0; attempt < 3; attempt++ {
+			rows, qErr = s.DB.SQL.QueryContext(ctx, query, args...)
+			if qErr == nil {
+				return rows, nil
+			}
+			if !isTransientDBError(qErr) || attempt == 2 {
+				return nil, qErr
+			}
+			time.Sleep(time.Duration(50*(1<<attempt)) * time.Millisecond)
 		}
-		if !isTransientDBError(err) || attempt == 2 {
-			return 0, err
-		}
-		time.Sleep(time.Duration(50*(1<<attempt)) * time.Millisecond)
+		return nil, qErr
 	}
-	defer rows.Close()
+
+	rows, err = queryWithRetry(zeroRetryQuery, names, batchSize)
+	if err != nil {
+		return 0, err
+	}
 
 	type rawJob struct {
 		id        int64
@@ -209,13 +219,37 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	for rows.Next() {
 		var job rawJob
 		if err := rows.Scan(&job.id, &job.url, &job.source, &job.postDate, &job.extraJSON); err != nil {
+			rows.Close()
 			return 0, err
 		}
 		jobs = append(jobs, job)
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
 		return 0, err
 	}
+	rows.Close()
+
+	if len(jobs) == 0 {
+		rows, err = queryWithRetry(minRetryQuery, names, batchSize)
+		if err != nil {
+			return 0, err
+		}
+		for rows.Next() {
+			var job rawJob
+			if err := rows.Scan(&job.id, &job.url, &job.source, &job.postDate, &job.extraJSON); err != nil {
+				rows.Close()
+				return 0, err
+			}
+			jobs = append(jobs, job)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		rows.Close()
+	}
+
 	log.Printf("raw-us-job-worker picked_unready_jobs=%d", len(jobs))
 
 	workerCount := s.Config.WorkerCount
