@@ -139,43 +139,73 @@ func main() {
 				hadError := false
 				errorDetails := make([]string, 0, 4)
 				log.Printf("worker-chain cycle_start")
-				if err := runStepWithTimeout("watcher", time.Duration(stepTimeoutSeconds)*time.Second, func(ctx context.Context) error {
-					return watcherSvc.RunOnceWithContext(ctx)
-				}); err != nil {
-					log.Printf("worker-chain watcher_failed error=%v", err)
-					hadError = true
-					errorDetails = append(errorDetails, "watcher="+err.Error())
-				} else {
-					log.Printf("worker-chain watcher_done")
+				stepTimeout := time.Duration(stepTimeoutSeconds) * time.Second
+				type stepResult struct {
+					name  string
+					count int
+					err   error
 				}
-				if err := runStepWithTimeout("importer", time.Duration(stepTimeoutSeconds)*time.Second, func(ctx context.Context) error {
-					return importerSvc.RunOnceWithContext(ctx)
-				}); err != nil {
-					log.Printf("worker-chain importer_failed error=%v", err)
-					hadError = true
-					errorDetails = append(errorDetails, "importer="+err.Error())
-				} else {
-					log.Printf("worker-chain importer_done")
-				}
-				rawCount, err := runCountStepWithTimeout(time.Duration(stepTimeoutSeconds)*time.Second, func(ctx context.Context) (int, error) {
-					return rawSvc.RunOnce(ctx)
-				})
-				if err != nil {
-					log.Printf("worker-chain raw_failed error=%v", err)
-					hadError = true
-					errorDetails = append(errorDetails, "raw="+err.Error())
-				} else {
-					log.Printf("worker-chain raw_done processed=%d", rawCount)
-				}
-				parsedCount, err := runCountStepWithTimeout(time.Duration(stepTimeoutSeconds)*time.Second, func(ctx context.Context) (int, error) {
-					return parsedSvc.RunOnce(ctx)
-				})
-				if err != nil {
-					log.Printf("worker-chain parsed_failed error=%v", err)
-					hadError = true
-					errorDetails = append(errorDetails, "parsed="+err.Error())
-				} else {
-					log.Printf("worker-chain parsed_done processed=%d", parsedCount)
+				results := make(chan stepResult, 4)
+				go func() {
+					err := runStepWithTimeout("watcher", stepTimeout, func(ctx context.Context) error {
+						return watcherSvc.RunOnceWithContext(ctx)
+					})
+					results <- stepResult{name: "watcher", err: err}
+				}()
+				go func() {
+					err := runStepWithTimeout("importer", stepTimeout, func(ctx context.Context) error {
+						return importerSvc.RunOnceWithContext(ctx)
+					})
+					results <- stepResult{name: "importer", err: err}
+				}()
+				go func() {
+					count, err := runCountStepWithTimeout(stepTimeout, func(ctx context.Context) (int, error) {
+						return rawSvc.RunOnce(ctx)
+					})
+					results <- stepResult{name: "raw", count: count, err: err}
+				}()
+				go func() {
+					count, err := runCountStepWithTimeout(stepTimeout, func(ctx context.Context) (int, error) {
+						return parsedSvc.RunOnce(ctx)
+					})
+					results <- stepResult{name: "parsed", count: count, err: err}
+				}()
+				for i := 0; i < 4; i++ {
+					res := <-results
+					switch res.name {
+					case "watcher":
+						if res.err != nil {
+							log.Printf("worker-chain watcher_failed error=%v", res.err)
+							hadError = true
+							errorDetails = append(errorDetails, "watcher="+res.err.Error())
+						} else {
+							log.Printf("worker-chain watcher_done")
+						}
+					case "importer":
+						if res.err != nil {
+							log.Printf("worker-chain importer_failed error=%v", res.err)
+							hadError = true
+							errorDetails = append(errorDetails, "importer="+res.err.Error())
+						} else {
+							log.Printf("worker-chain importer_done")
+						}
+					case "raw":
+						if res.err != nil {
+							log.Printf("worker-chain raw_failed error=%v", res.err)
+							hadError = true
+							errorDetails = append(errorDetails, "raw="+res.err.Error())
+						} else {
+							log.Printf("worker-chain raw_done processed=%d", res.count)
+						}
+					case "parsed":
+						if res.err != nil {
+							log.Printf("worker-chain parsed_failed error=%v", res.err)
+							hadError = true
+							errorDetails = append(errorDetails, "parsed="+res.err.Error())
+						} else {
+							log.Printf("worker-chain parsed_done processed=%d", res.count)
+						}
+					}
 				}
 				if hadError {
 					log.Printf("worker-chain cycle_done had_error=true details=%s", strings.Join(errorDetails, " | "))
