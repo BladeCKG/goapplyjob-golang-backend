@@ -4,6 +4,7 @@ import (
 	"goapplyjob-golang-backend/internal/sources/builtin"
 	"goapplyjob-golang-backend/internal/sources/dailyremote"
 	"goapplyjob-golang-backend/internal/sources/hiringcafe"
+	"goapplyjob-golang-backend/internal/sources/remotedotco"
 	"goapplyjob-golang-backend/internal/sources/remoterocketship"
 	"goapplyjob-golang-backend/internal/sources/remotive"
 	"goapplyjob-golang-backend/internal/sources/workable"
@@ -103,6 +104,18 @@ var registry = map[string]SourcePlugin{
 		ParseImportRows:      dailyremote.ParseImportRows,
 		SerializeImportRows:  dailyremote.SerializeImportRows,
 		UseExternalCompanyID: false,
+		UseCompanyMatchKeys:  true,
+		RunDuplicateCheck:    true,
+		InferCategories:      true,
+	},
+	remotedotco.Source: {
+		Source:               remotedotco.Source,
+		PayloadType:          remotedotco.PayloadType,
+		ToTargetJobURL:       remotedotco.ToTargetJobURL,
+		ParseRawHTML:         remotedotco.ParseRawHTML,
+		ParseImportRows:      remotedotco.ParseImportRows,
+		SerializeImportRows:  remotedotco.SerializeImportRows,
+		UseExternalCompanyID: true,
 		UseCompanyMatchKeys:  true,
 		RunDuplicateCheck:    true,
 		InferCategories:      true,

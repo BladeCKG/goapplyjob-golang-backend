@@ -13,6 +13,7 @@ import (
 	"goapplyjob-golang-backend/internal/sources/builtin"
 	"goapplyjob-golang-backend/internal/sources/dailyremote"
 	"goapplyjob-golang-backend/internal/sources/hiringcafe"
+	"goapplyjob-golang-backend/internal/sources/remotedotco"
 	"goapplyjob-golang-backend/internal/sources/remotive"
 	"goapplyjob-golang-backend/internal/sources/workable"
 	"log"
@@ -32,6 +33,7 @@ const (
 	sourceHiringCafe       = "hiringcafe"
 	sourceWorkable         = "workable"
 	sourceDailyremote      = "dailyremote"
+	sourceRemotedotco      = "remotedotco"
 	payloadTypeDelta       = "delta"
 	payloadTypeXML         = "delta_xml"
 )
@@ -66,6 +68,7 @@ type Config struct {
 	DailyRemoteBaseURL              string
 	DailyRemoteMaxPage              int
 	DailyRemotePagesPerCycle        int
+	RemoteDotCoSitemapURL           string
 	HiringCafeSearchAPIURL          string
 	HiringCafeTotalCountURL         string
 	HiringCafePageSize              int
@@ -114,6 +117,7 @@ func New(config Config, db *database.DB) *Service {
 		"dailyremote_base_url":          config.DailyRemoteBaseURL,
 		"dailyremote_max_page":          config.DailyRemoteMaxPage,
 		"dailyremote_pages_per_cycle":   config.DailyRemotePagesPerCycle,
+		"remotedotco_sitemap_url":       config.RemoteDotCoSitemapURL,
 		"hiringcafe_search_api_url":     config.HiringCafeSearchAPIURL,
 		"hiringcafe_total_count_url":    config.HiringCafeTotalCountURL,
 		"hiringcafe_page_size":          config.HiringCafePageSize,
@@ -246,6 +250,15 @@ func (s *Service) RunOnceWithContext(ctx context.Context) error {
 			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
 		} else {
 			log.Printf("watcher source_done source=%s runner=runOnceRemoteRocketship", sourceRemoterocketship)
+		}
+	}
+	if strings.TrimSpace(s.Config.RemoteDotCoSitemapURL) != "" && s.isSourceEnabled(sourceRemotedotco) {
+		log.Printf("watcher source_start source=%s runner=runOnceRemoteDotCo", sourceRemotedotco)
+		if err := s.runOnceRemoteDotCo(ctx); err != nil {
+			log.Printf("watcher source_failed source=%s runner=runOnceRemoteDotCo error=%v", sourceRemotedotco, err)
+			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
+		} else {
+			log.Printf("watcher source_done source=%s runner=runOnceRemoteDotCo", sourceRemotedotco)
 		}
 	}
 	if s.isRemotiveConfigured() && s.isSourceEnabled(sourceRemotive) {
@@ -506,6 +519,73 @@ func (s *Service) runOnceRemoteRocketship(ctx context.Context) error {
 		"last_delta_payload_id":       payloadID,
 	})
 	return nil
+}
+
+func (s *Service) runOnceRemoteDotCo(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	logf := func(format string, args ...any) {
+		log.Printf("watcher RemoteDotCo "+format, args...)
+	}
+	statePayload, err := s.loadStatePayload(ctx, sourceRemotedotco)
+	if err != nil {
+		return err
+	}
+	previousFirstLastmod, _ := statePayload["first_lastmod"].(string)
+
+	logf("sitemap_fetch_start url=%s", s.Config.RemoteDotCoSitemapURL)
+	xmlText, err := s.fetchTextWithScraper(ctx, s.Config.RemoteDotCoSitemapURL)
+	if err != nil {
+		logf("sitemap_fetch_failed error=%v", err)
+		return err
+	}
+	logf("sitemap_fetch_done bytes=%d", len(xmlText))
+
+	firstLastmod := remotedotco.ExtractFirstLastmod([]byte(xmlText))
+	deltaText := xmlText
+	deltaSource := "full"
+	overlapBytes := 0
+	if strings.TrimSpace(previousFirstLastmod) != "" {
+		deltaBytes := remotedotco.DeltaNewerThanLastmod([]byte(xmlText), previousFirstLastmod)
+		overlapBytes = max(len(xmlText)-len(deltaBytes), 0)
+		deltaText = string(deltaBytes)
+		deltaSource = "lastmod_window"
+	}
+	if strings.TrimSpace(deltaText) == "" {
+		logf("delta_empty skip_payload previous_first_lastmod=%s", previousFirstLastmod)
+		return s.saveStatePayload(ctx, sourceRemotedotco, map[string]any{
+			"first_lastmod":         valueOrNil(firstLastmod),
+			"last_scan_at":          utcNowISO(),
+			"last_delta_count":      0,
+			"last_delta_payload_id": nil,
+			"last_delta_source":     deltaSource,
+			"last_overlap_bytes":    overlapBytes,
+		})
+	}
+
+	rows, _ := remotedotco.ParseImportRows(deltaText)
+	logf("delta_rows_ready count=%d source=%s overlap=%d", len(rows), deltaSource, overlapBytes)
+	payloadID, err := s.saveDeltaPayloadForSource(
+		ctx,
+		sourceRemotedotco,
+		s.Config.RemoteDotCoSitemapURL,
+		remotedotco.PayloadType,
+		deltaText,
+	)
+	if err != nil {
+		logf("payload_save_failed error=%v", err)
+		return err
+	}
+	logf("payload_saved payload_id=%v rows=%d", payloadID, len(rows))
+	return s.saveStatePayload(ctx, sourceRemotedotco, map[string]any{
+		"first_lastmod":         valueOrNil(firstLastmod),
+		"last_scan_at":          utcNowISO(),
+		"last_delta_count":      len(rows),
+		"last_delta_payload_id": payloadID,
+		"last_delta_source":     deltaSource,
+		"last_overlap_bytes":    overlapBytes,
+	})
 }
 
 func (s *Service) runOnceBuiltin(ctx context.Context) error {

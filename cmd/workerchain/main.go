@@ -40,6 +40,7 @@ func main() {
 			defaultRemotiveSitemapMaxIndex    = 10
 			defaultRemotiveSitemapMinIndex    = 1
 			defaultDailyRemoteBaseURL         = "https://dailyremote.com/?location_country=United+States&sort_by=time&page={page}"
+			defaultRemoteDotCoSitemapURL      = "https://remote.co/latest-jobs-sitemap.xml"
 			defaultHiringCafeSearchURL        = "https://hiring.cafe/api/search-jobs?s="
 			defaultHiringCafeCountURL         = "https://hiring.cafe/api/search-jobs/get-total-count?s="
 		)
@@ -99,6 +100,7 @@ func main() {
 					DailyRemoteBaseURL:              defaultDailyRemoteBaseURL,
 					DailyRemoteMaxPage:              config.GetenvInt("WATCH_DAILYREMOTE_MAX_PAGE", 5000),
 					DailyRemotePagesPerCycle:        config.GetenvInt("WATCH_DAILYREMOTE_PAGES_PER_CYCLE", 300),
+					RemoteDotCoSitemapURL:           config.Getenv("WATCH_REMOTEDOTCO_SITEMAP_URL", defaultRemoteDotCoSitemapURL),
 					HiringCafeSearchAPIURL:          defaultHiringCafeSearchURL,
 					HiringCafeTotalCountURL:         defaultHiringCafeCountURL,
 					HiringCafePageSize:              config.GetenvInt("WATCH_HIRINGCAFE_PAGE_SIZE", 200),

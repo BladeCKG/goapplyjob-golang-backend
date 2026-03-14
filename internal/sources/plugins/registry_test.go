@@ -16,6 +16,13 @@ func TestRegistryIncludesHiringCafe(t *testing.T) {
 	}
 }
 
+func TestRegistryIncludesRemoteDotCo(t *testing.T) {
+	plugin, ok := Get("remotedotco")
+	if !ok || plugin.Source != "remotedotco" {
+		t.Fatalf("expected remotedotco plugin, got %#v ok=%v", plugin, ok)
+	}
+}
+
 func TestPluginParityWithPageExtractForWorkableAndHiringCafe(t *testing.T) {
 	workablePlugin, ok := Get("workable")
 	if !ok {
