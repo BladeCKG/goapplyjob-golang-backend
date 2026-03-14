@@ -256,7 +256,7 @@ func TestFindSimilarRemoteCategoriesAvoidsGenericEngineer(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Product Implementation Engineer", nil)
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Product Implementation Engineer", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +293,7 @@ func TestFindSimilarRemoteCategoriesPrefersExactNormalizedRoleTitle(t *testing.T
 		t.Fatal(err)
 	}
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Senior SWE Dev Ops", nil)
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Senior SWE Dev Ops", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +324,7 @@ func TestFindSimilarRemoteCategoriesUsesTechStackFilter(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Platform Engineer", []string{"Ruby"})
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Platform Engineer", []string{"Ruby"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +353,7 @@ func TestFindSimilarRemoteCategoriesFallsBackWhenTechStackFilterHasNoMatch(t *te
 		t.Fatal(err)
 	}
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Backend Engineer", []string{"Rust"})
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Backend Engineer", []string{"Rust"})
 	if err != nil {
 		t.Fatal(err)
 	}

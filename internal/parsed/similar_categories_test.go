@@ -64,7 +64,7 @@ func TestFindSimilarRemoteCategoriesNoSignalReturnsEmpty(t *testing.T) {
 	defer db.Close()
 
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "", nil)
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestFindSimilarRemoteCategoriesPrefersOrderedCategoryTokens(t *testing.T) {
 	insertSimilarCategoryCandidate(t, db, 2, "Manager", "Manager", "Operations", nil, now.Add(-time.Minute))
 
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Senior Product Manager", nil)
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Senior Product Manager", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestFindSimilarRemoteCategoriesAcceptsOutOfOrderTokens(t *testing.T) {
 	insertSimilarCategoryCandidate(t, db, 1, "Product Manager", "Product Manager", "Product", nil, now)
 
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Manager Product", nil)
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Manager Product", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestFindSimilarRemoteCategoriesRejectsLowInformationPartialMatch(t *testing
 	insertSimilarCategoryCandidate(t, db, 1, "Product Manager", "Product Manager", "Product", nil, now)
 
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Product", nil)
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Product", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestFindSimilarRemoteCategoriesIgnoresSeniorityAndEmploymentNoise(t *testin
 	insertSimilarCategoryCandidate(t, db, 1, "Backend Engineer", "Backend Engineer", "Engineering", nil, now)
 
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Senior II Full Time Backend Engineer", nil)
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Senior II Full Time Backend Engineer", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestFindSimilarRemoteCategoriesScansBeyondFirstThousandCandidates(t *testin
 	insertSimilarCategoryCandidate(t, db, 2001, "Product Implementation Engineer", "Implementation Engineer", "Engineering", nil, now.Add(-time.Hour))
 
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Senior Product Implementation Engineer", nil)
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Senior Product Implementation Engineer", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestFindSimilarRemoteCategoriesPrefersSpecificAccountManagerOverGenericMana
 	insertSimilarCategoryCandidate(t, db, 2, "Account Manager", "Account Manager", "Sales", nil, now.Add(-time.Minute))
 
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Senior Account Manager", nil)
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Senior Account Manager", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestFindSimilarRemoteCategoriesUsesTechStackToBreakTie(t *testing.T) {
 	insertSimilarCategoryCandidate(t, db, 2, "Platform Engineer", "Account Executive", "Sales", []string{"Java"}, now.Add(-time.Minute))
 
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Platform Engineer", []string{"Ruby"})
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Platform Engineer", []string{"Ruby"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestFindSimilarRemoteCategoriesFallsBackWhenTechStackFilteredSetEmpty(t *te
 	insertSimilarCategoryCandidate(t, db, 1, "Backend Engineer", "Backend Engineer", "Engineering", []string{"Python"}, now)
 
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Backend Engineer", []string{"Rust"})
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Backend Engineer", []string{"Rust"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func TestFindSimilarRemoteCategoriesAvoidsGenericEngineerWhenSpecificExists(t *t
 	insertSimilarCategoryCandidate(t, db, 2, "Software Engineer", "Software Engineer", "Engineering", nil, now.Add(-time.Minute))
 
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Senior Software Engineer", nil)
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Senior Software Engineer", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestFindSimilarRemoteCategoriesUsesFunctionOverlapAsTieBreaker(t *testing.T
 	insertSimilarCategoryCandidate(t, db, 2, "Account Manager", "Account Manager", "Sales", nil, now.Add(-time.Minute))
 
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Account Manager Sales", nil)
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Account Manager Sales", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestFindSimilarRemoteCategoriesPrefersImplementationEngineerOverEngineer(t 
 	insertSimilarCategoryCandidate(t, db, 2, "Consultant", "Implementation Engineer", "Engineering", nil, now.Add(-time.Minute))
 
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Product Implementation Engineer", nil)
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Product Implementation Engineer", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func TestFindSimilarRemoteCategoriesExactTitlePathUsesSkillOverlapTieBreaker(t *
 	insertSimilarCategoryCandidate(t, db, 3, "Platform Engineer", "Backend Engineer", "Engineering", []string{"Ruby"}, now.Add(-2*time.Minute))
 
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Platform Engineer", []string{"Ruby"})
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Platform Engineer", []string{"Ruby"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func TestFindSimilarRemoteCategoriesExactTitleSkipsGenericOneWordWhenSourceHasSp
 	insertSimilarCategoryCandidate(t, db, 2, "Platform Engineer", "Software Engineer", "Engineering", []string{"Ruby"}, now.Add(-time.Minute))
 
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Senior Platform Engineer", []string{"Ruby"})
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Senior Platform Engineer", []string{"Ruby"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +363,7 @@ func TestFindSimilarRemoteCategoriesDoesNotScanBeyondMaxRows(t *testing.T) {
 	insertSimilarCategoryCandidate(t, db, 3001, "Consultant", "Implementation Engineer", "Engineering", nil, now.Add(-3000*time.Second))
 
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Product Implementation Engineer", nil)
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Product Implementation Engineer", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +384,7 @@ func TestFindSimilarRemoteCategoriesConfidenceGateRejectsWeakOverlap(t *testing.
 	insertSimilarCategoryCandidate(t, db, 2, "Finance Manager", "Manager", "Operations", nil, now.Add(-time.Minute))
 
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Quantum Compiler Researcher", nil)
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Quantum Compiler Researcher", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +407,7 @@ func TestFindSimilarRemoteCategoriesDirectMatchWinsOverHigherRecency(t *testing.
 	insertSimilarCategoryCandidate(t, db, 2, "Something Else", "Product Manager", "Product", nil, now.Add(-time.Minute))
 
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Senior Product Manager", nil)
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Senior Product Manager", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +428,7 @@ func TestFindSimilarRemoteCategoriesConfidenceGateAcceptsWithSpecificSignal(t *t
 	insertSimilarCategoryCandidate(t, db, 2, "Engineer", "Engineer", "Engineering", nil, now.Add(-time.Minute))
 
 	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteCategories(context.Background(), "Implementation Engineer", nil)
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Implementation Engineer", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

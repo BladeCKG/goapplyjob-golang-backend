@@ -30,22 +30,37 @@ const (
 )
 
 var seniorityTokens = map[string]struct{}{
-	"senior": {}, "sr": {}, "junior": {}, "jr": {}, "lead": {}, "principal": {}, "staff": {}, "entry": {}, "mid": {}, "expert": {}, "leader": {}, "level": {},
+	"senior": {}, "sr": {}, "junior": {}, "jr": {},
+	"associate": {}, "lead": {}, "principal": {}, "staff": {},
+	"entry": {}, "mid": {}, "midlevel": {}, "expert": {}, "leader": {},
+	"level": {}, "lvl": {},
+	"l1": {}, "l2": {}, "l3": {}, "l4": {}, "l5": {}, "l6": {}, "l7": {}, "l8": {},
 	"ii": {}, "iii": {}, "iv": {}, "v": {}, "vi": {}, "vii": {}, "viii": {}, "ix": {}, "x": {},
 }
 
 var employmentNoiseTokens = map[string]struct{}{
-	"full": {}, "time": {}, "fulltime": {}, "part": {}, "parttime": {}, "contract": {}, "contractor": {}, "temp": {}, "temporary": {}, "intern": {}, "internship": {}, "freelance": {}, "permanent": {},
-	"seasonal": {}, "weekend": {}, "weekends": {}, "night": {}, "evening": {}, "overnight": {}, "urgent": {}, "immediate": {}, "hiring": {}, "opening": {}, "opportunity": {},
+	"full": {}, "time": {}, "fulltime": {}, "part": {}, "parttime": {},
+	"contract": {}, "contractor": {}, "temp": {}, "temporary": {},
+	"intern": {}, "internship": {}, "freelance": {}, "freelancer": {},
+	"permanent": {}, "fixedterm": {}, "hourly": {}, "salaried": {},
+	"apprentice": {}, "apprenticeship": {}, "volunteer": {},
+	"seasonal": {}, "weekend": {}, "weekends": {}, "night": {}, "evening": {}, "overnight": {},
+	"urgent": {}, "immediate": {}, "hiring": {}, "opening": {}, "opportunity": {},
 }
 
 var workModeNoiseTokens = map[string]struct{}{
-	"remote": {}, "hybrid": {}, "onsite": {}, "wfh": {}, "office": {}, "homebased": {}, "telecommute": {}, "telecommuting": {},
+	"remote": {}, "hybrid": {}, "onsite": {}, "wfh": {}, "office": {},
+	"homebased": {}, "telecommute": {}, "telecommuting": {},
+	"telework": {}, "teleworking": {}, "distributed": {},
+	"remotefirst": {}, "remoteonly": {}, "inoffice": {},
 }
 
 var genericCategoryMatchTokens = map[string]struct{}{
-	"and": {}, "accountant": {}, "account": {}, "administrator": {}, "engineer": {}, "developer": {}, "manager": {}, "specialist": {}, "consultant": {}, "analyst": {}, "architect": {}, "designer": {}, "director": {}, "producer": {}, "writer": {}, "support": {}, "operations": {}, "web": {}, "remote": {}, "lead": {}, "staff": {},
-	"executive": {}, "sales": {}, "marketing": {}, "product": {}, "business": {}, "customer": {}, "success": {}, "representative": {}, "technical": {}, "project": {}, "program": {}, "data": {}, "software": {}, "solutions": {}, "content": {}, "security": {},
+	"and":      {},
+	"engineer": {}, "developer": {}, "manager": {}, "specialist": {},
+	"consultant": {}, "analyst": {}, "architect": {}, "designer": {},
+	"director": {}, "representative": {}, "support": {}, "technical": {},
+	"solutions": {}, "administrator": {}, "producer": {}, "writer": {},
 }
 
 var countryAliases = map[string]string{
@@ -342,7 +357,7 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, ro
 		}
 	}
 	if categorizedTitle == "" {
-		inferredTitle, inferredFunction, err := s.findSimilarRemoteCategories(ctx, roleTitle, normalizedTechStack)
+		inferredTitle, inferredFunction, err := s.findSimilarRemoteRoekctshipCategories(ctx, roleTitle, normalizedTechStack)
 		if err != nil {
 			return "", "", nil, err
 		}
@@ -473,8 +488,10 @@ func shouldSkipRoleToken(token string) bool {
 	return false
 }
 
+var similarityTokenSplitRegexp = regexp.MustCompile(`[^a-z0-9]+`)
+
 func tokenizeRoleTitleForSimilarity(roleTitle string) map[string]struct{} {
-	rawTokens := regexp.MustCompile(`[^a-z0-9]+`).Split(normalizeTextForMatching(roleTitle), -1)
+	rawTokens := similarityTokenSplitRegexp.Split(normalizeTextForMatching(roleTitle), -1)
 	out := map[string]struct{}{}
 	for _, token := range rawTokens {
 		if len(token) <= 1 {
@@ -489,7 +506,7 @@ func tokenizeRoleTitleForSimilarity(roleTitle string) map[string]struct{} {
 }
 
 func tokenizeTextForSequence(value string) []string {
-	rawTokens := regexp.MustCompile(`[^a-z0-9]+`).Split(normalizeTextForMatching(value), -1)
+	rawTokens := similarityTokenSplitRegexp.Split(normalizeTextForMatching(value), -1)
 	out := make([]string, 0, len(rawTokens))
 	for _, token := range rawTokens {
 		if len(token) <= 1 {
@@ -558,24 +575,13 @@ func orderedTokenMatchCount(sourceTokens, targetTokens []string) int {
 }
 
 func orderedTokens(value string) []string {
-	raw := regexp.MustCompile(`[^a-z0-9]+`).Split(normalizeTextForMatching(value), -1)
-	out := make([]string, 0, len(raw))
-	for _, token := range raw {
-		if len(token) <= 1 {
-			continue
-		}
-		if shouldSkipRoleToken(token) {
-			continue
-		}
-		out = append(out, token)
-	}
-	return out
+	return tokenizeTextForSequence(value)
 }
 
 func tokenizeTechStackForSimilarity(values []string) map[string]struct{} {
 	tokens := map[string]struct{}{}
 	for _, value := range values {
-		raw := regexp.MustCompile(`[^a-z0-9]+`).Split(strings.ToLower(value), -1)
+		raw := similarityTokenSplitRegexp.Split(strings.ToLower(strings.TrimSpace(value)), -1)
 		for _, token := range raw {
 			if token != "" && len(token) > 1 {
 				tokens[token] = struct{}{}
@@ -583,6 +589,54 @@ func tokenizeTechStackForSimilarity(values []string) map[string]struct{} {
 		}
 	}
 	return tokens
+}
+
+func normalizeSkillValuesForQuery(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		normalized := strings.ToLower(strings.TrimSpace(normalizeTechStackValue(value)))
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, normalized)
+	}
+	return out
+}
+
+func buildSimilarityQueryTokens(sourceSequenceTokens []string) []string {
+	specific := make([]string, 0, len(sourceSequenceTokens))
+	generic := make([]string, 0, len(sourceSequenceTokens))
+	seen := make(map[string]struct{}, len(sourceSequenceTokens))
+
+	for _, token := range sourceSequenceTokens {
+		if token == "" {
+			continue
+		}
+		if _, ok := seen[token]; ok {
+			continue
+		}
+		seen[token] = struct{}{}
+
+		if isGenericCategoryToken(token) {
+			generic = append(generic, token)
+		} else {
+			specific = append(specific, token)
+		}
+	}
+
+	sort.SliceStable(specific, func(i, j int) bool { return len(specific[i]) > len(specific[j]) })
+	sort.SliceStable(generic, func(i, j int) bool { return len(generic[i]) > len(generic[j]) })
+
+	out := append(specific, generic...)
+	if len(out) > similarCategoryQueryTopN {
+		out = out[:similarCategoryQueryTopN]
+	}
+	return out
 }
 
 func tokenSpecificityWeight(token string) float64 {
@@ -630,82 +684,80 @@ func setSubsetOf(left, right map[string]struct{}) bool {
 	return true
 }
 
-func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle string, sourceTechStack []string) (string, string, error) {
+func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, roleTitle string, sourceTechStack []string) (string, string, error) {
 	sourceTokens := tokenizeRoleTitleForSimilarity(roleTitle)
 	sourceSequenceTokens := tokenizeTextForSequence(roleTitle)
 	sourceNormalizedTitle := normalizeRoleTitleForExactMatch(roleTitle)
-	sourceSkillValues := make([]string, 0, len(sourceTechStack))
-	seenSkillValues := map[string]struct{}{}
-	for _, value := range sourceTechStack {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
-			continue
-		}
-		normalizedKey := strings.ToLower(trimmed)
-		if _, exists := seenSkillValues[normalizedKey]; exists {
-			continue
-		}
-		seenSkillValues[normalizedKey] = struct{}{}
-		sourceSkillValues = append(sourceSkillValues, trimmed)
-	}
-	sourceSkillTokens := tokenizeTechStackForSimilarity(sourceTechStack)
+	sourceSkillValues := normalizeSkillValuesForQuery(sourceTechStack)
+	sourceSkillTokens := tokenizeTechStackForSimilarity(sourceSkillValues)
 
 	if len(sourceTokens) == 0 && len(sourceSequenceTokens) == 0 && len(sourceSkillTokens) == 0 {
 		return "", "", nil
 	}
-	sourceTokenSet := map[string]struct{}{}
+
+	sourceTokenSet := make(map[string]struct{}, len(sourceSequenceTokens))
 	for _, token := range sourceSequenceTokens {
 		sourceTokenSet[token] = struct{}{}
 	}
+
 	sourceHasSpecificTokens := false
 	sourceSpecificTokens := map[string]struct{}{}
 	for token := range sourceTokens {
-		if !isGenericCategoryToken(token) {
-			sourceHasSpecificTokens = true
-			sourceSpecificTokens[token] = struct{}{}
+		if isGenericCategoryToken(token) {
+			continue
 		}
+		sourceHasSpecificTokens = true
+		sourceSpecificTokens[token] = struct{}{}
 	}
-	sourceTokenWeights := map[string]float64{}
+
+	sourceTokenWeights := make(map[string]float64, len(sourceTokens))
 	for token := range sourceTokens {
 		sourceTokenWeights[token] = tokenSpecificityWeight(token)
 	}
-	sourceSpecificWeights := map[string]float64{}
+
+	sourceSpecificWeights := make(map[string]float64, len(sourceSpecificTokens))
 	for token := range sourceSpecificTokens {
 		sourceSpecificWeights[token] = tokenSpecificityWeight(token)
 	}
 
-	// Fast-path exact role-title match.
+	// Fast exact-title path.
 	normalizedInputTitle := strings.ToLower(strings.TrimSpace(roleTitle))
 	if normalizedInputTitle != "" {
 		query := `SELECT p.role_title, p.categorized_job_title, p.categorized_job_function, COALESCE(p.tech_stack::text, '[]')
 			FROM parsed_jobs p
 			JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
 			WHERE r.source = ?
+			  AND p.role_title IS NOT NULL
 			  AND p.categorized_job_title IS NOT NULL
 			  AND p.categorized_job_function IS NOT NULL
-			  AND LOWER(p.role_title) = ?`
-		args := []any{sourceRemoteRocketship}
-		args = append(args, normalizedInputTitle)
+			  AND LOWER(TRIM(p.role_title)) = ?`
+		args := []any{sourceRemoteRocketship, normalizedInputTitle}
+
 		if len(sourceSkillValues) > 0 {
 			query += ` AND EXISTS (
 				SELECT 1
 				FROM jsonb_array_elements_text(COALESCE(p.tech_stack, '[]'::jsonb)) AS skill
-				WHERE skill = ANY(?::text[])
+				WHERE LOWER(skill) = ANY(?::text[])
 			)`
 			args = append(args, sourceSkillValues)
 		}
+
 		query += ` ORDER BY p.updated_at DESC, p.id DESC LIMIT 100`
+
 		rows, err := s.DB.SQL.QueryContext(ctx, query, args...)
 		if err != nil {
 			return "", "", err
 		}
 		defer rows.Close()
-		bestRankSet := false
-		bestSkillOverlapCount := 0
-		bestSkillOverlapRatio := 0.0
-		bestCategoryOverlap := 0
-		bestTitle := ""
-		bestFunction := ""
+
+		bestExactSet := false
+		bestExactTitle := ""
+		bestExactFunction := ""
+		bestExactSkillOverlapCount := -1
+		bestExactSkillOverlapRatio := -1.0
+		bestExactCategoryOverlap := -1
+		bestExactSequence := -1
+
 		for rows.Next() {
 			var candidateRoleTitle, candidateTitle sql.NullString
 			var candidateFunction sql.NullString
@@ -713,11 +765,14 @@ func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle str
 			if err := rows.Scan(&candidateRoleTitle, &candidateTitle, &candidateFunction, &candidateTechStackRaw); err != nil {
 				return "", "", err
 			}
+
 			titleTokens := tokenizeTextForSequence(candidateTitle.String)
 			titleTokenSet := map[string]struct{}{}
 			for _, token := range titleTokens {
 				titleTokenSet[token] = struct{}{}
 			}
+
+			// Avoid collapsing a specific source title onto a single generic bucket like "Engineer".
 			skipCandidate := false
 			if sourceHasSpecificTokens && len(titleTokenSet) == 1 {
 				for token := range titleTokenSet {
@@ -730,12 +785,7 @@ func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle str
 			if skipCandidate {
 				continue
 			}
-			candidateSkillTokens := tokenizeTechStackForSimilarity(parseStringJSONArray(candidateTechStackRaw.String))
-			skillOverlapCount := setIntersectionCount(sourceSkillTokens, candidateSkillTokens)
-			skillOverlapRatio := 0.0
-			if len(sourceSkillTokens) > 0 {
-				skillOverlapRatio = float64(skillOverlapCount) / float64(len(sourceSkillTokens))
-			}
+
 			functionTokens := tokenizeTextForSequence(candidateFunction.String)
 			combinedCategorySet := map[string]struct{}{}
 			for _, token := range titleTokens {
@@ -744,155 +794,182 @@ func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle str
 			for _, token := range functionTokens {
 				combinedCategorySet[token] = struct{}{}
 			}
+
+			candidateSkillTokens := tokenizeTechStackForSimilarity(parseStringJSONArray(candidateTechStackRaw.String))
+			skillOverlapCount := setIntersectionCount(sourceSkillTokens, candidateSkillTokens)
+			skillOverlapRatio := 0.0
+			if len(sourceSkillTokens) > 0 {
+				skillOverlapRatio = float64(skillOverlapCount) / float64(len(sourceSkillTokens))
+			}
+
 			categoryOverlapCount := setIntersectionCount(sourceTokens, combinedCategorySet)
-			if !bestRankSet ||
-				skillOverlapCount > bestSkillOverlapCount ||
-				(skillOverlapCount == bestSkillOverlapCount && skillOverlapRatio > bestSkillOverlapRatio) ||
-				(skillOverlapCount == bestSkillOverlapCount && skillOverlapRatio == bestSkillOverlapRatio && categoryOverlapCount > bestCategoryOverlap) {
-				bestRankSet = true
-				bestSkillOverlapCount = skillOverlapCount
-				bestSkillOverlapRatio = skillOverlapRatio
-				bestCategoryOverlap = categoryOverlapCount
-				bestTitle = candidateTitle.String
-				bestFunction = candidateFunction.String
+			sequenceCount := orderedTokenMatchCount(sourceSequenceTokens, titleTokens)
+			if functionSeq := orderedTokenMatchCount(sourceSequenceTokens, functionTokens); functionSeq > sequenceCount {
+				sequenceCount = functionSeq
+			}
+
+			if !bestExactSet ||
+				skillOverlapCount > bestExactSkillOverlapCount ||
+				(skillOverlapCount == bestExactSkillOverlapCount && skillOverlapRatio > bestExactSkillOverlapRatio) ||
+				(skillOverlapCount == bestExactSkillOverlapCount && skillOverlapRatio == bestExactSkillOverlapRatio && categoryOverlapCount > bestExactCategoryOverlap) ||
+				(skillOverlapCount == bestExactSkillOverlapCount && skillOverlapRatio == bestExactSkillOverlapRatio && categoryOverlapCount == bestExactCategoryOverlap && sequenceCount > bestExactSequence) {
+				bestExactSet = true
+				bestExactTitle = candidateTitle.String
+				bestExactFunction = candidateFunction.String
+				bestExactSkillOverlapCount = skillOverlapCount
+				bestExactSkillOverlapRatio = skillOverlapRatio
+				bestExactCategoryOverlap = categoryOverlapCount
+				bestExactSequence = sequenceCount
 			}
 		}
+
 		if err := rows.Err(); err != nil {
 			return "", "", err
 		}
-		if bestTitle != "" {
-			return bestTitle, bestFunction, nil
+		if bestExactTitle != "" {
+			return bestExactTitle, bestExactFunction, nil
 		}
 	}
 
-	seenTokens := map[string]struct{}{}
-	prioritizedTokens := make([]string, 0, len(sourceSequenceTokens))
-	for _, token := range sourceSequenceTokens {
-		if _, seen := seenTokens[token]; seen {
-			continue
-		}
-		seenTokens[token] = struct{}{}
-		if !isGenericCategoryToken(token) {
-			prioritizedTokens = append(prioritizedTokens, token)
-		}
-	}
-	if len(prioritizedTokens) == 0 {
-		for _, token := range sourceSequenceTokens {
-			if _, seen := seenTokens[token]; seen {
-				continue
-			}
-			seenTokens[token] = struct{}{}
-			prioritizedTokens = append(prioritizedTokens, token)
-		}
-	}
-	sort.SliceStable(prioritizedTokens, func(i, j int) bool {
-		return len(prioritizedTokens[i]) > len(prioritizedTokens[j])
-	})
-	queryTokens := append([]string{}, prioritizedTokens[:min(len(prioritizedTokens), similarCategoryQueryTopN)]...)
-	if len(queryTokens) < similarCategoryQueryTopN {
-		allUnique := make([]string, 0, len(sourceSequenceTokens))
-		seen := map[string]struct{}{}
-		for _, token := range sourceSequenceTokens {
-			if _, ok := seen[token]; ok {
-				continue
-			}
-			seen[token] = struct{}{}
-			allUnique = append(allUnique, token)
-		}
-		sort.SliceStable(allUnique, func(i, j int) bool { return len(allUnique[i]) > len(allUnique[j]) })
-		for _, token := range allUnique {
-			exists := false
-			for _, current := range queryTokens {
-				if current == token {
-					exists = true
-					break
-				}
-			}
-			if exists {
-				continue
-			}
-			queryTokens = append(queryTokens, token)
-			if len(queryTokens) >= similarCategoryQueryTopN {
-				break
-			}
-		}
-	}
+	queryTokens := buildSimilarityQueryTokens(sourceSequenceTokens)
 
 	type matchRank struct {
-		nonGenericCategoryPreference int
-		exactNormalizedTitleMatch    int
-		weightedSpecificTokenHits    float64
-		weightedCategoryOverlap      float64
-		weightedRoleOverlap          float64
-		combinedSpecificTokenHits    int
-		roleSpecificTokenHits        int
-		categorySpecificTokenHits    int
-		combinedCategoryOverlap      int
-		categoryOverlapCount         int
-		overlapCount                 int
-		overlapRatio                 float64
-		totalSequenceMatchCount      int
-		categoryTokenCount           int
-		functionTokenCount           int
-		functionOverlapCount         int
-		skillOverlapCount            int
-		skillOverlapRatio            float64
-		specificity                  int
-		roleJaccard                  float64
+		exactNormalizedTitleMatch     int
+		nonGenericCategoryPreference  int
+		weightedSpecificTokenHits     float64
+		weightedCategoryOverlap       float64
+		weightedRoleOverlap           float64
+		combinedSpecificTokenHits     int
+		combinedCategoryOverlap       int
+		categoryOverlapCount          int
+		functionOverlapCount          int
+		overlapCount                  int
+		overlapRatio                  float64
+		totalSequenceMatchCount       int
+		skillOverlapCount             int
+		skillOverlapRatio             float64
+		roleJaccard                   float64
+		genericOneWordCategoryPenalty int
 	}
+
 	rankGreater := func(left, right matchRank) bool {
 		switch {
-		case left.nonGenericCategoryPreference != right.nonGenericCategoryPreference:
-			return left.nonGenericCategoryPreference > right.nonGenericCategoryPreference
 		case left.exactNormalizedTitleMatch != right.exactNormalizedTitleMatch:
 			return left.exactNormalizedTitleMatch > right.exactNormalizedTitleMatch
 		case left.weightedSpecificTokenHits != right.weightedSpecificTokenHits:
 			return left.weightedSpecificTokenHits > right.weightedSpecificTokenHits
+		case left.combinedSpecificTokenHits != right.combinedSpecificTokenHits:
+			return left.combinedSpecificTokenHits > right.combinedSpecificTokenHits
 		case left.weightedCategoryOverlap != right.weightedCategoryOverlap:
 			return left.weightedCategoryOverlap > right.weightedCategoryOverlap
 		case left.weightedRoleOverlap != right.weightedRoleOverlap:
 			return left.weightedRoleOverlap > right.weightedRoleOverlap
-		case left.combinedSpecificTokenHits != right.combinedSpecificTokenHits:
-			return left.combinedSpecificTokenHits > right.combinedSpecificTokenHits
-		case left.roleSpecificTokenHits != right.roleSpecificTokenHits:
-			return left.roleSpecificTokenHits > right.roleSpecificTokenHits
-		case left.categorySpecificTokenHits != right.categorySpecificTokenHits:
-			return left.categorySpecificTokenHits > right.categorySpecificTokenHits
 		case left.combinedCategoryOverlap != right.combinedCategoryOverlap:
 			return left.combinedCategoryOverlap > right.combinedCategoryOverlap
 		case left.categoryOverlapCount != right.categoryOverlapCount:
 			return left.categoryOverlapCount > right.categoryOverlapCount
-		case left.overlapCount != right.overlapCount:
-			return left.overlapCount > right.overlapCount
-		case left.overlapRatio != right.overlapRatio:
-			return left.overlapRatio > right.overlapRatio
-		case left.totalSequenceMatchCount != right.totalSequenceMatchCount:
-			return left.totalSequenceMatchCount > right.totalSequenceMatchCount
-		case left.categoryTokenCount != right.categoryTokenCount:
-			return left.categoryTokenCount > right.categoryTokenCount
-		case left.functionTokenCount != right.functionTokenCount:
-			return left.functionTokenCount > right.functionTokenCount
-		case left.functionOverlapCount != right.functionOverlapCount:
-			return left.functionOverlapCount > right.functionOverlapCount
 		case left.skillOverlapCount != right.skillOverlapCount:
 			return left.skillOverlapCount > right.skillOverlapCount
 		case left.skillOverlapRatio != right.skillOverlapRatio:
 			return left.skillOverlapRatio > right.skillOverlapRatio
-		case left.specificity != right.specificity:
-			return left.specificity > right.specificity
+		case left.totalSequenceMatchCount != right.totalSequenceMatchCount:
+			return left.totalSequenceMatchCount > right.totalSequenceMatchCount
+		case left.overlapCount != right.overlapCount:
+			return left.overlapCount > right.overlapCount
+		case left.overlapRatio != right.overlapRatio:
+			return left.overlapRatio > right.overlapRatio
+		case left.functionOverlapCount != right.functionOverlapCount:
+			return left.functionOverlapCount > right.functionOverlapCount
+		case left.nonGenericCategoryPreference != right.nonGenericCategoryPreference:
+			return left.nonGenericCategoryPreference > right.nonGenericCategoryPreference
+		case left.genericOneWordCategoryPenalty != right.genericOneWordCategoryPenalty:
+			return left.genericOneWordCategoryPenalty < right.genericOneWordCategoryPenalty
 		default:
 			return left.roleJaccard > right.roleJaccard
 		}
 	}
 
+	isConfidentMatch := func(rank matchRank) bool {
+		requiredOverlap := 2
+		if len(sourceTokens) <= 1 {
+			requiredOverlap = 1
+		}
+
+		hasTechSignal := len(sourceSkillTokens) > 0 &&
+			(rank.skillOverlapCount >= 2 || (rank.skillOverlapCount >= 1 && rank.skillOverlapRatio >= 0.25))
+
+		minSpecificHits := 0
+		minWeightedSpecific := 0.0
+		if len(sourceSpecificTokens) > 0 {
+			minSpecificHits = 1
+			minWeightedSpecific = 0.35
+		}
+		hasSpecificSignal := rank.combinedSpecificTokenHits >= minSpecificHits ||
+			rank.weightedSpecificTokenHits >= minWeightedSpecific
+
+		hasCategorySignal := rank.categoryOverlapCount >= 2 ||
+			(len(sourceTokens) >= 2 && rank.categoryOverlapCount >= 1 && hasSpecificSignal)
+
+		requiredSequenceMatches := 2
+		if len(sourceSequenceTokens) >= 4 {
+			requiredSequenceMatches = 3
+		}
+		hasSequenceSignal := rank.totalSequenceMatchCount >= requiredSequenceMatches
+
+		hasWeightedOverlapSignal := sourceHasSpecificTokens &&
+			(rank.weightedCategoryOverlap+rank.weightedRoleOverlap) >= 0.5
+
+		if len(sourceTokens) <= 1 {
+			return rank.exactNormalizedTitleMatch == 1 ||
+				hasTechSignal ||
+				(hasSequenceSignal && rank.categoryOverlapCount >= 1)
+		}
+
+		hasOverlapSignal := rank.overlapCount >= requiredOverlap && rank.overlapRatio >= 0.35
+
+		return rank.exactNormalizedTitleMatch == 1 ||
+			hasTechSignal ||
+			hasCategorySignal ||
+			hasSequenceSignal ||
+			hasSpecificSignal ||
+			hasWeightedOverlapSignal ||
+			hasOverlapSignal
+	}
+
+	hasAnySignal := func(rank matchRank) bool {
+		return rank.exactNormalizedTitleMatch == 1 ||
+			rank.skillOverlapCount > 0 ||
+			rank.categoryOverlapCount > 0 ||
+			rank.functionOverlapCount > 0 ||
+			rank.overlapCount > 0 ||
+			rank.totalSequenceMatchCount > 0 ||
+			rank.weightedSpecificTokenHits > 0 ||
+			rank.weightedCategoryOverlap > 0 ||
+			rank.weightedRoleOverlap > 0
+	}
+
 	directMatchTitle := ""
 	directMatchFunction := ""
+	directMatchCandidateRoleTitle := ""
 	directMatchScore := -1
+
 	bestTitle := ""
 	bestFunction := ""
 	bestCandidateRoleTitle := ""
 	bestRankSet := false
 	var bestRank matchRank
+
+	softFallbackTitle := ""
+	softFallbackFunction := ""
+	softFallbackCandidateRoleTitle := ""
+	softFallbackSet := false
+	var softFallbackRank matchRank
+
+	anyCandidateTitle := ""
+	anyCandidateFunction := ""
+	anyCandidateRoleTitle := ""
+	anyCandidateSet := false
+	var anyCandidateRank matchRank
 
 	buildQuery := func(applySkillFilter bool, offset int) (string, []any) {
 		query := `SELECT p.role_title, p.categorized_job_title, p.categorized_job_function, COALESCE(p.tech_stack::text, '[]')
@@ -902,6 +979,7 @@ func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle str
 			  AND p.role_title IS NOT NULL
 			  AND p.categorized_job_title IS NOT NULL`
 		args := []any{sourceRemoteRocketship}
+
 		if len(queryTokens) > 0 {
 			query += ` AND EXISTS (
 				SELECT 1
@@ -912,64 +990,86 @@ func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle str
 			)`
 			args = append(args, queryTokens)
 		}
+
 		if applySkillFilter && len(sourceSkillValues) > 0 {
 			query += ` AND EXISTS (
 				SELECT 1
 				FROM jsonb_array_elements_text(COALESCE(p.tech_stack, '[]'::jsonb)) AS skill
-				WHERE skill = ANY(?::text[])
+				WHERE LOWER(skill) = ANY(?::text[])
 			)`
 			args = append(args, sourceSkillValues)
 		}
+
 		query += ` ORDER BY p.updated_at DESC, p.id DESC OFFSET ? LIMIT ?`
 		args = append(args, offset, similarCategoryScanBatch)
 		return query, args
 	}
 
-	for _, applySkillFilter := range []bool{true, false} {
-		if applySkillFilter && len(sourceSkillValues) == 0 {
-			continue
-		}
+	runPass := func(applySkillFilter bool) error {
 		offset := 0
 		scannedRows := 0
+
 		for {
 			query, args := buildQuery(applySkillFilter, offset)
 			rows, err := s.DB.SQL.QueryContext(ctx, query, args...)
 			if err != nil {
-				return "", "", err
+				return err
 			}
+
 			rowCount := 0
 			for rows.Next() {
 				rowCount++
 				scannedRows++
+
 				var candidateRoleTitle, candidateTitle, candidateFunction, candidateTechStackRaw sql.NullString
 				if err := rows.Scan(&candidateRoleTitle, &candidateTitle, &candidateFunction, &candidateTechStackRaw); err != nil {
 					rows.Close()
-					return "", "", err
+					return err
 				}
+
 				roleTokens := tokenizeTextForSequence(candidateRoleTitle.String)
 				candidateNormalizedTitle := normalizeRoleTitleForExactMatch(candidateRoleTitle.String)
 				titleTokens := tokenizeTextForSequence(candidateTitle.String)
 				functionTokens := tokenizeTextForSequence(candidateFunction.String)
 
-				if len(titleTokens) > 0 && len(functionTokens) > 0 {
-					titleTokenSet := map[string]struct{}{}
-					for _, token := range titleTokens {
-						titleTokenSet[token] = struct{}{}
-					}
-					functionTokenSet := map[string]struct{}{}
-					for _, token := range functionTokens {
-						functionTokenSet[token] = struct{}{}
-					}
-					isSpecificDirectTitle := len(titleTokenSet) >= 2
-					if isSpecificDirectTitle && setSubsetOf(titleTokenSet, sourceTokenSet) && setSubsetOf(functionTokenSet, sourceTokenSet) {
-						directScore := len(titleTokenSet) + len(functionTokenSet) +
-							orderedTokenMatchCount(sourceSequenceTokens, titleTokens) +
-							orderedTokenMatchCount(sourceSequenceTokens, functionTokens)
-						if directScore > directMatchScore {
-							directMatchScore = directScore
-							directMatchTitle = candidateTitle.String
-							directMatchFunction = candidateFunction.String
+				titleTokenSet := map[string]struct{}{}
+				for _, token := range titleTokens {
+					titleTokenSet[token] = struct{}{}
+				}
+
+				functionTokenSet := map[string]struct{}{}
+				for _, token := range functionTokens {
+					functionTokenSet[token] = struct{}{}
+				}
+
+				candidateSkillTokens := tokenizeTechStackForSimilarity(parseStringJSONArray(candidateTechStackRaw.String))
+				skillOverlapCount := setIntersectionCount(sourceSkillTokens, candidateSkillTokens)
+				skillOverlapRatio := 0.0
+				if len(sourceSkillTokens) > 0 {
+					skillOverlapRatio = float64(skillOverlapCount) / float64(len(sourceSkillTokens))
+				}
+
+				isGenericOneWordCategory := false
+				if len(titleTokenSet) == 1 {
+					for token := range titleTokenSet {
+						if isGenericCategoryToken(token) {
+							isGenericOneWordCategory = true
 						}
+					}
+				}
+
+				if !isGenericOneWordCategory &&
+					setSubsetOf(titleTokenSet, sourceTokenSet) &&
+					(len(functionTokenSet) == 0 || setSubsetOf(functionTokenSet, sourceTokenSet)) {
+					directScore := len(titleTokenSet)*4 + len(functionTokenSet)*2 + skillOverlapCount*4 +
+						orderedTokenMatchCount(sourceSequenceTokens, titleTokens) +
+						orderedTokenMatchCount(sourceSequenceTokens, functionTokens)
+
+					if directScore > directMatchScore {
+						directMatchScore = directScore
+						directMatchTitle = candidateTitle.String
+						directMatchFunction = candidateFunction.String
+						directMatchCandidateRoleTitle = candidateRoleTitle.String
 					}
 				}
 
@@ -979,36 +1079,16 @@ func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle str
 				if len(sourceTokens) > 0 {
 					overlapRatio = float64(overlapCount) / float64(len(sourceTokens))
 				}
+
 				categoryTokenSet := map[string]struct{}{}
 				for _, token := range titleTokens {
 					categoryTokenSet[token] = struct{}{}
 				}
-				functionTokenSet := map[string]struct{}{}
-				for _, token := range functionTokens {
-					functionTokenSet[token] = struct{}{}
-				}
+
 				categoryOverlapCount := setIntersectionCount(sourceTokens, categoryTokenSet)
 				functionOverlapCount := setIntersectionCount(sourceTokens, functionTokenSet)
-				matchTokens := map[string]struct{}{}
-				for token := range candidateTokens {
-					matchTokens[token] = struct{}{}
-				}
-				for _, token := range titleTokens {
-					matchTokens[token] = struct{}{}
-				}
-				for _, token := range functionTokens {
-					matchTokens[token] = struct{}{}
-				}
 				roleJaccard := jaccardSimilarity(sourceTokens, candidateTokens)
 
-				candidateSkillTokens := tokenizeTechStackForSimilarity(parseStringJSONArray(candidateTechStackRaw.String))
-				skillOverlapCount := setIntersectionCount(sourceSkillTokens, candidateSkillTokens)
-				skillOverlapRatio := 0.0
-				if len(sourceSkillTokens) > 0 {
-					skillOverlapRatio = float64(skillOverlapCount) / float64(len(sourceSkillTokens))
-				}
-				categoryTokenCount := len(titleTokens)
-				functionTokenCount := len(functionTokens)
 				combinedCategorySet := map[string]struct{}{}
 				for token := range categoryTokenSet {
 					combinedCategorySet[token] = struct{}{}
@@ -1017,24 +1097,26 @@ func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle str
 					combinedCategorySet[token] = struct{}{}
 				}
 				combinedCategoryOverlap := setIntersectionCount(sourceTokens, combinedCategorySet)
+
 				roleTokenSet := map[string]struct{}{}
 				for _, token := range roleTokens {
 					roleTokenSet[token] = struct{}{}
 				}
+
 				weightedRoleOverlap := 0.0
 				for token := range sourceTokens {
 					if _, ok := roleTokenSet[token]; ok {
 						weightedRoleOverlap += sourceTokenWeights[token]
 					}
 				}
+
 				weightedCategoryOverlap := 0.0
 				for token := range sourceTokens {
 					if _, ok := combinedCategorySet[token]; ok {
 						weightedCategoryOverlap += sourceTokenWeights[token]
 					}
 				}
-				roleSpecificTokenHits := setIntersectionCount(sourceSpecificTokens, roleTokenSet)
-				categorySpecificTokenHits := setIntersectionCount(sourceSpecificTokens, combinedCategorySet)
+
 				roleCategoryFunctionSet := map[string]struct{}{}
 				for token := range roleTokenSet {
 					roleCategoryFunctionSet[token] = struct{}{}
@@ -1042,58 +1124,74 @@ func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle str
 				for token := range combinedCategorySet {
 					roleCategoryFunctionSet[token] = struct{}{}
 				}
+
 				combinedSpecificTokenHits := setIntersectionCount(sourceSpecificTokens, roleCategoryFunctionSet)
+
 				weightedSpecificTokenHits := 0.0
 				for token := range sourceSpecificTokens {
 					if _, ok := roleCategoryFunctionSet[token]; ok {
 						weightedSpecificTokenHits += sourceSpecificWeights[token]
 					}
 				}
-				totalSequenceMatchCount := max(
-					orderedTokenMatchCount(sourceSequenceTokens, roleTokens),
-					max(
-						orderedTokenMatchCount(sourceSequenceTokens, titleTokens),
-						orderedTokenMatchCount(sourceSequenceTokens, functionTokens),
-					),
-				)
-				isGenericOneWordCategory := false
-				if categoryTokenCount == 1 {
-					for token := range categoryTokenSet {
-						if isGenericCategoryToken(token) {
-							isGenericOneWordCategory = true
-						}
-					}
+
+				totalSequenceMatchCount := orderedTokenMatchCount(sourceSequenceTokens, roleTokens)
+				if score := orderedTokenMatchCount(sourceSequenceTokens, titleTokens); score > totalSequenceMatchCount {
+					totalSequenceMatchCount = score
 				}
+				if score := orderedTokenMatchCount(sourceSequenceTokens, functionTokens); score > totalSequenceMatchCount {
+					totalSequenceMatchCount = score
+				}
+
 				nonGenericCategoryPreference := 0
 				if sourceHasSpecificTokens && !isGenericOneWordCategory {
 					nonGenericCategoryPreference = 1
 				}
+
 				exactNormalizedTitleMatch := 0
 				if sourceNormalizedTitle != "" && sourceNormalizedTitle == candidateNormalizedTitle {
 					exactNormalizedTitleMatch = 1
 				}
-				rank := matchRank{
-					nonGenericCategoryPreference: nonGenericCategoryPreference,
-					exactNormalizedTitleMatch:    exactNormalizedTitleMatch,
-					weightedSpecificTokenHits:    weightedSpecificTokenHits,
-					weightedCategoryOverlap:      weightedCategoryOverlap,
-					weightedRoleOverlap:          weightedRoleOverlap,
-					combinedSpecificTokenHits:    combinedSpecificTokenHits,
-					roleSpecificTokenHits:        roleSpecificTokenHits,
-					categorySpecificTokenHits:    categorySpecificTokenHits,
-					combinedCategoryOverlap:      combinedCategoryOverlap,
-					categoryOverlapCount:         categoryOverlapCount,
-					overlapCount:                 overlapCount,
-					overlapRatio:                 overlapRatio,
-					totalSequenceMatchCount:      totalSequenceMatchCount,
-					categoryTokenCount:           categoryTokenCount,
-					functionTokenCount:           functionTokenCount,
-					functionOverlapCount:         functionOverlapCount,
-					skillOverlapCount:            skillOverlapCount,
-					skillOverlapRatio:            skillOverlapRatio,
-					specificity:                  len(matchTokens),
-					roleJaccard:                  roleJaccard,
+
+				genericOneWordCategoryPenalty := 0
+				if isGenericOneWordCategory {
+					genericOneWordCategoryPenalty = 1
 				}
+
+				rank := matchRank{
+					exactNormalizedTitleMatch:     exactNormalizedTitleMatch,
+					nonGenericCategoryPreference:  nonGenericCategoryPreference,
+					weightedSpecificTokenHits:     weightedSpecificTokenHits,
+					weightedCategoryOverlap:       weightedCategoryOverlap,
+					weightedRoleOverlap:           weightedRoleOverlap,
+					combinedSpecificTokenHits:     combinedSpecificTokenHits,
+					combinedCategoryOverlap:       combinedCategoryOverlap,
+					categoryOverlapCount:          categoryOverlapCount,
+					functionOverlapCount:          functionOverlapCount,
+					overlapCount:                  overlapCount,
+					overlapRatio:                  overlapRatio,
+					totalSequenceMatchCount:       totalSequenceMatchCount,
+					skillOverlapCount:             skillOverlapCount,
+					skillOverlapRatio:             skillOverlapRatio,
+					roleJaccard:                   roleJaccard,
+					genericOneWordCategoryPenalty: genericOneWordCategoryPenalty,
+				}
+
+				if !anyCandidateSet || rankGreater(rank, anyCandidateRank) {
+					anyCandidateSet = true
+					anyCandidateRank = rank
+					anyCandidateTitle = candidateTitle.String
+					anyCandidateFunction = candidateFunction.String
+					anyCandidateRoleTitle = candidateRoleTitle.String
+				}
+
+				if hasAnySignal(rank) && (!softFallbackSet || rankGreater(rank, softFallbackRank)) {
+					softFallbackSet = true
+					softFallbackRank = rank
+					softFallbackTitle = candidateTitle.String
+					softFallbackFunction = candidateFunction.String
+					softFallbackCandidateRoleTitle = candidateRoleTitle.String
+				}
+
 				if !bestRankSet || rankGreater(rank, bestRank) {
 					bestRankSet = true
 					bestRank = rank
@@ -1102,21 +1200,31 @@ func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle str
 					bestCandidateRoleTitle = candidateRoleTitle.String
 				}
 			}
+
 			if err := rows.Err(); err != nil {
 				rows.Close()
-				return "", "", err
+				return err
 			}
 			rows.Close()
-			if rowCount == 0 {
+
+			if rowCount == 0 || scannedRows >= similarCategoryMaxScan {
 				break
 			}
 			offset += rowCount
-			if scannedRows >= similarCategoryMaxScan {
-				break
-			}
 		}
-		if bestRankSet || !applySkillFilter {
-			break
+
+		return nil
+	}
+
+	if len(sourceSkillValues) > 0 {
+		if err := runPass(true); err != nil {
+			return "", "", err
+		}
+	}
+
+	if directMatchTitle == "" && (!bestRankSet || !isConfidentMatch(bestRank)) {
+		if err := runPass(false); err != nil {
+			return "", "", err
 		}
 	}
 
@@ -1124,46 +1232,39 @@ func (s *Service) findSimilarRemoteCategories(ctx context.Context, roleTitle str
 		log.Printf(
 			"similar-category direct_match role_title=%s candidate_role_title=%s",
 			roleTitle,
-			bestCandidateRoleTitle,
+			directMatchCandidateRoleTitle,
 		)
 		return directMatchTitle, directMatchFunction, nil
 	}
-	if !bestRankSet {
-		return "", "", nil
+
+	if bestRankSet && isConfidentMatch(bestRank) {
+		log.Printf(
+			"similar-category best_match role_title=%s candidate_role_title=%s",
+			roleTitle,
+			bestCandidateRoleTitle,
+		)
+		return bestTitle, bestFunction, nil
 	}
 
-	requiredOverlap := 2
-	if len(sourceTokens) <= 1 {
-		requiredOverlap = 1
+	if softFallbackSet {
+		log.Printf(
+			"similar-category soft_fallback role_title=%s candidate_role_title=%s",
+			roleTitle,
+			softFallbackCandidateRoleTitle,
+		)
+		return softFallbackTitle, softFallbackFunction, nil
 	}
-	hasTechSignal := len(sourceSkillTokens) > 0 && bestRank.skillOverlapCount >= 1
-	minSpecificHits := 2
-	if len(sourceSpecificTokens) >= 2 {
-		minSpecificHits = 1
+
+	if anyCandidateSet {
+		log.Printf(
+			"similar-category weak_fallback role_title=%s candidate_role_title=%s",
+			roleTitle,
+			anyCandidateRoleTitle,
+		)
+		return anyCandidateTitle, anyCandidateFunction, nil
 	}
-	minWeightedSpecific := 0.8
-	if len(sourceSpecificTokens) >= 2 {
-		minWeightedSpecific = 0.35
-	}
-	hasSpecificSignal := bestRank.combinedSpecificTokenHits >= minSpecificHits || bestRank.weightedSpecificTokenHits >= minWeightedSpecific
-	hasCategorySignal := bestRank.categoryOverlapCount >= 2 ||
-		(len(sourceTokens) >= 2 && bestRank.categoryOverlapCount >= 1 && hasSpecificSignal)
-	hasSequenceSignal := bestRank.totalSequenceMatchCount >= 3
-	hasWeightedOverlapSignal := sourceHasSpecificTokens && (bestRank.weightedCategoryOverlap+bestRank.weightedRoleOverlap) >= 0.5
-	hasConfidentSignal := hasTechSignal || hasCategorySignal || hasSequenceSignal || hasSpecificSignal || hasWeightedOverlapSignal
-	lowInformationSource := len(sourceTokens) <= 1
-	if lowInformationSource && !hasTechSignal && bestRank.totalSequenceMatchCount < 2 && bestRank.categoryOverlapCount < 2 {
-		return "", "", nil
-	}
-	if (bestRank.overlapRatio < 0.35 && !hasConfidentSignal) || (bestRank.overlapCount < requiredOverlap && !hasConfidentSignal) {
-		return "", "", nil
-	}
-	log.Printf(
-		"similar-category best_match role_title=%s candidate_role_title=%s",
-		roleTitle,
-		bestCandidateRoleTitle,
-	)
-	return bestTitle, bestFunction, nil
+
+	return "", "", nil
 }
 
 func (s *Service) resolveJobFunctionForCategory(ctx context.Context, category string) (string, error) {
@@ -1725,7 +1826,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				}
 			}
 			if categorizedTitle == nil {
-				inferredTitle, inferredFunction, err := s.findSimilarRemoteCategories(ctx, stringValue(payload["roleTitle"]), normalizedTechStack)
+				inferredTitle, inferredFunction, err := s.findSimilarRemoteRoekctshipCategories(ctx, stringValue(payload["roleTitle"]), normalizedTechStack)
 				if err != nil {
 					log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
 					return processedInc, skippedInc + 1, nil
