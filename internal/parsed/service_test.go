@@ -4,11 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"testing"
-	"time"
-
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/sources/plugins"
+	"testing"
+	"time"
 )
 
 func TestSourceOlderThanPostDateReturnsTrue(t *testing.T) {
@@ -710,8 +709,8 @@ func TestProcessPendingReturnsZeroWhenNoEnabledSources(t *testing.T) {
 	}
 }
 
-func TestProcessPendingCrossSourceDuplicateMarksRawRowSkippable(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "test_parsed_duplicate_marks_skippable"))
+func TestProcessPendingCrossSourceDuplicateMergesEmptyFieldsAndSkipsRawRow(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_duplicate_merge"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -730,8 +729,10 @@ func TestProcessPendingCrossSourceDuplicateMarksRawRowSkippable(t *testing.T) {
 	}
 	_, err = db.SQL.ExecContext(
 		context.Background(),
-		`INSERT INTO parsed_jobs (id, raw_us_job_id, url, role_title, updated_at)
-		 VALUES (1, 1, 'https://example.com/job/shared', 'Backend Engineer', ?)`,
+		`INSERT INTO parsed_jobs (
+		   id, raw_us_job_id, url, role_title, role_description, required_languages, location_us_states, tech_stack, salary_currency_code, updated_at
+		 )
+		 VALUES (1, 1, 'https://example.com/job/shared', 'Backend Engineer', '', '[]'::json, '[]'::jsonb, '["Go"]'::jsonb, 'USD', ?)`,
 		time.Now().UTC().Format(time.RFC3339Nano),
 	)
 	if err != nil {
@@ -741,8 +742,16 @@ func TestProcessPendingCrossSourceDuplicateMarksRawRowSkippable(t *testing.T) {
 	payload, err := json.Marshal(map[string]any{
 		"url":                    "https://www.example.com/job/shared/",
 		"roleTitle":              "Backend Engineer",
+		"roleDescription":        "Filled from duplicate",
+		"requiredLanguages":      []string{"English"},
+		"locationUSStates":       []string{"NY"},
+		"locationCountries":      []string{"United States"},
+		"techStack":              []string{"Python"},
 		"categorizedJobTitle":    "Backend Engineer",
 		"categorizedJobFunction": "Engineering",
+		"salaryRange": map[string]any{
+			"currencyCode": "EUR",
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -768,6 +777,40 @@ func TestProcessPendingCrossSourceDuplicateMarksRawRowSkippable(t *testing.T) {
 	}
 	if !isParsed || !isSkippable {
 		t.Fatalf("expected raw duplicate row marked parsed+skippable, got is_parsed=%t is_skippable=%t", isParsed, isSkippable)
+	}
+
+	var (
+		roleDescription    sql.NullString
+		requiredLanguages  sql.NullString
+		locationUSStates   sql.NullString
+		locationCountries  sql.NullString
+		techStack          sql.NullString
+		salaryCurrencyCode sql.NullString
+	)
+	if err := db.SQL.QueryRowContext(
+		context.Background(),
+		`SELECT role_description, required_languages::text, location_us_states::text, location_countries::text, tech_stack::text, salary_currency_code
+		   FROM parsed_jobs WHERE id = 1`,
+	).Scan(&roleDescription, &requiredLanguages, &locationUSStates, &locationCountries, &techStack, &salaryCurrencyCode); err != nil {
+		t.Fatal(err)
+	}
+	if roleDescription.String != "Filled from duplicate" {
+		t.Fatalf("expected role_description to be filled, got %q", roleDescription.String)
+	}
+	if requiredLanguages.String != "[\"English\"]" {
+		t.Fatalf("expected required_languages to be filled, got %q", requiredLanguages.String)
+	}
+	if locationUSStates.String != "[\"NY\"]" {
+		t.Fatalf("expected location_us_states to be filled, got %q", locationUSStates.String)
+	}
+	if locationCountries.String != "[\"United States\"]" {
+		t.Fatalf("expected location_countries to be filled, got %q", locationCountries.String)
+	}
+	if techStack.String != "[\"Go\"]" {
+		t.Fatalf("expected tech_stack to remain original, got %q", techStack.String)
+	}
+	if salaryCurrencyCode.String != "USD" {
+		t.Fatalf("expected salary_currency_code to remain original, got %q", salaryCurrencyCode.String)
 	}
 
 	var parsedCount int

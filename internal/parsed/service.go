@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/sources/plugins"
 	"log"
 	"net/url"
 	"os"
@@ -15,9 +17,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"goapplyjob-golang-backend/internal/database"
-	"goapplyjob-golang-backend/internal/sources/plugins"
 )
 
 const (
@@ -1602,7 +1601,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		log.Printf("parsed-job-worker upsert_start raw_job_id=%d source=%s", row.id, row.source)
 		sourceCreatedAt := parseDT(payload["created_at"])
 		normalizedTechStack := normalizeTechStack(payload["techStack"])
-		plugin, pluginOK := plugins.Get(row.source)
+		plugin, _ := plugins.Get(row.source)
 
 		_, normalizedLocationCity, normalizedUSStates := normalizeLocationFields(
 			payload["location"],
@@ -1623,8 +1622,11 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			return processedInc, skippedInc + 1, nil
 		}
 
+		// isRemoteRocketshipDuplicate := false
+		isNonRemoterocketshipDuplicate := false
 		if isDuplicate {
 			if strings.EqualFold(row.source, sourceRemoteRocketship) {
+				// isRemoteRocketshipDuplicate = true
 				var previousCreatedAt sql.NullTime
 				if err := s.DB.SQL.QueryRowContext(ctx, `SELECT created_at_source FROM parsed_jobs WHERE id = ? LIMIT 1`, duplicateID).Scan(&previousCreatedAt); err != nil {
 					log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
@@ -1651,23 +1653,11 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				}
 				log.Printf("parsed-job-worker duplicate_replaced existing_parsed_id=%d raw_job_id=%d source=%s", duplicateID, row.id, row.source)
 			} else {
-				log.Printf("parsed-job-worker duplicate_cross_source_skip raw_job_id=%d source=%s duplicate_parsed_job_id=%d", row.id, row.source, duplicateID)
-				retries, retryDelay := parsedLockRetryConfig()
-				if err := database.RetryLocked(retries, retryDelay, func() error {
-					_, execErr := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true, is_skippable = true WHERE id = ?`, row.id)
-					return execErr
-				}); err != nil {
-					log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
-					return processedInc, skippedInc + 1, nil
-				}
-				return processedInc + 1, skippedInc, nil
+				isNonRemoterocketshipDuplicate = true
 			}
 		}
 
-		inferCategories := false
-		if pluginOK {
-			inferCategories = plugin.InferCategories
-		}
+		inferCategories := !isNonRemoterocketshipDuplicate
 		categorizedTitle := stringFromPayload(payload["categorizedJobTitle"])
 		categorizedFunction := stringFromPayload(payload["categorizedJobFunction"])
 		if inferCategories && categorizedTitle == nil {
@@ -1704,6 +1694,142 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				categorizedTitle = stringFromPayload(inferredTitle)
 				categorizedFunction = stringFromPayload(inferredFunction)
 			}
+		}
+
+		if isNonRemoterocketshipDuplicate {
+			retries, retryDelay := parsedLockRetryConfig()
+			if err := database.RetryLocked(retries, retryDelay, func() error {
+				_, execErr := s.DB.SQL.ExecContext(
+					ctx,
+					`UPDATE parsed_jobs SET
+					 valid_until_date = COALESCE(parsed_jobs.valid_until_date, ?),
+					 date_deleted = COALESCE(parsed_jobs.date_deleted, ?),
+					 description_language = COALESCE(NULLIF(parsed_jobs.description_language, ''), ?),
+					 role_description = COALESCE(NULLIF(parsed_jobs.role_description, ''), ?),
+					 role_requirements = COALESCE(NULLIF(parsed_jobs.role_requirements, ''), ?),
+					 benefits = COALESCE(NULLIF(parsed_jobs.benefits, ''), ?),
+					 job_description_summary = COALESCE(NULLIF(parsed_jobs.job_description_summary, ''), ?),
+					 two_line_job_description_summary = COALESCE(NULLIF(parsed_jobs.two_line_job_description_summary, ''), ?),
+					 role_title_brazil = COALESCE(NULLIF(parsed_jobs.role_title_brazil, ''), ?),
+					 role_description_brazil = COALESCE(NULLIF(parsed_jobs.role_description_brazil, ''), ?),
+					 role_requirements_brazil = COALESCE(NULLIF(parsed_jobs.role_requirements_brazil, ''), ?),
+					 benefits_brazil = COALESCE(NULLIF(parsed_jobs.benefits_brazil, ''), ?),
+					 slug_brazil = COALESCE(NULLIF(parsed_jobs.slug_brazil, ''), ?),
+					 job_description_summary_brazil = COALESCE(NULLIF(parsed_jobs.job_description_summary_brazil, ''), ?),
+					 two_line_job_description_summary_brazil = COALESCE(NULLIF(parsed_jobs.two_line_job_description_summary_brazil, ''), ?),
+					 role_title_france = COALESCE(NULLIF(parsed_jobs.role_title_france, ''), ?),
+					 role_description_france = COALESCE(NULLIF(parsed_jobs.role_description_france, ''), ?),
+					 role_requirements_france = COALESCE(NULLIF(parsed_jobs.role_requirements_france, ''), ?),
+					 benefits_france = COALESCE(NULLIF(parsed_jobs.benefits_france, ''), ?),
+					 slug_france = COALESCE(NULLIF(parsed_jobs.slug_france, ''), ?),
+					 job_description_summary_france = COALESCE(NULLIF(parsed_jobs.job_description_summary_france, ''), ?),
+					 two_line_job_description_summary_france = COALESCE(NULLIF(parsed_jobs.two_line_job_description_summary_france, ''), ?),
+					 role_title_germany = COALESCE(NULLIF(parsed_jobs.role_title_germany, ''), ?),
+					 role_description_germany = COALESCE(NULLIF(parsed_jobs.role_description_germany, ''), ?),
+					 role_requirements_germany = COALESCE(NULLIF(parsed_jobs.role_requirements_germany, ''), ?),
+					 benefits_germany = COALESCE(NULLIF(parsed_jobs.benefits_germany, ''), ?),
+					 slug_germany = COALESCE(NULLIF(parsed_jobs.slug_germany, ''), ?),
+					 job_description_summary_germany = COALESCE(NULLIF(parsed_jobs.job_description_summary_germany, ''), ?),
+					 two_line_job_description_summary_germany = COALESCE(NULLIF(parsed_jobs.two_line_job_description_summary_germany, ''), ?),
+					 employment_type = COALESCE(NULLIF(parsed_jobs.employment_type, ''), ?),
+					 location_type = COALESCE(NULLIF(parsed_jobs.location_type, ''), ?),
+					 location_city = COALESCE(NULLIF(parsed_jobs.location_city, ''), ?),
+					 education_requirements_credential_category = COALESCE(NULLIF(parsed_jobs.education_requirements_credential_category, ''), ?),
+					 experience_in_place_of_education = COALESCE(parsed_jobs.experience_in_place_of_education, ?),
+					 experience_requirements_months = COALESCE(parsed_jobs.experience_requirements_months, ?),
+					 is_on_linkedin = COALESCE(parsed_jobs.is_on_linkedin, ?),
+					 is_promoted = COALESCE(parsed_jobs.is_promoted, ?),
+					 is_entry_level = COALESCE(parsed_jobs.is_entry_level, ?),
+					 is_junior = COALESCE(parsed_jobs.is_junior, ?),
+					 is_mid_level = COALESCE(parsed_jobs.is_mid_level, ?),
+					 is_senior = COALESCE(parsed_jobs.is_senior, ?),
+					 is_lead = COALESCE(parsed_jobs.is_lead, ?),
+					 required_languages = COALESCE(NULLIF(parsed_jobs.required_languages::text, '[]'), ?)::json,
+					 location_us_states = COALESCE(NULLIF(parsed_jobs.location_us_states::text, '[]'), ?)::jsonb,
+					 location_countries = COALESCE(NULLIF(parsed_jobs.location_countries::text, '[]'), ?)::jsonb,
+					 tech_stack = COALESCE(NULLIF(parsed_jobs.tech_stack::text, '[]'), ?)::jsonb,
+					 salary_min = COALESCE(parsed_jobs.salary_min, ?),
+					 salary_max = COALESCE(parsed_jobs.salary_max, ?),
+					 salary_type = COALESCE(NULLIF(parsed_jobs.salary_type, ''), ?),
+					 salary_currency_code = COALESCE(NULLIF(parsed_jobs.salary_currency_code, ''), ?),
+					 salary_currency_symbol = COALESCE(NULLIF(parsed_jobs.salary_currency_symbol, ''), ?),
+					 salary_min_usd = COALESCE(parsed_jobs.salary_min_usd, ?),
+					 salary_max_usd = COALESCE(parsed_jobs.salary_max_usd, ?),
+					 salary_human_text = COALESCE(NULLIF(parsed_jobs.salary_human_text, ''), ?),
+					 updated_at = ?
+					 WHERE id = ?`,
+					formatNullableTime(parseDT(payload["validUntilDate"])),
+					formatNullableTime(parseDT(payload["dateDeleted"])),
+					stringFromPayload(payload["descriptionLanguage"]),
+					stringFromPayload(payload["roleDescription"]),
+					stringFromPayload(payload["roleRequirements"]),
+					stringFromPayload(payload["benefits"]),
+					stringFromPayload(payload["jobDescriptionSummary"]),
+					stringFromPayload(payload["twoLineJobDescriptionSummary"]),
+					stringFromPayload(payload["roleTitleBrazil"]),
+					stringFromPayload(payload["roleDescriptionBrazil"]),
+					stringFromPayload(payload["roleRequirementsBrazil"]),
+					stringFromPayload(payload["benefitsBrazil"]),
+					stringFromPayload(payload["slugBrazil"]),
+					stringFromPayload(payload["jobDescriptionSummaryBrazil"]),
+					stringFromPayload(payload["twoLineJobDescriptionSummaryBrazil"]),
+					stringFromPayload(payload["roleTitleFrance"]),
+					stringFromPayload(payload["roleDescriptionFrance"]),
+					stringFromPayload(payload["roleRequirementsFrance"]),
+					stringFromPayload(payload["benefitsFrance"]),
+					stringFromPayload(payload["slugFrance"]),
+					stringFromPayload(payload["jobDescriptionSummaryFrance"]),
+					stringFromPayload(payload["twoLineJobDescriptionSummaryFrance"]),
+					stringFromPayload(payload["roleTitleGermany"]),
+					stringFromPayload(payload["roleDescriptionGermany"]),
+					stringFromPayload(payload["roleRequirementsGermany"]),
+					stringFromPayload(payload["benefitsGermany"]),
+					stringFromPayload(payload["slugGermany"]),
+					stringFromPayload(payload["jobDescriptionSummaryGermany"]),
+					stringFromPayload(payload["twoLineJobDescriptionSummaryGermany"]),
+					normalizeEmploymentTypeValue(payload["employmentType"]),
+					stringFromPayload(payload["locationType"]),
+					normalizedLocationCity,
+					normalizeEducationCredentialCategory(payload["educationRequirementsCredentialCategory"]),
+					_normalizeNullStringToNone(payload["experienceInPlaceOfEducation"]),
+					_normalizeNullStringToNone(payload["experienceRequirementsMonthsOfExperience"]),
+					_normalizeNullStringToNone(payload["isOnLinkedIn"]),
+					_normalizeNullStringToNone(payload["isPromoted"]),
+					_normalizeNullStringToNone(payload["isEntryLevel"]),
+					_normalizeNullStringToNone(payload["isJunior"]),
+					_normalizeNullStringToNone(payload["isMidLevel"]),
+					_normalizeNullStringToNone(payload["isSenior"]),
+					_normalizeNullStringToNone(payload["isLead"]),
+					normalizedJSONArrayText(_normalizeNullStringToNone(payload["requiredLanguages"])),
+					normalizedUSStates,
+					normalizedLocationCountries,
+					normalizedTechStackJSON,
+					_normalizeNullStringToNone(mapValue(payload, "salaryRange", "min")),
+					_normalizeNullStringToNone(mapValue(payload, "salaryRange", "max")),
+					_normalizeNullStringToNone(mapValue(payload, "salaryRange", "salaryType")),
+					_normalizeNullStringToNone(mapValue(payload, "salaryRange", "currencyCode")),
+					_normalizeNullStringToNone(mapValue(payload, "salaryRange", "currencySymbol")),
+					_normalizeNullStringToNone(mapValue(payload, "salaryRange", "minSalaryAsUSD")),
+					_normalizeNullStringToNone(mapValue(payload, "salaryRange", "maxSalaryAsUSD")),
+					_normalizeNullStringToNone(mapValue(payload, "salaryRange", "salaryHumanReadableText")),
+					time.Now().UTC().Format(time.RFC3339Nano),
+					duplicateID,
+				)
+				return execErr
+			}); err != nil {
+				log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
+				return processedInc, skippedInc + 1, nil
+			}
+			log.Printf("parsed-job-worker duplicate_cross_source_merge raw_job_id=%d source=%s duplicate_parsed_job_id=%d", row.id, row.source, duplicateID)
+			retries, retryDelay = parsedLockRetryConfig()
+			if err := database.RetryLocked(retries, retryDelay, func() error {
+				_, execErr := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true, is_skippable = true WHERE id = ?`, row.id)
+				return execErr
+			}); err != nil {
+				log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
+				return processedInc, skippedInc + 1, nil
+			}
+			return processedInc + 1, skippedInc, nil
 		}
 
 		retries, retryDelay := parsedLockRetryConfig()
