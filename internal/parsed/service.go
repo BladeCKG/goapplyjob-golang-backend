@@ -1691,6 +1691,8 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 					}
 					if len(groqRequiredSkills) > 0 {
 						normalizedTechStack = normalizeTechStack(groqRequiredSkills)
+						normalizedTechStackJSON = jsonStringOrNil(normalizedTechStack)
+
 					}
 					log.Printf(
 						"parsed-job-worker groq_inferred raw_job_id=%d source=%s role_title=%q category=%q function=%q required_skills_len=%d",
