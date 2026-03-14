@@ -319,6 +319,13 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, ro
 			if len(groqRequiredSkills) > 0 {
 				normalizedTechStack = normalizeTechStack(groqRequiredSkills)
 			}
+			log.Printf(
+				"parsed-job-worker groq_inferred role_title=%q category=%q function=%q required_skills_len=%d",
+				stringValue(roleTitle),
+				categorizedTitle,
+				categorizedFunction,
+				len(groqRequiredSkills),
+			)
 		} else {
 			groqCategory := classifyJobCategoryWithGroqSync(
 				stringValue(roleTitle),
@@ -330,6 +337,12 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, ro
 					categorizedFunction = categoryFunctions[categorizedTitle]
 				}
 			}
+			log.Printf(
+				"parsed-job-worker groq_inferred role_title=%q category=%q function=%q",
+				stringValue(roleTitle),
+				categorizedTitle,
+				categorizedFunction,
+			)
 		}
 	}
 	if categorizedTitle == "" {
@@ -339,6 +352,12 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, ro
 		}
 		categorizedTitle = strings.TrimSpace(inferredTitle)
 		categorizedFunction = strings.TrimSpace(inferredFunction)
+		log.Printf(
+			"parsed-job-worker remoterocketship_inferred role_title=%q category=%q function=%q",
+			stringValue(roleTitle),
+			categorizedTitle,
+			categorizedFunction,
+		)
 	}
 
 	return categorizedTitle, categorizedFunction, normalizedTechStack, nil
@@ -1677,6 +1696,15 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 					if len(groqRequiredSkills) > 0 {
 						normalizedTechStack = normalizeTechStack(groqRequiredSkills)
 					}
+					log.Printf(
+						"parsed-job-worker groq_inferred raw_job_id=%d source=%s role_title=%q category=%q function=%q required_skills_len=%d",
+						row.id,
+						row.source,
+						stringValue(payload["roleTitle"]),
+						stringValue(categorizedTitle),
+						stringValue(categorizedFunction),
+						len(groqRequiredSkills),
+					)
 				} else {
 					log.Printf("parsed-job-worker groq_category_classify_start raw_job_id=%d source=%s role_title=%s", row.id, row.source, stringValue(payload["roleTitle"]))
 					groqCategory := classifyJobCategoryWithGroqSync(
@@ -1688,6 +1716,14 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 						categorizedTitle = groqCategory
 						categorizedFunction = categoryFunctions[groqCategory]
 					}
+					log.Printf(
+						"parsed-job-worker groq_inferred raw_job_id=%d source=%s role_title=%q category=%q function=%q",
+						row.id,
+						row.source,
+						stringValue(payload["roleTitle"]),
+						stringValue(categorizedTitle),
+						stringValue(categorizedFunction),
+					)
 				}
 			}
 			if categorizedTitle == nil {
@@ -1698,6 +1734,14 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				}
 				categorizedTitle = stringFromPayload(inferredTitle)
 				categorizedFunction = stringFromPayload(inferredFunction)
+				log.Printf(
+					"parsed-job-worker remoterocketship_inferred raw_job_id=%d source=%s role_title=%q category=%q function=%q",
+					row.id,
+					row.source,
+					stringValue(payload["roleTitle"]),
+					stringValue(categorizedTitle),
+					stringValue(categorizedFunction),
+				)
 			}
 		}
 
