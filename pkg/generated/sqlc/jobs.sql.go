@@ -755,7 +755,7 @@ const listDistinctJobCategoryFunctionPairs = `-- name: ListDistinctJobCategoryFu
 SELECT DISTINCT categorized_job_title, categorized_job_function
 FROM parsed_jobs
 WHERE categorized_job_title IS NOT NULL
-   OR categorized_job_function IS NOT NULL
+  AND categorized_job_function IS NOT NULL
 `
 
 type ListDistinctJobCategoryFunctionPairsRow struct {

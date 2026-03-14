@@ -44,23 +44,10 @@ var groqAPIKeyRing = struct {
 
 var groqHTMLTagPattern = regexp.MustCompile(`(?is)<[^>]+>`)
 
-func SetCachedGroqCategorizedJobTitles(titles []string) {
-	normalized := make([]string, 0, len(titles))
-	seen := map[string]struct{}{}
-	for _, title := range titles {
-		trimmed := strings.TrimSpace(title)
-		if trimmed == "" {
-			continue
-		}
-		if _, exists := seen[trimmed]; exists {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		normalized = append(normalized, trimmed)
-	}
+func SetCachedGroqCategorizedJobTitles(titles []string, functions map[string]string) {
 	groqCategoryCache.mu.Lock()
-	groqCategoryCache.items = normalized
-	groqCategoryCache.functions = nil
+	groqCategoryCache.items = titles
+	groqCategoryCache.functions = functions
 	groqCategoryCache.mu.Unlock()
 }
 
@@ -528,10 +515,7 @@ func (s *Service) loadAllowedJobCategoriesForGroq(ctx context.Context) ([]string
 func (s *Service) loadAllowedJobCategoriesAndFunctionsForGroq(ctx context.Context) ([]string, map[string]string, error) {
 	groqCategoryCache.mu.RLock()
 	cached := append([]string(nil), groqCategoryCache.items...)
-	cachedFunctions := map[string]string{}
-	for key, value := range groqCategoryCache.functions {
-		cachedFunctions[key] = value
-	}
+	cachedFunctions := groqCategoryCache.functions
 	groqCategoryCache.mu.RUnlock()
 	if len(cached) > 0 {
 		if !containsCaseSensitive(cached, "Blank") {
@@ -546,11 +530,8 @@ func (s *Service) loadAllowedJobCategoriesAndFunctionsForGroq(ctx context.Contex
 		`SELECT categorized_job_title, categorized_job_function
 		   FROM parsed_jobs
 		  WHERE categorized_job_title IS NOT NULL
-		    AND categorized_job_title != ''
 		    AND categorized_job_function IS NOT NULL
-		    AND categorized_job_function != ''
-		  GROUP BY categorized_job_title, categorized_job_function
-		  ORDER BY categorized_job_title ASC, COUNT(id) DESC, categorized_job_function ASC`,
+		  GROUP BY categorized_job_title, categorized_job_function`,
 	)
 	if err != nil {
 		return nil, nil, err
@@ -559,7 +540,6 @@ func (s *Service) loadAllowedJobCategoriesAndFunctionsForGroq(ctx context.Contex
 
 	out := make([]string, 0, 128)
 	functions := map[string]string{}
-	seenTitles := map[string]struct{}{}
 	for rows.Next() {
 		var title sql.NullString
 		var function sql.NullString
@@ -567,16 +547,10 @@ func (s *Service) loadAllowedJobCategoriesAndFunctionsForGroq(ctx context.Contex
 			return nil, nil, scanErr
 		}
 		titleString := title.String
-		if _, exists := seenTitles[titleString]; !exists {
-			seenTitles[titleString] = struct{}{}
-			out = append(out, titleString)
-		}
-		if _, exists := functions[titleString]; !exists {
-			functionValue := function.String
-			if functionValue != "" {
-				functions[titleString] = functionValue
-			}
-		}
+		out = append(out, titleString)
+
+		functionValue := function.String
+		functions[titleString] = functionValue
 	}
 	if err := rows.Err(); err != nil {
 		return nil, nil, err

@@ -5,6 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"goapplyjob-golang-backend/internal/auth"
+	"goapplyjob-golang-backend/internal/config"
+	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/locationnorm"
+	"goapplyjob-golang-backend/internal/parsed"
 	"net/http"
 	"regexp"
 	"sort"
@@ -13,11 +18,6 @@ import (
 	"sync"
 	"time"
 
-	"goapplyjob-golang-backend/internal/auth"
-	"goapplyjob-golang-backend/internal/config"
-	"goapplyjob-golang-backend/internal/database"
-	"goapplyjob-golang-backend/internal/locationnorm"
-	"goapplyjob-golang-backend/internal/parsed"
 	gensqlc "goapplyjob-golang-backend/pkg/generated/sqlc"
 
 	"github.com/gin-gonic/gin"
@@ -557,6 +557,7 @@ func (h *Handler) refreshFilterCache(ctx context.Context) error {
 
 	categoryRows := [][2]string{}
 	categoryTitles := []string{}
+	categoryFunctions := map[string]string{}
 	techRows := [][]string{}
 	for _, row := range rows {
 		if row == nil {
@@ -564,9 +565,8 @@ func (h *Handler) refreshFilterCache(ctx context.Context) error {
 		}
 		if row.CategorizedJobTitle.Valid || row.CategorizedJobFunction.Valid {
 			categoryRows = append(categoryRows, [2]string{row.CategorizedJobTitle.String, row.CategorizedJobFunction.String})
-			if row.CategorizedJobTitle.Valid && strings.TrimSpace(row.CategorizedJobTitle.String) != "" {
-				categoryTitles = append(categoryTitles, strings.TrimSpace(row.CategorizedJobTitle.String))
-			}
+			categoryTitles = append(categoryTitles, row.CategorizedJobTitle.String)
+			categoryFunctions[row.CategorizedJobTitle.String] = row.CategorizedJobFunction.String
 		}
 	}
 
@@ -595,7 +595,7 @@ func (h *Handler) refreshFilterCache(ctx context.Context) error {
 	}
 
 	h.filterCache.jobCategoryParents = buildJobCategoryParentsMap(categoryRows)
-	parsed.SetCachedGroqCategorizedJobTitles(categoryTitles)
+	parsed.SetCachedGroqCategorizedJobTitles(categoryTitles, categoryFunctions)
 	locationParents := map[string][]string{}
 	for _, state := range locationnorm.USStateNames() {
 		locationParents[state] = []string{unitedStatesCountry}
@@ -1684,6 +1684,7 @@ func nullableString(value sql.NullString) *string {
 	v := value.String
 	return &v
 }
+
 func nullableFloatPtr(value sql.NullFloat64) *float64 {
 	if !value.Valid {
 		return nil
@@ -1691,6 +1692,7 @@ func nullableFloatPtr(value sql.NullFloat64) *float64 {
 	v := value.Float64
 	return &v
 }
+
 func nullableBool(value sql.NullBool) *bool {
 	if !value.Valid {
 		return nil
@@ -1861,6 +1863,7 @@ func mapListJobRow(row *gensqlc.ListJobsByIDsInOrderRow) jobItem {
 	item.CreatedAtSource = timestamptzTimePtr(row.CreatedAtSource)
 	return item
 }
+
 func parseIntDefault(raw string, fallback int) int {
 	if raw == "" {
 		return fallback
@@ -1897,12 +1900,14 @@ func sortStrings(values []string) {
 		}
 	}
 }
+
 func max(a, b int) int {
 	if a > b {
 		return a
 	}
 	return b
 }
+
 func min(a, b int) int {
 	if a < b {
 		return a
