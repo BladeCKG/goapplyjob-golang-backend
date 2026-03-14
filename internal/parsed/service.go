@@ -1664,6 +1664,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			if len(normalizedTechStack) == 0 {
 				allowedCategories, _ := s.loadAllowedJobCategoriesForGroq(ctx)
 				if shouldUseGroqClassification(stringValue(payload["roleTitle"])) {
+					log.Printf("parsed-job-worker groq_title_classify_start raw_job_id=%d source=%s role_title=%s", row.id, row.source, stringValue(payload["roleTitle"]))
 					groqCategory, groqRequiredSkills := classifyJobTitleWithGroqSync(
 						stringValue(payload["roleTitle"]),
 						stringValue(payload["roleDescription"]),
@@ -1676,6 +1677,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 						normalizedTechStack = normalizeTechStack(groqRequiredSkills)
 					}
 				} else {
+					log.Printf("parsed-job-worker groq_category_classify_start raw_job_id=%d source=%s role_title=%s", row.id, row.source, stringValue(payload["roleTitle"]))
 					groqCategory := classifyJobCategoryWithGroqSync(
 						stringValue(payload["roleTitle"]),
 						allowedCategories,
