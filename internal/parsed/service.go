@@ -310,11 +310,9 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, ro
 				stringValue(roleDescription),
 				allowedCategories,
 			)
-			if strings.TrimSpace(groqCategory) != "" {
-				categorizedTitle = strings.TrimSpace(groqCategory)
-				if categorizedFunction == "" {
-					categorizedFunction = categoryFunctions[categorizedTitle]
-				}
+			if groqCategory != "" {
+				categorizedTitle = groqCategory
+				categorizedFunction = categoryFunctions[groqCategory]
 			}
 			if len(groqRequiredSkills) > 0 {
 				normalizedTechStack = normalizeTechStack(groqRequiredSkills)
@@ -331,11 +329,9 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, ro
 				stringValue(roleTitle),
 				allowedCategories,
 			)
-			if strings.TrimSpace(groqCategory) != "" {
-				categorizedTitle = strings.TrimSpace(groqCategory)
-				if categorizedFunction == "" {
-					categorizedFunction = categoryFunctions[categorizedTitle]
-				}
+			if groqCategory != "" {
+				categorizedTitle = groqCategory
+				categorizedFunction = categoryFunctions[groqCategory]
 			}
 			log.Printf(
 				"parsed-job-worker groq_inferred role_title=%q category=%q function=%q",
