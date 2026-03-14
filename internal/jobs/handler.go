@@ -198,6 +198,7 @@ func (h *Handler) Register(router gin.IRouter) {
 	router.GET("/jobs/related-categories", h.relatedCategories)
 	router.GET("/jobs/top-categories", h.topCategories)
 	router.GET("/jobs/sitemap", h.sitemap)
+	router.GET("/jobs/count", h.jobsCount)
 	router.GET("/job/:jobID", h.jobDetail)
 	router.GET("/jobs/:jobID", h.jobDetail)
 	router.GET("/jobs", h.listJobs)
@@ -1215,6 +1216,15 @@ func (h *Handler) sitemap(c *gin.Context) {
 		"total":    totalCount,
 		"items":    items,
 	})
+}
+
+func (h *Handler) jobsCount(c *gin.Context) {
+	totalCount, err := h.q.CountParsedJobs(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs count"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"total": totalCount})
 }
 
 func (h *Handler) relatedCategories(c *gin.Context) {

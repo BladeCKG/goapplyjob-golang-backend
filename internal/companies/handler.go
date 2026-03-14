@@ -81,6 +81,7 @@ func NewHandler(cfg config.Config, db *database.DB, authHandler *auth.Handler) *
 func (h *Handler) Register(router gin.IRouter) {
 	router.GET("/companies", h.listCompanies)
 	router.GET("/companies/sitemap", h.companiesSitemap)
+	router.GET("/companies/count", h.companiesCount)
 	router.GET("/companies/:companySlug", h.companyProfile)
 }
 
@@ -302,6 +303,15 @@ func (h *Handler) companiesSitemap(c *gin.Context) {
 		"total":    totalCount,
 		"items":    items,
 	})
+}
+
+func (h *Handler) companiesCount(c *gin.Context) {
+	totalCount, err := h.q.CountCompaniesWithJobsForSitemap(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load companies count"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"total": totalCount})
 }
 
 func (h *Handler) companyProfile(c *gin.Context) {
