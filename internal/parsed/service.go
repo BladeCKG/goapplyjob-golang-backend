@@ -1823,7 +1823,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			log.Printf("parsed-job-worker duplicate_cross_source_merge raw_job_id=%d source=%s duplicate_parsed_job_id=%d", row.id, row.source, duplicateID)
 			retries, retryDelay = parsedLockRetryConfig()
 			if err := database.RetryLocked(retries, retryDelay, func() error {
-				_, execErr := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true, is_skippable = true WHERE id = ?`, row.id)
+				_, execErr := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true, is_skippable = true, raw_json = NULL WHERE id = ?`, row.id)
 				return execErr
 			}); err != nil {
 				log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
