@@ -417,13 +417,13 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 	return inserted, updated, failedDB, failedRows
 }
 
-func (s *Service) ImportRawUSJobsRows(rows []SitemapRow, batchSize int, source string) (Stats, map[string]SitemapRow, map[string]SitemapRow, error) {
-	if batchSize <= 0 {
-		batchSize = 100
+func (s *Service) ImportRawUSJobsRows(rows []SitemapRow, flushBufferBatchSize int, source string) (Stats, map[string]SitemapRow, map[string]SitemapRow, error) {
+	if flushBufferBatchSize <= 0 {
+		flushBufferBatchSize = 100
 	}
 	rowSource := source
 
-	log.Printf("raw-import-worker import_rows_start source=%s rows=%d batch_size=%d", rowSource, len(rows), batchSize)
+	log.Printf("raw-import-worker import_rows_start source=%s rows=%d batch_size=%d", rowSource, len(rows), flushBufferBatchSize)
 
 	stats := Stats{}
 	buffer := map[string]SitemapRow{}
@@ -438,7 +438,7 @@ func (s *Service) ImportRawUSJobsRows(rows []SitemapRow, batchSize int, source s
 		if current, ok := buffer[row.URL]; !ok || row.PostDate.After(current.PostDate) {
 			buffer[row.URL] = row
 		}
-		if len(buffer) >= batchSize {
+		if len(buffer) >= flushBufferBatchSize {
 			inserted, updated, failedDB, failedBatch := s.flushBuffer(buffer, rowSource)
 			stats.Inserted += inserted
 			stats.Updated += updated
@@ -725,6 +725,7 @@ func (s *Service) RunOnceWithContext(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	flushBufferBatchSize := 100
 	batchSize := s.Config.BatchSize
 	payloadsPerCycle := s.Config.PayloadsPerCycle
 	enabledSources := s.Config.EnabledSources
@@ -765,7 +766,7 @@ func (s *Service) RunOnceWithContext(ctx context.Context) error {
 		rowsToProcess := payloadRows[:toProcessCount]
 		unprocessedRows := payloadRows[toProcessCount:]
 
-		stats, failedRows, _, err := s.ImportRawUSJobsRows(rowsToProcess, batchSize, payload.Source)
+		stats, failedRows, _, err := s.ImportRawUSJobsRows(rowsToProcess, flushBufferBatchSize, payload.Source)
 		if err != nil {
 			log.Printf("raw-import-worker payload_failed payload_id=%d source=%s error=%v", payload.ID, payload.Source, err)
 			continue
