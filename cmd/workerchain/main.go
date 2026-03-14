@@ -135,7 +135,7 @@ func main() {
 					PollSeconds:         config.GetenvFloat("PARSED_JOB_WORKER_POLL_SECONDS", 5),
 					RunOnce:             true,
 					ErrorBackoffSeconds: errorBackoffSeconds,
-					WorkerCount:         config.GetenvInt("PARSED_JOB_WORKER_COUNT", 4),
+					WorkerCount:         config.GetenvInt("PARSED_JOB_WORKER_COUNT", 1),
 				}, db)
 				parsedSvc.EnabledSources = enabledSources
 

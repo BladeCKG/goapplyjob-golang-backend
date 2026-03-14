@@ -1,12 +1,11 @@
 package main
 
 import (
-	"log"
-
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/parsed"
 	"goapplyjob-golang-backend/internal/workerlog"
+	"log"
 )
 
 func main() {
@@ -28,7 +27,7 @@ func main() {
 		PollSeconds:         config.GetenvFloat("PARSED_JOB_WORKER_POLL_SECONDS", 5),
 		RunOnce:             config.GetenvBool("PARSED_JOB_RUN_ONCE", false),
 		ErrorBackoffSeconds: config.GetenvInt("WORKER_ERROR_BACKOFF_SECONDS", 10),
-		WorkerCount:         config.GetenvInt("PARSED_JOB_WORKER_COUNT", 4),
+		WorkerCount:         config.GetenvInt("PARSED_JOB_WORKER_COUNT", 1),
 	}, db)
 	svc.EnabledSources = config.GetenvCSVSet("ENABLED_SOURCES", "remoterocketship")
 	if err := svc.RunForever(); err != nil {
