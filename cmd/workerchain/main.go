@@ -115,6 +115,7 @@ func main() {
 					EnabledSources:      enabledSources,
 					RunOnce:             true,
 					ErrorBackoffSeconds: errorBackoffSeconds,
+					WorkerCount:         config.GetenvInt("RAW_IMPORT_WORKER_COUNT", 2),
 				}, db)
 
 				rawSvc := raw.New(raw.Config{
@@ -124,6 +125,7 @@ func main() {
 					ErrorBackoffSeconds:   errorBackoffSeconds,
 					RetentionDays:         config.GetenvInt("RAW_JOB_RETENTION_DAYS", 365),
 					RetentionCleanupBatch: config.GetenvInt("RAW_JOB_RETENTION_CLEANUP_BATCH", 5000),
+					WorkerCount:           config.GetenvInt("RAW_JOB_WORKER_COUNT", 4),
 				}, db)
 				rawSvc.EnabledSources = enabledSources
 				rawSvc.ReadHTML = makeReadHTMLWith429Retry(retries429, time.Duration(retryDelaySeconds)*time.Second)
@@ -133,6 +135,7 @@ func main() {
 					PollSeconds:         config.GetenvFloat("PARSED_JOB_WORKER_POLL_SECONDS", 5),
 					RunOnce:             true,
 					ErrorBackoffSeconds: errorBackoffSeconds,
+					WorkerCount:         config.GetenvInt("PARSED_JOB_WORKER_COUNT", 4),
 				}, db)
 				parsedSvc.EnabledSources = enabledSources
 

@@ -44,6 +44,10 @@ func main() {
 	if errorBackoffSeconds < 1 {
 		errorBackoffSeconds = 1
 	}
+	workerCount := config.GetenvInt("RAW_IMPORT_WORKER_COUNT", 2)
+	if workerCount < 1 {
+		workerCount = 1
+	}
 
 	svc := importer.New(importer.Config{
 		IntervalMinutes:     intervalMinutes,
@@ -53,6 +57,7 @@ func main() {
 		EnabledSources:      enabledSources,
 		RunOnce:             runOnce,
 		ErrorBackoffSeconds: errorBackoffSeconds,
+		WorkerCount:         workerCount,
 	}, db)
 
 	if err := svc.RunForever(); err != nil {

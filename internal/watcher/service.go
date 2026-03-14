@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -243,69 +244,77 @@ func (s *Service) RunOnceWithContext(ctx context.Context) error {
 		return err
 	}
 	log.Printf("watcher cycle_start enabled_sources=%v", sortedSourceNames(s.Config.EnabledSources))
+	type task struct {
+		source string
+		name   string
+		fn     func(context.Context) error
+	}
+	tasks := []task{}
 	if strings.TrimSpace(s.Config.RemoteRocketshipUSJobSitemapURL) != "" && s.isSourceEnabled(sourceRemoterocketship) {
-		log.Printf("watcher source_start source=%s runner=runOnceRemoteRocketship", sourceRemoterocketship)
-		if err := s.runOnceRemoteRocketship(ctx); err != nil {
-			log.Printf("watcher source_failed source=%s runner=runOnceRemoteRocketship error=%v", sourceRemoterocketship, err)
-			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
-		} else {
-			log.Printf("watcher source_done source=%s runner=runOnceRemoteRocketship", sourceRemoterocketship)
-		}
+		tasks = append(tasks, task{
+			source: sourceRemoterocketship,
+			name:   "runOnceRemoteRocketship",
+			fn:     s.runOnceRemoteRocketship,
+		})
 	}
 	if strings.TrimSpace(s.Config.RemoteDotCoSitemapURL) != "" && s.isSourceEnabled(sourceRemotedotco) {
-		log.Printf("watcher source_start source=%s runner=runOnceRemoteDotCo", sourceRemotedotco)
-		if err := s.runOnceRemoteDotCo(ctx); err != nil {
-			log.Printf("watcher source_failed source=%s runner=runOnceRemoteDotCo error=%v", sourceRemotedotco, err)
-			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
-		} else {
-			log.Printf("watcher source_done source=%s runner=runOnceRemoteDotCo", sourceRemotedotco)
-		}
+		tasks = append(tasks, task{
+			source: sourceRemotedotco,
+			name:   "runOnceRemoteDotCo",
+			fn:     s.runOnceRemoteDotCo,
+		})
 	}
 	if s.isRemotiveConfigured() && s.isSourceEnabled(sourceRemotive) {
-		log.Printf("watcher source_start source=%s runner=runOnceRemotive", sourceRemotive)
-		if err := s.runOnceRemotive(ctx); err != nil {
-			log.Printf("watcher source_failed source=%s runner=runOnceRemotive error=%v", sourceRemotive, err)
-			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
-		} else {
-			log.Printf("watcher source_done source=%s runner=runOnceRemotive", sourceRemotive)
-		}
+		tasks = append(tasks, task{
+			source: sourceRemotive,
+			name:   "runOnceRemotive",
+			fn:     s.runOnceRemotive,
+		})
 	}
-	if strings.TrimSpace(s.Config.WorkableAPIURL) != "" && s.isSourceEnabled("workable") {
-		log.Printf("watcher source_start source=workable runner=runOnceWorkable")
-		if err := s.runOnceWorkable(ctx); err != nil {
-			log.Printf("watcher source_failed source=workable runner=runOnceWorkable error=%v", err)
-			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
-		} else {
-			log.Printf("watcher source_done source=workable runner=runOnceWorkable")
-		}
+	if strings.TrimSpace(s.Config.WorkableAPIURL) != "" && s.isSourceEnabled(sourceWorkable) {
+		tasks = append(tasks, task{
+			source: sourceWorkable,
+			name:   "runOnceWorkable",
+			fn:     s.runOnceWorkable,
+		})
 	}
 	if strings.TrimSpace(s.Config.DailyRemoteBaseURL) != "" && strings.Contains(s.Config.DailyRemoteBaseURL, "{page}") && s.Config.DailyRemoteMaxPage >= 1 && s.Config.DailyRemotePagesPerCycle >= 1 && s.isSourceEnabled(sourceDailyremote) {
-		log.Printf("watcher source_start source=%s runner=runOnceDailyremote", sourceDailyremote)
-		if err := s.runOnceDailyremote(ctx); err != nil {
-			log.Printf("watcher source_failed source=%s runner=runOnceDailyremote error=%v", sourceDailyremote, err)
-			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
-		} else {
-			log.Printf("watcher source_done source=%s runner=runOnceDailyremote", sourceDailyremote)
-		}
+		tasks = append(tasks, task{
+			source: sourceDailyremote,
+			name:   "runOnceDailyremote",
+			fn:     s.runOnceDailyremote,
+		})
 	}
 	if strings.TrimSpace(s.Config.BuiltinBaseURL) != "" && s.isSourceEnabled(sourceBuiltin) {
-		log.Printf("watcher source_start source=%s runner=runOnceBuiltin", sourceBuiltin)
-		if err := s.runOnceBuiltin(ctx); err != nil {
-			log.Printf("watcher source_failed source=%s runner=runOnceBuiltin error=%v", sourceBuiltin, err)
-			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
-		} else {
-			log.Printf("watcher source_done source=%s runner=runOnceBuiltin", sourceBuiltin)
-		}
+		tasks = append(tasks, task{
+			source: sourceBuiltin,
+			name:   "runOnceBuiltin",
+			fn:     s.runOnceBuiltin,
+		})
 	}
 	if strings.TrimSpace(s.Config.HiringCafeSearchAPIURL) != "" && strings.TrimSpace(s.Config.HiringCafeTotalCountURL) != "" && s.isSourceEnabled(sourceHiringCafe) {
-		log.Printf("watcher source_start source=%s runner=runOnceHiringCafe", sourceHiringCafe)
-		if err := s.runOnceHiringCafe(ctx); err != nil {
-			log.Printf("watcher source_failed source=%s runner=runOnceHiringCafe error=%v", sourceHiringCafe, err)
-			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
-		} else {
-			log.Printf("watcher source_done source=%s runner=runOnceHiringCafe", sourceHiringCafe)
-		}
+		tasks = append(tasks, task{
+			source: sourceHiringCafe,
+			name:   "runOnceHiringCafe",
+			fn:     s.runOnceHiringCafe,
+		})
 	}
+	var wg sync.WaitGroup
+	for _, task := range tasks {
+		task := task
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			log.Printf("watcher source_start source=%s runner=%s", task.source, task.name)
+			if err := task.fn(ctx); err != nil {
+				log.Printf("watcher source_failed source=%s runner=%s error=%v", task.source, task.name, err)
+				s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
+				return
+			}
+			log.Printf("watcher source_done source=%s runner=%s", task.source, task.name)
+		}()
+	}
+	wg.Wait()
 	return nil
 }
 

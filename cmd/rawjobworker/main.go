@@ -42,6 +42,7 @@ func main() {
 		ErrorBackoffSeconds:   config.GetenvInt("WORKER_ERROR_BACKOFF_SECONDS", 10),
 		RetentionDays:         config.GetenvInt("RAW_JOB_RETENTION_DAYS", 365),
 		RetentionCleanupBatch: config.GetenvInt("RAW_JOB_RETENTION_CLEANUP_BATCH", 5000),
+		WorkerCount:           config.GetenvInt("RAW_JOB_WORKER_COUNT", 4),
 	}, db)
 	svc.EnabledSources = config.GetenvCSVSet("ENABLED_SOURCES", "remoterocketship")
 	svc.ReadHTML = makeReadHTMLWith429Retry(retries429, time.Duration(retryDelaySeconds)*time.Second)

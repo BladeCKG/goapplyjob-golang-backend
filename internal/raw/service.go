@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"goapplyjob-golang-backend/internal/database"
@@ -49,6 +51,7 @@ type Config struct {
 	ErrorBackoffSeconds   int
 	RetentionDays         int
 	RetentionCleanupBatch int
+	WorkerCount           int
 }
 
 var scriptJSONBlockPattern = regexp.MustCompile(`(?is)<script[^>]*type=['"]application/json['"][^>]*>(.*?)</script>`)
@@ -215,155 +218,220 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	}
 	log.Printf("raw-us-job-worker picked_unready_jobs=%d", len(jobs))
 
-	processed := 0
-	throttledSources := map[string]struct{}{}
-	for _, job := range jobs {
-		clearParsed := func(jobID int64) error {
-			return database.RetryLocked(8, 50*time.Millisecond, func() error {
-				var parsedJobID int64
-				err := s.DB.SQL.QueryRowContext(ctx, `SELECT id FROM parsed_jobs WHERE raw_us_job_id = ? LIMIT 1`, jobID).Scan(&parsedJobID)
-				if err != nil && !errors.Is(err, sql.ErrNoRows) {
-					return err
-				}
-				if err == nil {
-					if _, execErr := s.DB.SQL.ExecContext(ctx, `DELETE FROM user_job_actions WHERE parsed_job_id = ?`, parsedJobID); execErr != nil {
-						return execErr
-					}
-					if _, execErr := s.DB.SQL.ExecContext(ctx, `DELETE FROM parsed_jobs WHERE id = ?`, parsedJobID); execErr != nil {
-						return execErr
-					}
-				}
-				return nil
-			})
-		}
-		setRetry := func(jobID int64) error {
-			if err := clearParsed(jobID); err != nil {
-				return err
-			}
-			return database.RetryLocked(8, 50*time.Millisecond, func() error {
-				_, err := s.DB.SQL.ExecContext(
-					ctx,
-					`UPDATE raw_us_jobs
-					 SET is_ready = false,
-					     is_skippable = false,
-					     is_parsed = false,
-					     raw_json = NULL,
-					     retry_count = retry_count + 1
-					 WHERE id = ?`,
-					jobID,
-				)
-				return err
-			})
-		}
-		if _, throttled := throttledSources[job.source]; throttled {
-			log.Printf("raw-us-job-worker source_throttled_skip job_id=%d source=%s reason=prior_429_in_cycle", job.id, job.source)
-			if err := setRetry(job.id); err != nil {
-				return processed, err
-			}
-			processed++
-			continue
-		}
-		targetURL := toTargetJobURLForSource(job.source, job.url)
-		log.Printf("raw-us-job-worker fetch_start job_id=%d source=%s target_url=%s", job.id, job.source, targetURL)
-		html, statusCode, err := s.ReadHTML(ctx, targetURL)
-		if err != nil {
-			return processed, err
-		}
-
-		setSkippable := func(job_id int64) error {
-			if err := clearParsed(job_id); err != nil {
-				return err
-			}
-			return database.RetryLocked(8, 50*time.Millisecond, func() error {
-				_, err := s.DB.SQL.ExecContext(
-					ctx,
-					`UPDATE raw_us_jobs
-					 SET is_ready = true,
-					     is_skippable = true,
-					     is_parsed = false,
-					     raw_json = NULL,
-					     extra_json = NULL
-					 WHERE id = ?`,
-					job_id,
-				)
-				return err
-			})
-		}
-		switch {
-		case isRemovedBuiltinJobHTML(job.source, html):
-			log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s detected_builtin_removed_job", job.id, job.source)
-			if err := setSkippable(job.id); err != nil {
-				return processed, err
-			}
-		case statusCode == statusGone && isDailyRemoteGoneJobHTML(job.source, html):
-			log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s status=410 detected_no_longer_available", job.id, job.source)
-			if err := setSkippable(job.id); err != nil {
-				return processed, err
-			}
-		case statusCode == statusNotFound:
-			log.Printf("raw-us-job-worker fetch_result job_id=%d status=404", job.id)
-			if err := setSkippable(job.id); err != nil {
-				return processed, err
-			}
-		case statusCode == statusTooManyRequests:
-			log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s status=429 retry_later", job.id, job.source)
-			throttledSources[job.source] = struct{}{}
-			if err := setRetry(job.id); err != nil {
-				return processed, err
-			}
-		case statusCode < 200 || statusCode >= 300:
-			log.Printf("raw-us-job-worker fetch_result job_id=%d status=%d empty_html_or_error", job.id, statusCode)
-			if err := setRetry(job.id); err != nil {
-				return processed, err
-			}
-		case strings.TrimSpace(html) == "":
-			log.Printf("raw-us-job-worker fetch_result job_id=%d status=%d empty_html_or_error", job.id, statusCode)
-			if err := setRetry(job.id); err != nil {
-				return processed, err
-			}
-		default:
-			log.Printf("raw-us-job-worker parse_start job_id=%d source=%s", job.id, job.source)
-			payload := parseHTMLForSource(job.source, html, job.url)
-			if skipRetry, _ := payload["_skip_for_retry"].(bool); skipRetry {
-				log.Printf("raw-us-job-worker parse_retry_later job_id=%d source=%s reason=%v", job.id, job.source, payload["_skip_reason"])
-				if err := setRetry(job.id); err != nil {
-					return processed, err
-				}
-				processed++
-				continue
-			}
-			if skipNonUS, _ := payload["_skip_for_non_us"].(bool); skipNonUS {
-				log.Printf("raw-us-job-worker parse_skipped_non_us job_id=%d source=%s", job.id, job.source)
-				if err := setSkippable(job.id); err != nil {
-					return processed, err
-				}
-				processed++
-				continue
-			}
-
-			extraPayload := parseExtraJSON(job.extraJSON)
-			if len(extraPayload) > 0 {
-				for key, value := range extraPayload {
-					if _, exists := payload[key]; !exists {
-						payload[key] = value
-					}
-				}
-			}
-			log.Printf("raw-us-job-worker parse_done job_id=%d parsed_keys=%d", job.id, len(payload))
-			rawJSON, err := json.Marshal(payload)
-			if err != nil {
-				return processed, err
-			}
-			if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
-				_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_ready = true, raw_json = ?, extra_json = NULL WHERE id = ?`, string(rawJSON), job.id)
-				return err
-			}); err != nil {
-				return processed, err
-			}
-		}
-		processed++
+	workerCount := s.Config.WorkerCount
+	if workerCount < 1 {
+		workerCount = 1
 	}
-	return processed, nil
+	if workerCount > len(jobs) {
+		workerCount = len(jobs)
+	}
+	if workerCount == 0 {
+		return 0, nil
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var processed int64
+	var firstErr atomic.Value
+	var errOnce sync.Once
+	reportErr := func(err error) {
+		if err == nil {
+			return
+		}
+		errOnce.Do(func() {
+			firstErr.Store(err)
+			cancel()
+		})
+	}
+
+	throttledSources := map[string]struct{}{}
+	var throttledMu sync.Mutex
+
+	jobCh := make(chan rawJob)
+	var wg sync.WaitGroup
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobCh {
+				if err := ctx.Err(); err != nil {
+					return
+				}
+				clearParsed := func(jobID int64) error {
+					return database.RetryLocked(8, 50*time.Millisecond, func() error {
+						var parsedJobID int64
+						err := s.DB.SQL.QueryRowContext(ctx, `SELECT id FROM parsed_jobs WHERE raw_us_job_id = ? LIMIT 1`, jobID).Scan(&parsedJobID)
+						if err != nil && !errors.Is(err, sql.ErrNoRows) {
+							return err
+						}
+						if err == nil {
+							if _, execErr := s.DB.SQL.ExecContext(ctx, `DELETE FROM user_job_actions WHERE parsed_job_id = ?`, parsedJobID); execErr != nil {
+								return execErr
+							}
+							if _, execErr := s.DB.SQL.ExecContext(ctx, `DELETE FROM parsed_jobs WHERE id = ?`, parsedJobID); execErr != nil {
+								return execErr
+							}
+						}
+						return nil
+					})
+				}
+				setRetry := func(jobID int64) error {
+					if err := clearParsed(jobID); err != nil {
+						return err
+					}
+					return database.RetryLocked(8, 50*time.Millisecond, func() error {
+						_, err := s.DB.SQL.ExecContext(
+							ctx,
+							`UPDATE raw_us_jobs
+							 SET is_ready = false,
+							     is_skippable = false,
+							     is_parsed = false,
+							     raw_json = NULL,
+							     retry_count = retry_count + 1
+							 WHERE id = ?`,
+							jobID,
+						)
+						return err
+					})
+				}
+				throttledMu.Lock()
+				_, throttled := throttledSources[job.source]
+				throttledMu.Unlock()
+				if throttled {
+					log.Printf("raw-us-job-worker source_throttled_skip job_id=%d source=%s reason=prior_429_in_cycle", job.id, job.source)
+					if err := setRetry(job.id); err != nil {
+						reportErr(err)
+						return
+					}
+					atomic.AddInt64(&processed, 1)
+					continue
+				}
+				targetURL := toTargetJobURLForSource(job.source, job.url)
+				log.Printf("raw-us-job-worker fetch_start job_id=%d source=%s target_url=%s", job.id, job.source, targetURL)
+				html, statusCode, err := s.ReadHTML(ctx, targetURL)
+				if err != nil {
+					reportErr(err)
+					return
+				}
+
+				setSkippable := func(job_id int64) error {
+					if err := clearParsed(job_id); err != nil {
+						return err
+					}
+					return database.RetryLocked(8, 50*time.Millisecond, func() error {
+						_, err := s.DB.SQL.ExecContext(
+							ctx,
+							`UPDATE raw_us_jobs
+							 SET is_ready = true,
+							     is_skippable = true,
+							     is_parsed = false,
+							     raw_json = NULL,
+							     extra_json = NULL
+							 WHERE id = ?`,
+							job_id,
+						)
+						return err
+					})
+				}
+				switch {
+				case isRemovedBuiltinJobHTML(job.source, html):
+					log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s detected_builtin_removed_job", job.id, job.source)
+					if err := setSkippable(job.id); err != nil {
+						reportErr(err)
+						return
+					}
+				case statusCode == statusGone && isDailyRemoteGoneJobHTML(job.source, html):
+					log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s status=410 detected_no_longer_available", job.id, job.source)
+					if err := setSkippable(job.id); err != nil {
+						reportErr(err)
+						return
+					}
+				case statusCode == statusNotFound:
+					log.Printf("raw-us-job-worker fetch_result job_id=%d status=404", job.id)
+					if err := setSkippable(job.id); err != nil {
+						reportErr(err)
+						return
+					}
+				case statusCode == statusTooManyRequests:
+					log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s status=429 retry_later", job.id, job.source)
+					throttledMu.Lock()
+					throttledSources[job.source] = struct{}{}
+					throttledMu.Unlock()
+					if err := setRetry(job.id); err != nil {
+						reportErr(err)
+						return
+					}
+				case statusCode < 200 || statusCode >= 300:
+					log.Printf("raw-us-job-worker fetch_result job_id=%d status=%d empty_html_or_error", job.id, statusCode)
+					if err := setRetry(job.id); err != nil {
+						reportErr(err)
+						return
+					}
+				case strings.TrimSpace(html) == "":
+					log.Printf("raw-us-job-worker fetch_result job_id=%d status=%d empty_html_or_error", job.id, statusCode)
+					if err := setRetry(job.id); err != nil {
+						reportErr(err)
+						return
+					}
+				default:
+					log.Printf("raw-us-job-worker parse_start job_id=%d source=%s", job.id, job.source)
+					payload := parseHTMLForSource(job.source, html, job.url)
+					if skipRetry, _ := payload["_skip_for_retry"].(bool); skipRetry {
+						log.Printf("raw-us-job-worker parse_retry_later job_id=%d source=%s reason=%v", job.id, job.source, payload["_skip_reason"])
+						if err := setRetry(job.id); err != nil {
+							reportErr(err)
+							return
+						}
+						atomic.AddInt64(&processed, 1)
+						continue
+					}
+					if skipNonUS, _ := payload["_skip_for_non_us"].(bool); skipNonUS {
+						log.Printf("raw-us-job-worker parse_skipped_non_us job_id=%d source=%s", job.id, job.source)
+						if err := setSkippable(job.id); err != nil {
+							reportErr(err)
+							return
+						}
+						atomic.AddInt64(&processed, 1)
+						continue
+					}
+
+					extraPayload := parseExtraJSON(job.extraJSON)
+					if len(extraPayload) > 0 {
+						for key, value := range extraPayload {
+							if _, exists := payload[key]; !exists {
+								payload[key] = value
+							}
+						}
+					}
+					log.Printf("raw-us-job-worker parse_done job_id=%d parsed_keys=%d", job.id, len(payload))
+					rawJSON, err := json.Marshal(payload)
+					if err != nil {
+						reportErr(err)
+						return
+					}
+					if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+						_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_ready = true, raw_json = ?, extra_json = NULL WHERE id = ?`, string(rawJSON), job.id)
+						return err
+					}); err != nil {
+						reportErr(err)
+						return
+					}
+				}
+				atomic.AddInt64(&processed, 1)
+			}
+		}()
+	}
+	for _, job := range jobs {
+		jobCh <- job
+	}
+	close(jobCh)
+	wg.Wait()
+
+	if err := firstErr.Load(); err != nil {
+		return int(atomic.LoadInt64(&processed)), err.(error)
+	}
+	return int(atomic.LoadInt64(&processed)), nil
 }
 
 func (s *Service) CleanupOldRawJobs(ctx context.Context, retentionDays, cleanupBatchSize int) (int64, int64, error) {

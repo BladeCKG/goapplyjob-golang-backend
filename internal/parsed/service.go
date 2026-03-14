@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"goapplyjob-golang-backend/internal/database"
@@ -252,6 +254,7 @@ type Config struct {
 	PollSeconds         float64
 	RunOnce             bool
 	ErrorBackoffSeconds int
+	WorkerCount         int
 }
 
 func New(cfg Config, db *database.DB) *Service { return &Service{DB: db, Config: cfg} }
@@ -1551,25 +1554,50 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	}
 	log.Printf("parsed-job-worker picked_pending_rows=%d", len(pending))
 
-	processed := 0
-	skipped := 0
-	for _, row := range pending {
+	workerCount := s.Config.WorkerCount
+	if workerCount < 1 {
+		workerCount = 1
+	}
+	if workerCount > len(pending) {
+		workerCount = len(pending)
+	}
+	if workerCount == 0 {
+		log.Printf("parsed-job-worker batch_done rows=0 processed=0 skipped=0")
+		return 0, nil
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var processed int64
+	var skipped int64
+	var firstErr atomic.Value
+	var errOnce sync.Once
+	reportErr := func(err error) {
+		if err == nil {
+			return
+		}
+		errOnce.Do(func() {
+			firstErr.Store(err)
+			cancel()
+		})
+	}
+
+	processRow := func(ctx context.Context, row rawRow) (int, int, error) {
+		processedInc := 0
+		skippedInc := 0
 		payload := map[string]any{}
 		if !row.rawJSON.Valid || row.rawJSON.String == "" {
 			if _, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true WHERE id = ?`, row.id); err != nil {
-				return processed, err
+				return processedInc, skippedInc, err
 			}
-			processed++
-			skipped++
-			continue
+			return 1, 1, nil
 		}
 		if err := json.Unmarshal([]byte(row.rawJSON.String), &payload); err != nil {
 			if _, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true WHERE id = ?`, row.id); err != nil {
-				return processed, err
+				return processedInc, skippedInc, err
 			}
-			processed++
-			skipped++
-			continue
+			return 1, 1, nil
 		}
 		log.Printf("parsed-job-worker upsert_start raw_job_id=%d source=%s", row.id, row.source)
 		sourceCreatedAt := parseDT(payload["created_at"])
@@ -1586,15 +1614,13 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		companyID, companyErr := s.upsertCompanyFromPayload(ctx, payload, plugin)
 		if companyErr != nil {
 			log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, companyErr)
-			skipped++
-			continue
+			return processedInc, skippedInc + 1, nil
 		}
 		createdAtSourceValue := formatNullableTime(sourceCreatedAt)
 		duplicateID, isDuplicate, duplicateErr := s.findDuplicateCrossSourceParsedJob(ctx, row.id, row.source, payload, companyID)
 		if duplicateErr != nil {
 			log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, duplicateErr)
-			skipped++
-			continue
+			return processedInc, skippedInc + 1, nil
 		}
 
 		if isDuplicate {
@@ -1602,8 +1628,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				var previousCreatedAt sql.NullTime
 				if err := s.DB.SQL.QueryRowContext(ctx, `SELECT created_at_source FROM parsed_jobs WHERE id = ? LIMIT 1`, duplicateID).Scan(&previousCreatedAt); err != nil {
 					log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
-					skipped++
-					continue
+					return processedInc, skippedInc + 1, nil
 				}
 				if previousCreatedAt.Valid {
 					createdAtSourceValue = formatNullableTime(&previousCreatedAt.Time)
@@ -1622,8 +1647,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 					return execErr
 				}); err != nil {
 					log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
-					skipped++
-					continue
+					return processedInc, skippedInc + 1, nil
 				}
 				log.Printf("parsed-job-worker duplicate_replaced existing_parsed_id=%d raw_job_id=%d source=%s", duplicateID, row.id, row.source)
 			} else {
@@ -1634,11 +1658,9 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 					return execErr
 				}); err != nil {
 					log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
-					skipped++
-					continue
+					return processedInc, skippedInc + 1, nil
 				}
-				processed++
-				continue
+				return processedInc + 1, skippedInc, nil
 			}
 		}
 
@@ -1677,8 +1699,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				inferredTitle, inferredFunction, err := s.findSimilarRemoteCategories(ctx, stringValue(payload["roleTitle"]), normalizedTechStack)
 				if err != nil {
 					log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
-					skipped++
-					continue
+					return processedInc, skippedInc + 1, nil
 				}
 				categorizedTitle = stringFromPayload(inferredTitle)
 				categorizedFunction = stringFromPayload(inferredFunction)
@@ -1686,7 +1707,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		}
 
 		retries, retryDelay := parsedLockRetryConfig()
-		err = database.RetryLocked(retries, retryDelay, func() error {
+		err := database.RetryLocked(retries, retryDelay, func() error {
 			_, execErr := s.DB.SQL.ExecContext(
 				ctx,
 				`INSERT INTO parsed_jobs (
@@ -1850,8 +1871,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		})
 		if err != nil {
 			log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
-			skipped++
-			continue
+			return processedInc, skippedInc + 1, nil
 		}
 		retries, retryDelay = parsedLockRetryConfig()
 		if err := database.RetryLocked(retries, retryDelay, func() error {
@@ -1859,14 +1879,47 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			return err
 		}); err != nil {
 			log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
-			skipped++
-			continue
+			return processedInc, skippedInc + 1, nil
 		}
 		log.Printf("parsed-job-worker upsert_done raw_job_id=%d source=%s", row.id, row.source)
-		processed++
+		return processedInc + 1, skippedInc, nil
 	}
-	log.Printf("parsed-job-worker batch_done rows=%d processed=%d skipped=%d", len(pending), processed, skipped)
-	return processed, nil
+
+	rowCh := make(chan rawRow)
+	var wg sync.WaitGroup
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for row := range rowCh {
+				if err := ctx.Err(); err != nil {
+					return
+				}
+				proc, skip, err := processRow(ctx, row)
+				if err != nil {
+					reportErr(err)
+					return
+				}
+				if proc > 0 {
+					atomic.AddInt64(&processed, int64(proc))
+				}
+				if skip > 0 {
+					atomic.AddInt64(&skipped, int64(skip))
+				}
+			}
+		}()
+	}
+	for _, row := range pending {
+		rowCh <- row
+	}
+	close(rowCh)
+	wg.Wait()
+
+	if err := firstErr.Load(); err != nil {
+		return int(atomic.LoadInt64(&processed)), err.(error)
+	}
+	log.Printf("parsed-job-worker batch_done rows=%d processed=%d skipped=%d", len(pending), atomic.LoadInt64(&processed), atomic.LoadInt64(&skipped))
+	return int(atomic.LoadInt64(&processed)), nil
 }
 
 func normalizeNameForKey(value string) string {

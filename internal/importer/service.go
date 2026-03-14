@@ -18,6 +18,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -58,6 +60,7 @@ type Config struct {
 	EnabledSources      map[string]struct{}
 	RunOnce             bool
 	ErrorBackoffSeconds int
+	WorkerCount         int
 }
 
 type Service struct {
@@ -741,62 +744,103 @@ func (s *Service) RunOnceWithContext(ctx context.Context) error {
 		}
 		return nil
 	}
-	remainingRowsBudget := batchSize
-	for _, payload := range payloads {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if remainingRowsBudget <= 0 {
-			break
-		}
-		payloadRows, skippedInvalid, supported := ParseRowsForSourcePayload(payload.Source, payload.PayloadType, payload.BodyText)
-		if !supported {
-			log.Printf("importer skipping unsupported payload_id=%d source=%s payload_type=%s", payload.ID, payload.Source, payload.PayloadType)
-			continue
-		}
-		if len(payloadRows) == 0 {
-			log.Printf("importer kept empty payload_id=%d skipped_invalid=%d", payload.ID, skippedInvalid)
-			continue
-		}
-
-		toProcessCount := len(payloadRows)
-		if toProcessCount > remainingRowsBudget {
-			toProcessCount = remainingRowsBudget
-		}
-		rowsToProcess := payloadRows[:toProcessCount]
-		unprocessedRows := payloadRows[toProcessCount:]
-
-		stats, failedRows, _, err := s.ImportRawUSJobsRows(rowsToProcess, flushBufferBatchSize, payload.Source)
-		if err != nil {
-			log.Printf("raw-import-worker payload_failed payload_id=%d source=%s error=%v", payload.ID, payload.Source, err)
-			continue
-		}
-		stats.SkippedInvalid = skippedInvalid
-		failedRowsList := FailedImportRowsToList(failedRows)
-		remainingRows := append(failedRowsList, unprocessedRows...)
-		remainingRowsBudget -= toProcessCount
-
-		if len(remainingRows) > 0 {
-			var err error
-			serializedRows := make([]map[string]any, 0, len(remainingRows))
-			for _, row := range remainingRows {
-				serializedRows = append(serializedRows, serializeRowForSource(row))
-			}
-			err = s.ReplaceSourcePayloadRows(payload.ID, payload.Source, serializedRows)
-			if err != nil {
-				log.Printf("raw-import-worker payload_update_failed payload_id=%d source=%s error=%v", payload.ID, payload.Source, err)
-				continue
-			}
-			log.Printf("importer partial payload_id=%d seen=%d inserted=%d updated=%d skipped_invalid=%d failed_db=%d remaining_rows=%d remaining_budget=%d", payload.ID, stats.Seen, stats.Inserted, stats.Updated, stats.SkippedInvalid, stats.FailedDB, len(remainingRows), remainingRowsBudget)
-			continue
-		}
-		if err := s.DeletePayload(payload.ID); err != nil {
-			log.Printf("raw-import-worker payload_delete_failed payload_id=%d source=%s error=%v", payload.ID, payload.Source, err)
-			continue
-		}
-		log.Printf("importer imported payload_id=%d seen=%d inserted=%d updated=%d skipped_invalid=%d failed_db=%d", payload.ID, stats.Seen, stats.Inserted, stats.Updated, stats.SkippedInvalid, stats.FailedDB)
+	remainingRowsBudget := int64(batchSize)
+	workerCount := s.Config.WorkerCount
+	if workerCount < 1 {
+		workerCount = 1
 	}
-	log.Printf("raw-import-worker cycle_complete processed_payloads=%d remaining_rows_budget=%d", len(payloads), remainingRowsBudget)
+	if workerCount > len(payloads) {
+		workerCount = len(payloads)
+	}
+	if workerCount == 0 {
+		log.Printf("raw-import-worker cycle_complete processed_payloads=0 remaining_rows_budget=%d", remainingRowsBudget)
+		return nil
+	}
+	payloadCh := make(chan struct {
+		ID          int64
+		Source      string
+		PayloadType string
+		BodyText    string
+	})
+	var wg sync.WaitGroup
+	reserveBudget := func(request int) int {
+		for {
+			current := atomic.LoadInt64(&remainingRowsBudget)
+			if current <= 0 {
+				return 0
+			}
+			take := int64(request)
+			if take > current {
+				take = current
+			}
+			if atomic.CompareAndSwapInt64(&remainingRowsBudget, current, current-take) {
+				return int(take)
+			}
+		}
+	}
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for payload := range payloadCh {
+				if err := ctx.Err(); err != nil {
+					return
+				}
+				payloadRows, skippedInvalid, supported := ParseRowsForSourcePayload(payload.Source, payload.PayloadType, payload.BodyText)
+				if !supported {
+					log.Printf("importer skipping unsupported payload_id=%d source=%s payload_type=%s", payload.ID, payload.Source, payload.PayloadType)
+					continue
+				}
+				if len(payloadRows) == 0 {
+					log.Printf("importer kept empty payload_id=%d skipped_invalid=%d", payload.ID, skippedInvalid)
+					continue
+				}
+
+				toProcessCount := reserveBudget(len(payloadRows))
+				if toProcessCount <= 0 {
+					log.Printf("importer payload_budget_exhausted payload_id=%d source=%s", payload.ID, payload.Source)
+					continue
+				}
+				rowsToProcess := payloadRows[:toProcessCount]
+				unprocessedRows := payloadRows[toProcessCount:]
+
+				stats, failedRows, _, err := s.ImportRawUSJobsRows(rowsToProcess, flushBufferBatchSize, payload.Source)
+				if err != nil {
+					log.Printf("raw-import-worker payload_failed payload_id=%d source=%s error=%v", payload.ID, payload.Source, err)
+					continue
+				}
+				stats.SkippedInvalid = skippedInvalid
+				failedRowsList := FailedImportRowsToList(failedRows)
+				remainingRows := append(failedRowsList, unprocessedRows...)
+
+				if len(remainingRows) > 0 {
+					serializedRows := make([]map[string]any, 0, len(remainingRows))
+					for _, row := range remainingRows {
+						serializedRows = append(serializedRows, serializeRowForSource(row))
+					}
+					if err := s.ReplaceSourcePayloadRows(payload.ID, payload.Source, serializedRows); err != nil {
+						log.Printf("raw-import-worker payload_update_failed payload_id=%d source=%s error=%v", payload.ID, payload.Source, err)
+						continue
+					}
+					log.Printf("importer partial payload_id=%d seen=%d inserted=%d updated=%d skipped_invalid=%d failed_db=%d remaining_rows=%d remaining_budget=%d",
+						payload.ID, stats.Seen, stats.Inserted, stats.Updated, stats.SkippedInvalid, stats.FailedDB, len(remainingRows), atomic.LoadInt64(&remainingRowsBudget))
+					continue
+				}
+				if err := s.DeletePayload(payload.ID); err != nil {
+					log.Printf("raw-import-worker payload_delete_failed payload_id=%d source=%s error=%v", payload.ID, payload.Source, err)
+					continue
+				}
+				log.Printf("importer imported payload_id=%d seen=%d inserted=%d updated=%d skipped_invalid=%d failed_db=%d",
+					payload.ID, stats.Seen, stats.Inserted, stats.Updated, stats.SkippedInvalid, stats.FailedDB)
+			}
+		}()
+	}
+	for _, payload := range payloads {
+		payloadCh <- payload
+	}
+	close(payloadCh)
+	wg.Wait()
+	log.Printf("raw-import-worker cycle_complete processed_payloads=%d remaining_rows_budget=%d", len(payloads), atomic.LoadInt64(&remainingRowsBudget))
 	return nil
 }
 
