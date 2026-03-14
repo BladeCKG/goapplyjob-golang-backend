@@ -31,8 +31,9 @@ type GroqJobClassifier struct {
 var defaultGroqClassifier = &GroqJobClassifier{}
 
 var groqCategoryCache = struct {
-	mu    sync.RWMutex
-	items []string
+	mu        sync.RWMutex
+	items     []string
+	functions map[string]string
 }{}
 
 var groqAPIKeyRing = struct {
@@ -59,6 +60,7 @@ func SetCachedGroqCategorizedJobTitles(titles []string) {
 	}
 	groqCategoryCache.mu.Lock()
 	groqCategoryCache.items = normalized
+	groqCategoryCache.functions = nil
 	groqCategoryCache.mu.Unlock()
 }
 
@@ -519,43 +521,65 @@ func containsCaseSensitive(values []string, expected string) bool {
 }
 
 func (s *Service) loadAllowedJobCategoriesForGroq(ctx context.Context) ([]string, error) {
+	categories, _, err := s.loadAllowedJobCategoriesAndFunctionsForGroq(ctx)
+	return categories, err
+}
+
+func (s *Service) loadAllowedJobCategoriesAndFunctionsForGroq(ctx context.Context) ([]string, map[string]string, error) {
 	groqCategoryCache.mu.RLock()
 	cached := append([]string(nil), groqCategoryCache.items...)
+	cachedFunctions := map[string]string{}
+	for key, value := range groqCategoryCache.functions {
+		cachedFunctions[key] = value
+	}
 	groqCategoryCache.mu.RUnlock()
 	if len(cached) > 0 {
 		if !containsCaseSensitive(cached, "Blank") {
 			cached = append(cached, "Blank")
 		}
-		return cached, nil
+		return cached, cachedFunctions, nil
 	}
 	log.Printf("parsed-job-worker groq_category_cache_empty_fallback=db")
 
 	rows, err := s.DB.SQL.QueryContext(
 		ctx,
-		`SELECT DISTINCT categorized_job_title
+		`SELECT categorized_job_title, categorized_job_function
 		   FROM parsed_jobs
 		  WHERE categorized_job_title IS NOT NULL
 		    AND categorized_job_title != ''
-		  ORDER BY categorized_job_title ASC`,
+		    AND categorized_job_function IS NOT NULL
+		    AND categorized_job_function != ''
+		  GROUP BY categorized_job_title, categorized_job_function
+		  ORDER BY categorized_job_title ASC, COUNT(id) DESC, categorized_job_function ASC`,
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 
 	out := make([]string, 0, 128)
+	functions := map[string]string{}
+	seenTitles := map[string]struct{}{}
 	for rows.Next() {
 		var title sql.NullString
-		if scanErr := rows.Scan(&title); scanErr != nil {
-			return nil, scanErr
+		var function sql.NullString
+		if scanErr := rows.Scan(&title, &function); scanErr != nil {
+			return nil, nil, scanErr
 		}
-		trimmed := strings.TrimSpace(title.String)
-		if trimmed != "" {
-			out = append(out, trimmed)
+		titleString := title.String
+		if _, exists := seenTitles[titleString]; !exists {
+			seenTitles[titleString] = struct{}{}
+			out = append(out, titleString)
+		}
+		if _, exists := functions[titleString]; !exists {
+			functionValue := function.String
+			if functionValue != "" {
+				functions[titleString] = functionValue
+			}
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !containsCaseSensitive(out, "Blank") {
 		out = append(out, "Blank")
@@ -563,7 +587,8 @@ func (s *Service) loadAllowedJobCategoriesForGroq(ctx context.Context) ([]string
 
 	groqCategoryCache.mu.Lock()
 	groqCategoryCache.items = append([]string(nil), out...)
+	groqCategoryCache.functions = functions
 	groqCategoryCache.mu.Unlock()
 
-	return out, nil
+	return out, functions, nil
 }

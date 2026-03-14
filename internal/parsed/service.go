@@ -303,7 +303,7 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, ro
 	categorizedFunction := ""
 
 	if len(normalizedTechStack) == 0 {
-		allowedCategories, _ := s.loadAllowedJobCategoriesForGroq(ctx)
+		allowedCategories, categoryFunctions, _ := s.loadAllowedJobCategoriesAndFunctionsForGroq(ctx)
 		if shouldUseGroqClassification(stringValue(roleTitle)) {
 			groqCategory, groqRequiredSkills := classifyJobTitleWithGroqSync(
 				stringValue(roleTitle),
@@ -312,6 +312,9 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, ro
 			)
 			if strings.TrimSpace(groqCategory) != "" {
 				categorizedTitle = strings.TrimSpace(groqCategory)
+				if categorizedFunction == "" {
+					categorizedFunction = categoryFunctions[categorizedTitle]
+				}
 			}
 			if len(groqRequiredSkills) > 0 {
 				normalizedTechStack = normalizeTechStack(groqRequiredSkills)
@@ -323,6 +326,9 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, ro
 			)
 			if strings.TrimSpace(groqCategory) != "" {
 				categorizedTitle = strings.TrimSpace(groqCategory)
+				if categorizedFunction == "" {
+					categorizedFunction = categoryFunctions[categorizedTitle]
+				}
 			}
 		}
 	}
@@ -334,13 +340,7 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, ro
 		categorizedTitle = strings.TrimSpace(inferredTitle)
 		categorizedFunction = strings.TrimSpace(inferredFunction)
 	}
-	if categorizedTitle != "" && categorizedFunction == "" {
-		resolvedFunction, err := s.resolveJobFunctionForCategory(ctx, categorizedTitle)
-		if err != nil {
-			return "", "", nil, err
-		}
-		categorizedFunction = strings.TrimSpace(resolvedFunction)
-	}
+
 	return categorizedTitle, categorizedFunction, normalizedTechStack, nil
 }
 
@@ -1662,7 +1662,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		categorizedFunction := stringFromPayload(payload["categorizedJobFunction"])
 		if inferCategories && categorizedTitle == nil {
 			if len(normalizedTechStack) == 0 {
-				allowedCategories, _ := s.loadAllowedJobCategoriesForGroq(ctx)
+				allowedCategories, categoryFunctions, _ := s.loadAllowedJobCategoriesAndFunctionsForGroq(ctx)
 				if shouldUseGroqClassification(stringValue(payload["roleTitle"])) {
 					log.Printf("parsed-job-worker groq_title_classify_start raw_job_id=%d source=%s role_title=%s", row.id, row.source, stringValue(payload["roleTitle"]))
 					groqCategory, groqRequiredSkills := classifyJobTitleWithGroqSync(
@@ -1670,8 +1670,9 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 						stringValue(payload["roleDescription"]),
 						allowedCategories,
 					)
-					if strings.TrimSpace(groqCategory) != "" {
-						categorizedTitle = strings.TrimSpace(groqCategory)
+					if groqCategory != "" {
+						categorizedTitle = groqCategory
+						categorizedFunction = categoryFunctions[groqCategory]
 					}
 					if len(groqRequiredSkills) > 0 {
 						normalizedTechStack = normalizeTechStack(groqRequiredSkills)
@@ -1682,8 +1683,10 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 						stringValue(payload["roleTitle"]),
 						allowedCategories,
 					)
-					if strings.TrimSpace(groqCategory) != "" {
-						categorizedTitle = strings.TrimSpace(groqCategory)
+
+					if groqCategory != "" {
+						categorizedTitle = groqCategory
+						categorizedFunction = categoryFunctions[groqCategory]
 					}
 				}
 			}
