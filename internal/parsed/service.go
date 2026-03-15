@@ -1264,7 +1264,7 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 		return anyCandidateTitle, anyCandidateFunction, nil
 	}
 
-	return "", "", nil
+	return "Any", "Any", nil
 }
 
 func (s *Service) resolveJobFunctionForCategory(ctx context.Context, category string) (string, error) {
