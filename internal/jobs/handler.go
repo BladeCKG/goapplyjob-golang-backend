@@ -718,7 +718,7 @@ LIMIT 1
 	filterInput := h.buildListingFilterInput(c, currentUser, true)
 
 	whereSQL, whereArgs := buildJobsWhereSQL(filterInput)
-	totalSQL := `SELECT COUNT(p.id)::bigint AS total, COUNT(DISTINCT p.company_id)::bigint AS company_count FROM parsed_jobs p`
+	totalSQL := `SELECT COUNT(p.id)::bigint AS total, COUNT(DISTINCT p.company_id)::bigint AS company_count FROM parsed_jobs p LEFT JOIN parsed_companies c ON c.id = p.company_id`
 	if whereSQL != "" {
 		totalSQL += " WHERE " + whereSQL
 	}
@@ -899,14 +899,19 @@ func buildJobsWhereSQL(input listingFilterInput) (string, []any) {
 				continue
 			}
 			andParts := make([]string, 0, len(group))
+			companyParts := make([]string, 0, len(group))
 			for _, tok := range group {
 				if strings.TrimSpace(tok) == "" {
 					continue
 				}
-				andParts = append(andParts, fmt.Sprintf("COALESCE(p.role_title, '') ILIKE ('%%' || %s::text || '%%')", b.add(tok)))
+				andParts = append(andParts, fmt.Sprintf("p.role_title ILIKE ('%%' || %s::text || '%%')", b.add(tok)))
+				companyParts = append(companyParts, fmt.Sprintf("c.name ILIKE ('%%' || %s::text || '%%')", b.add(tok)))
 			}
 			if len(andParts) > 0 {
 				titleOr = append(titleOr, "("+strings.Join(andParts, " AND ")+")")
+			}
+			if len(companyParts) > 0 {
+				titleOr = append(titleOr, "("+strings.Join(companyParts, " AND ")+")")
 			}
 		}
 	}
@@ -916,15 +921,7 @@ func buildJobsWhereSQL(input listingFilterInput) (string, []any) {
 
 	if strings.TrimSpace(input.CompanyFilter) != "" {
 		ph := b.add(input.CompanyFilter)
-		clauses = append(clauses, fmt.Sprintf(`EXISTS (
-SELECT 1
-FROM parsed_companies c
-WHERE c.id = p.company_id
-  AND (
-    lower(trim(COALESCE(c.slug, ''))) = %s::text
-    OR lower(trim(COALESCE(c.name, ''))) = %s::text
-  )
-)`, ph, ph))
+		clauses = append(clauses, fmt.Sprintf("(c.slug = %s::text OR lower(c.name) = %s::text)", ph, ph))
 	}
 
 	if input.HasStructuredLocation {
@@ -1030,7 +1027,7 @@ func buildJobsIDsSQL(input listingFilterInput, whereSQL string, whereArgs []any,
 	args = append(args, whereArgs...)
 	b := sqlArgsBuilder{args: args}
 
-	sqlText := `SELECT p.id FROM parsed_jobs p`
+	sqlText := `SELECT p.id FROM parsed_jobs p LEFT JOIN parsed_companies c ON c.id = p.company_id`
 	if whereSQL != "" {
 		sqlText += " WHERE " + whereSQL
 	}
