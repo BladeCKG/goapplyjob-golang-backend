@@ -99,7 +99,7 @@ func ParseRawHTML(htmlText, _ string) map[string]any {
 		return map[string]any{}
 	}
 
-	applyURL := stringValue(pageProps["applyURL"])
+	applyURL := stringValue(jobDetails["applyURL"])
 	roleTitle := stringValue(jobDetails["title"])
 	roleDescription := stringValue(jobDetails["description"])
 	jobSummary := stringValue(jobDetails["jobSummary"])
