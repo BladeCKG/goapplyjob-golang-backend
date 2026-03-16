@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -64,6 +65,7 @@ func (h *Handler) Register(router gin.IRouter) {
 	router.POST("/auth/password/signup", h.passwordSignup)
 	router.POST("/auth/password/login", h.passwordLogin)
 	router.GET("/auth/me", h.me)
+	router.PATCH("/auth/me", h.updateMe)
 	router.POST("/auth/password/change", h.passwordChange)
 	router.POST("/auth/logout", h.logout)
 }
@@ -81,6 +83,7 @@ func (h *Handler) CurrentUser(c *gin.Context) (*User, error) {
 	if err != nil {
 		return nil, err
 	}
+	h.touchLastSeen(c.Request.Context(), row.ID)
 	return &User{ID: row.ID, Email: row.Email}, nil
 }
 
@@ -478,7 +481,58 @@ func (h *Handler) me(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Not authenticated"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"id": user.ID, "email": user.Email})
+	lastSeen, lastJobFilters := h.getUserMeta(c.Request.Context(), user.ID)
+	c.JSON(http.StatusOK, gin.H{
+		"id":                    user.ID,
+		"email":                 user.Email,
+		"last_seen_at":          lastSeen,
+		"last_job_filters_json": lastJobFilters,
+	})
+}
+
+func (h *Handler) updateMe(c *gin.Context) {
+	user, err := h.CurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Not authenticated"})
+		return
+	}
+	var payload struct {
+		LastJobFiltersJSON *json.RawMessage `json:"last_job_filters_json"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid request"})
+		return
+	}
+
+	var stored any = nil
+	if payload.LastJobFiltersJSON != nil {
+		raw := strings.TrimSpace(string(*payload.LastJobFiltersJSON))
+		if raw != "" && raw != "null" {
+			var parsed any
+			if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid last_job_filters_json"})
+				return
+			}
+			stored = raw
+		}
+	}
+
+	if _, err := h.db.SQL.ExecContext(
+		c.Request.Context(),
+		`UPDATE auth_users SET last_job_filters_json = ? WHERE id = ?`,
+		stored, user.ID,
+	); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to update user profile"})
+		return
+	}
+
+	lastSeen, lastJobFilters := h.getUserMeta(c.Request.Context(), user.ID)
+	c.JSON(http.StatusOK, gin.H{
+		"id":                    user.ID,
+		"email":                 user.Email,
+		"last_seen_at":          lastSeen,
+		"last_job_filters_json": lastJobFilters,
+	})
 }
 func (h *Handler) passwordChange(c *gin.Context) {
 	user, err := h.CurrentUser(c)
@@ -571,7 +625,55 @@ func (h *Handler) createSessionForUser(c *gin.Context, userID int32) (string, er
 	}); err != nil {
 		return "", err
 	}
+	h.touchLastSeen(c.Request.Context(), userID)
 	return sessionToken, nil
+}
+
+func (h *Handler) touchLastSeen(ctx context.Context, userID int32) {
+	if userID <= 0 {
+		return
+	}
+	var lastSeen sql.NullTime
+	if err := h.db.SQL.QueryRowContext(ctx, `SELECT last_seen_at FROM auth_users WHERE id = ?`, userID).Scan(&lastSeen); err != nil {
+		return
+	}
+	now := utcNow()
+	if lastSeen.Valid {
+		lastSeenUTC := lastSeen.Time.UTC()
+		if now.Sub(lastSeenUTC) < 5*time.Minute {
+			return
+		}
+	}
+	_, _ = h.db.SQL.ExecContext(ctx, `UPDATE auth_users SET last_seen_at = ? WHERE id = ?`, now, userID)
+}
+
+func (h *Handler) getUserMeta(ctx context.Context, userID int32) (any, any) {
+	var lastSeen sql.NullTime
+	var lastJobFilters sql.NullString
+	if err := h.db.SQL.QueryRowContext(
+		ctx,
+		`SELECT last_seen_at, last_job_filters_json::text FROM auth_users WHERE id = ?`,
+		userID,
+	).Scan(&lastSeen, &lastJobFilters); err != nil {
+		return nil, nil
+	}
+
+	var lastSeenValue any = nil
+	if lastSeen.Valid {
+		lastSeenValue = lastSeen.Time.UTC().Format(time.RFC3339Nano)
+	}
+
+	var lastJobFiltersValue any = nil
+	if lastJobFilters.Valid && strings.TrimSpace(lastJobFilters.String) != "" {
+		var parsed any
+		if err := json.Unmarshal([]byte(lastJobFilters.String), &parsed); err == nil {
+			lastJobFiltersValue = parsed
+		} else {
+			lastJobFiltersValue = lastJobFilters.String
+		}
+	}
+
+	return lastSeenValue, lastJobFiltersValue
 }
 
 func (h *Handler) ensureDefaultFreeSubscription(c *gin.Context, userID int32) error {
