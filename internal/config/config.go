@@ -25,11 +25,13 @@ type Config struct {
 	EmailProvider                 string
 	EmailProviders                string
 	MailtrapAPIToken              string
+	MailtrapAPITokens             string
 	MailtrapFromEmail             string
 	MailtrapFromName              string
 	MailtrapUseSandbox            bool
 	MailtrapInboxID               string
 	BrevoAPIKey                   string
+	BrevoAPIKeys                  string
 	BrevoFromEmail                string
 	BrevoFromName                 string
 	BrevoAPIURL                   string
@@ -89,11 +91,13 @@ func Load() Config {
 		EmailProvider:                 getenv("EMAIL_PROVIDER", "brevo"),
 		EmailProviders:                getenv("EMAIL_PROVIDERS", ""),
 		MailtrapAPIToken:              getenv("MAILTRAP_API_TOKEN", ""),
+		MailtrapAPITokens:             getenv("MAILTRAP_API_TOKENS", ""),
 		MailtrapFromEmail:             getenv("MAILTRAP_FROM_EMAIL", ""),
 		MailtrapFromName:              getenv("MAILTRAP_FROM_NAME", "GoApplyJob"),
 		MailtrapUseSandbox:            getenvBool("MAILTRAP_USE_SANDBOX", false),
 		MailtrapInboxID:               getenv("MAILTRAP_INBOX_ID", ""),
 		BrevoAPIKey:                   getenv("BREVO_API_KEY", ""),
+		BrevoAPIKeys:                  getenv("BREVO_API_KEYS", ""),
 		BrevoFromEmail:                getenv("BREVO_FROM_EMAIL", ""),
 		BrevoFromName:                 getenv("BREVO_FROM_NAME", "GoApplyJob"),
 		BrevoAPIURL:                   getenv("BREVO_API_URL", "https://api.brevo.com/v3/smtp/email"),

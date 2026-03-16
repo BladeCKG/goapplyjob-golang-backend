@@ -3,9 +3,7 @@ package email
 import (
 	"bytes"
 	"embed"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/smtp"
 	"strings"
@@ -16,8 +14,6 @@ import (
 
 const (
 	defaultProvider = "brevo"
-	defaultBrevoURL = "https://api.brevo.com/v3/smtp/email"
-	defaultMailtrap = "https://send.api.mailtrap.io/api/send"
 )
 
 //go:embed templates/verification_email.html templates/verification_email_light.html
@@ -139,10 +135,10 @@ func (s *Service) resolveProviders() []string {
 		return []string{provider}
 	}
 	out := []string{}
-	if strings.TrimSpace(s.cfg.MailtrapAPIToken) != "" && strings.TrimSpace(s.cfg.MailtrapFromEmail) != "" {
+	if len(collectMailtrapKeys(s.cfg)) > 0 && strings.TrimSpace(s.cfg.MailtrapFromEmail) != "" {
 		out = append(out, "mailtrap")
 	}
-	if strings.TrimSpace(s.cfg.BrevoAPIKey) != "" && strings.TrimSpace(s.cfg.BrevoFromEmail) != "" {
+	if len(collectBrevoKeys(s.cfg)) > 0 && strings.TrimSpace(s.cfg.BrevoFromEmail) != "" {
 		out = append(out, "brevo")
 	}
 	if strings.TrimSpace(s.cfg.SMTPHost) != "" && (strings.TrimSpace(s.cfg.SMTPFrom) != "" || strings.TrimSpace(s.cfg.SMTPUser) != "") {
@@ -152,81 +148,6 @@ func (s *Service) resolveProviders() []string {
 		return []string{"smtp"}
 	}
 	return out
-}
-
-func (s *Service) sendViaMailtrap(toEmail, siteName, code, textContent, htmlContent string) error {
-	if strings.TrimSpace(s.cfg.MailtrapAPIToken) == "" || strings.TrimSpace(s.cfg.MailtrapFromEmail) == "" {
-		return fmt.Errorf("Mailtrap API is not configured")
-	}
-	endpoint := defaultMailtrap
-	if s.cfg.MailtrapUseSandbox && strings.TrimSpace(s.cfg.MailtrapInboxID) != "" {
-		endpoint = "https://sandbox.api.mailtrap.io/api/send/" + strings.TrimSpace(s.cfg.MailtrapInboxID)
-	}
-	body := map[string]any{
-		"from": map[string]any{
-			"email": s.cfg.MailtrapFromEmail,
-			"name":  firstNonEmpty(s.cfg.MailtrapFromName, siteName),
-		},
-		"to":      []map[string]any{{"email": toEmail}},
-		"subject": siteName + " verification code: " + code,
-		"text":    textContent,
-		"html":    htmlContent,
-	}
-	rawBody, _ := json.Marshal(body)
-	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(rawBody))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+s.cfg.MailtrapAPIToken)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("Mailtrap API email send failed: %T", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= http.StatusBadRequest {
-		bodyText, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
-		return fmt.Errorf("Mailtrap API email send failed: status=%d body=%s", resp.StatusCode, string(bodyText))
-	}
-	return nil
-}
-
-func (s *Service) sendViaBrevo(toEmail, siteName, code, textContent, htmlContent string) error {
-	if strings.TrimSpace(s.cfg.BrevoAPIKey) == "" || strings.TrimSpace(s.cfg.BrevoFromEmail) == "" {
-		return fmt.Errorf("Brevo email API is not configured")
-	}
-	apiURL := strings.TrimSpace(s.cfg.BrevoAPIURL)
-	if apiURL == "" {
-		apiURL = defaultBrevoURL
-	}
-	body := map[string]any{
-		"sender": map[string]any{
-			"name":  firstNonEmpty(s.cfg.BrevoFromName, siteName),
-			"email": s.cfg.BrevoFromEmail,
-		},
-		"to":          []map[string]any{{"email": toEmail}},
-		"subject":     siteName + " verification code: " + code,
-		"htmlContent": htmlContent,
-		"textContent": textContent,
-	}
-	rawBody, _ := json.Marshal(body)
-	req, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewReader(rawBody))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("accept", "application/json")
-	req.Header.Set("api-key", s.cfg.BrevoAPIKey)
-	req.Header.Set("content-type", "application/json")
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("Brevo API email send failed: %T", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= http.StatusBadRequest {
-		bodyText, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
-		return fmt.Errorf("Brevo API email send failed: status=%d body=%s", resp.StatusCode, string(bodyText))
-	}
-	return nil
 }
 
 func (s *Service) sendViaSMTP(toEmail, siteName, code, textContent, htmlContent string) error {
