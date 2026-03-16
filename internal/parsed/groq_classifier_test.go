@@ -2,9 +2,8 @@ package parsed
 
 import (
 	"context"
-	"testing"
-
 	"goapplyjob-golang-backend/internal/database"
+	"testing"
 )
 
 func TestCleanGroqDescriptionStripsHTML(t *testing.T) {
@@ -77,7 +76,7 @@ func TestLoadAllowedJobCategoriesAndFunctionsForGroq(t *testing.T) {
 		  (3, 'Data Analyst', 'Data Analyst', 'Business', NOW()),
 		  (4, 'Engineer', 'Software Engineer', 'Engineering', NOW()),
 		  (5, 'Ignore Title', '', 'Engineering', NOW()),
-		  (6, 'Ignore Function', 'Product Manager', '', NOW()),
+		  (6, 'Ignore Function', 'Product Manager', NULL, NOW()),
 		  (7, 'Ignore Null Function', 'Product Manager', NULL, NOW())`,
 	)
 	if err != nil {

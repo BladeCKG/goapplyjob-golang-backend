@@ -10,6 +10,7 @@ import (
 	"goapplyjob-golang-backend/internal/parsed"
 	"goapplyjob-golang-backend/internal/raw"
 	"goapplyjob-golang-backend/internal/scraper"
+	"goapplyjob-golang-backend/internal/sources/remotedotco"
 	"goapplyjob-golang-backend/internal/watcher"
 	"goapplyjob-golang-backend/internal/workerlog"
 	"log"
@@ -128,7 +129,7 @@ func main() {
 					WorkerCount:           config.GetenvInt("RAW_JOB_WORKER_COUNT", 4),
 				}, db)
 				rawSvc.EnabledSources = enabledSources
-				rawSvc.ReadHTML = makeReadHTMLWith429Retry(retries429, time.Duration(retryDelaySeconds)*time.Second)
+				rawSvc.ReadHTMLForSource = makeReadHTMLForSourceWith429Retry(retries429, time.Duration(retryDelaySeconds)*time.Second)
 
 				parsedSvc := parsed.New(parsed.Config{
 					BatchSize:           config.GetenvInt("PARSED_JOB_WORKER_BATCH_SIZE", 260),
@@ -291,20 +292,30 @@ func runCountStepWithTimeout(timeout time.Duration, fn func(context.Context) (in
 	}
 }
 
-func makeReadHTMLWith429Retry(max429Retries int, retryDelay time.Duration) raw.ReadHTMLFunc {
+func makeReadHTMLForSourceWith429Retry(max429Retries int, retryDelay time.Duration) raw.ReadHTMLForSourceFunc {
 	fetcher, err := scraper.NewCloudscraperFetcher(scraper.CloudscraperConfig{
 		Timeout: 30 * time.Second,
 	})
 	if err != nil {
 		log.Printf("worker-chain cloudscraper init failed: %v", err)
-		return func(ctx context.Context, targetURL string) (string, int, error) {
+		return func(ctx context.Context, _ string, targetURL string) (string, int, error) {
 			if ctx == nil {
 				ctx = context.Background()
 			}
 			return "", -1, errors.New("cloudscraper unavailable")
 		}
 	}
-	return func(ctx context.Context, targetURL string) (string, int, error) {
+	tlsFetcher, tlsErr := scraper.NewTLSClientFetcher(scraper.TLSClientConfig{Timeout: 30 * time.Second})
+	if tlsErr != nil {
+		log.Printf("worker-chain tls-client init failed: %v", tlsErr)
+	}
+
+	return func(ctx context.Context, source, targetURL string) (string, int, error) {
+		if tlsErr == nil && source == remotedotco.Source {
+			return tlsFetcher.ReadHTMLWithHeaders(ctx, targetURL, map[string]string{
+				"Cookie": remotedotco.Cookie,
+			})
+		}
 		return fetcher.ReadHTMLWith429Retry(ctx, targetURL, max429Retries, retryDelay)
 	}
 }

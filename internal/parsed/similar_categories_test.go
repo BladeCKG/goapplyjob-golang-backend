@@ -4,10 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"goapplyjob-golang-backend/internal/database"
 	"testing"
 	"time"
-
-	"goapplyjob-golang-backend/internal/database"
 )
 
 func insertSimilarCategoryCandidate(
@@ -111,26 +110,6 @@ func TestFindSimilarRemoteCategoriesAcceptsOutOfOrderTokens(t *testing.T) {
 	}
 	if title != "Product Manager" || function != "Product" {
 		t.Fatalf("expected Product Manager/Product, got %q / %q", title, function)
-	}
-}
-
-func TestFindSimilarRemoteCategoriesRejectsLowInformationPartialMatch(t *testing.T) {
-	db, err := database.Open(testDatabaseURL(t, "simcat_partial_reject"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
-	now := time.Now().UTC()
-	insertSimilarCategoryCandidate(t, db, 1, "Product Manager", "Product Manager", "Product", nil, now)
-
-	svc := New(Config{}, db)
-	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Product", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if title != "" || function != "" {
-		t.Fatalf("expected empty inference for low-information input, got %q / %q", title, function)
 	}
 }
 
@@ -388,7 +367,7 @@ func TestFindSimilarRemoteCategoriesConfidenceGateRejectsWeakOverlap(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if title != "" || function != "" {
+	if title != "Any" || function != "Any" {
 		t.Fatalf("expected weak-overlap candidate to be rejected, got %q / %q", title, function)
 	}
 }

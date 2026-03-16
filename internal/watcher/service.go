@@ -192,6 +192,23 @@ func (s *Service) fetchTextWithScraper(ctx context.Context, rawURL string) (stri
 	return string(data), nil
 }
 
+func (s *Service) fetchTextWithTLSClientCookie(ctx context.Context, rawURL string, cookie string) (string, error) {
+	fetcher, err := scraper.NewTLSClientFetcher(scraper.TLSClientConfig{Timeout: 30 * time.Second})
+	if err != nil {
+		return "", err
+	}
+	htmlText, status, err := fetcher.ReadHTMLWithHeaders(ctx, rawURL, map[string]string{
+		"Cookie": cookie,
+	})
+	if err != nil {
+		return "", err
+	}
+	if status < 200 || status >= 300 {
+		return "", errors.New("http status " + strconv.Itoa(status))
+	}
+	return htmlText, nil
+}
+
 func (s *Service) fetchTextForDailyRemote(ctx context.Context, rawURL string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -544,7 +561,7 @@ func (s *Service) runOnceRemoteDotCo(ctx context.Context) error {
 	previousHash, _ := statePayload["sitemap_hash"].(string)
 
 	logf("sitemap_fetch_start url=%s", s.Config.RemoteDotCoSitemapURL)
-	xmlText, err := s.fetchTextWithScraper(ctx, s.Config.RemoteDotCoSitemapURL)
+	xmlText, err := s.fetchTextWithTLSClientCookie(ctx, s.Config.RemoteDotCoSitemapURL, remotedotco.Cookie)
 	if err != nil {
 		logf("sitemap_fetch_failed error=%v", err)
 		return err

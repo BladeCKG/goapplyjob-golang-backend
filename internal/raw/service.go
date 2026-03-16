@@ -34,11 +34,13 @@ const (
 
 type (
 	ReadHTMLFunc func(context.Context, string) (string, int, error)
+	ReadHTMLForSourceFunc func(context.Context, string, string) (string, int, error)
 )
 
 type Service struct {
 	DB             *database.DB
 	ReadHTML       ReadHTMLFunc
+	ReadHTMLForSource ReadHTMLForSourceFunc
 	Status         StatusFunc
 	EnabledSources map[string]struct{}
 	Config         Config
@@ -63,7 +65,17 @@ func New(cfg Config, db *database.DB) *Service {
 		ReadHTML: func(context.Context, string) (string, int, error) {
 			return "", 0, errors.New("read html not configured")
 		},
+		ReadHTMLForSource: func(context.Context, string, string) (string, int, error) {
+			return "", 0, errors.New("read html not configured")
+		},
 	}
+}
+
+func (s *Service) readHTMLForSource(ctx context.Context, source, targetURL string) (string, int, error) {
+	if s.ReadHTMLForSource != nil {
+		return s.ReadHTMLForSource(ctx, source, targetURL)
+	}
+	return s.ReadHTML(ctx, targetURL)
 }
 
 func (s *Service) RunOnce(ctx context.Context) (int, error) {
@@ -343,7 +355,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				}
 				targetURL := toTargetJobURLForSource(job.source, job.url)
 				log.Printf("raw-us-job-worker fetch_start job_id=%d source=%s target_url=%s", job.id, job.source, targetURL)
-				html, statusCode, err := s.ReadHTML(ctx, targetURL)
+				html, statusCode, err := s.readHTMLForSource(ctx, job.source, targetURL)
 				if err != nil {
 					reportErr(err)
 					return

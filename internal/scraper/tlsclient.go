@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"math/rand"
+	"strings"
 	"time"
 
 	fhttp "github.com/bogdanfinn/fhttp"
@@ -89,6 +90,71 @@ func (f *TLSClientFetcher) ReadHTML(ctx context.Context, targetURL string) (stri
 			"Sec-Fetch-Site":            {"none"},
 			"Sec-Fetch-User":            {"?1"},
 			"Referer":                   {"https://www.google.com/"},
+		}
+
+		resp, err := f.client.Do(req)
+		if err != nil {
+			ch <- result{body: "", status: -1, err: err}
+			return
+		}
+		if resp.Body == nil {
+			ch <- result{body: "", status: -1, err: nil}
+			return
+		}
+		defer resp.Body.Close()
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			ch <- result{body: "", status: -1, err: readErr}
+			return
+		}
+		ch <- result{body: string(body), status: resp.StatusCode, err: nil}
+	}()
+	select {
+	case <-ctx.Done():
+		return "", -1, ctx.Err()
+	case res := <-ch:
+		return res.body, res.status, res.err
+	}
+}
+
+func (f *TLSClientFetcher) ReadHTMLWithHeaders(ctx context.Context, targetURL string, headers map[string]string) (string, int, error) {
+	if f == nil {
+		return "", 0, errors.New("tls-client fetcher is nil")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	type result struct {
+		body   string
+		status int
+		err    error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		req, err := fhttp.NewRequest("GET", targetURL, nil)
+		if err != nil {
+			ch <- result{body: "", status: 0, err: err}
+			return
+		}
+		req.Header = fhttp.Header{
+			"User-Agent":                {UserAgents[rand.Intn(len(UserAgents))]},
+			"Accept":                    {"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"},
+			"Accept-Language":           {"en-US,en;q=0.9"},
+			"Accept-Encoding":           {"gzip, deflate, br"},
+			"Cache-Control":             {"no-cache"},
+			"Pragma":                    {"no-cache"},
+			"Upgrade-Insecure-Requests": {"1"},
+			"Sec-Fetch-Dest":            {"document"},
+			"Sec-Fetch-Mode":            {"navigate"},
+			"Sec-Fetch-Site":            {"none"},
+			"Sec-Fetch-User":            {"?1"},
+			"Referer":                   {"https://www.google.com/"},
+		}
+		for key, value := range headers {
+			if strings.TrimSpace(key) == "" {
+				continue
+			}
+			req.Header.Set(key, value)
 		}
 
 		resp, err := f.client.Do(req)

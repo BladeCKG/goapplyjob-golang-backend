@@ -13,6 +13,7 @@ import (
 const (
 	Source      = "remotedotco"
 	PayloadType = "delta_xml"
+	Cookie      = "bm_sv=5A8C7F1CB92FE5C2C4A41ABDED31BD15~YAAQLg7SF68pw8ycAQAApUNB6x+woxlOaUD8U+4uGiITnowuSTjYUQ1mV48EVhnpSJKdhVDfz+RkzEGchTu1dyTPhK3AYn94J3usk8zaQPys5KGNsS/FLk51rjwPXTZOJDWBjA6mczsxHknaSndu3k8YrkKk4bCGrmayS3dQdkYA1cHMAwmWVJ/MkAC3wReE0MudAARwDhHiGHUwz503y00dUtIldmi1sy52YdeoDmsAQ2dncj78q3B7QSCWgac=~1;"
 )
 
 var (
