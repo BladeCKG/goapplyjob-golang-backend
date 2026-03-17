@@ -4,11 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"goapplyjob-golang-backend/internal/locationnorm"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type LastJobFiltersPayload struct {
@@ -92,52 +89,6 @@ func BuildJobsWhereSQLForEmailFilters(payload LastJobFiltersPayload) (string, []
 		}
 	}
 
-	if payload.PostDateCutoff != "" {
-		if cutoff, ok := parsePostDateFrom(payload.PostDateCutoff); ok {
-			input.HasCreatedFrom = true
-			input.CreatedFrom = pgtype.Timestamptz{Time: cutoff, Valid: true}
-		}
-	} else if postDate := strings.ToLower(strings.TrimSpace(payload.PostDate)); postDate != "" {
-		nowUTC := time.Now().UTC()
-		todayStart := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 0, 0, 0, 0, time.UTC)
-		thisWeekStart := todayStart.AddDate(0, 0, -((int(todayStart.Weekday()) + 6) % 7))
-		thisMonthStart := time.Date(nowUTC.Year(), nowUTC.Month(), 1, 0, 0, 0, 0, time.UTC)
-		lastMonthStart := thisMonthStart.AddDate(0, -1, 0)
-		lastWeekStart := thisWeekStart.AddDate(0, 0, -7)
-
-		switch postDate {
-		case "today":
-			input.HasCreatedFrom = true
-			input.CreatedFrom = pgtype.Timestamptz{Time: todayStart, Valid: true}
-		case "yesterday":
-			input.HasCreatedFrom = true
-			input.CreatedFrom = pgtype.Timestamptz{Time: todayStart.AddDate(0, 0, -1), Valid: true}
-			input.HasCreatedTo = true
-			input.CreatedTo = pgtype.Timestamptz{Time: todayStart, Valid: true}
-		case "this_week":
-			input.HasCreatedFrom = true
-			input.CreatedFrom = pgtype.Timestamptz{Time: thisWeekStart, Valid: true}
-		case "previous_week":
-			input.HasCreatedFrom = true
-			input.CreatedFrom = pgtype.Timestamptz{Time: lastWeekStart, Valid: true}
-			input.HasCreatedTo = true
-			input.CreatedTo = pgtype.Timestamptz{Time: thisWeekStart, Valid: true}
-		case "this_month":
-			input.HasCreatedFrom = true
-			input.CreatedFrom = pgtype.Timestamptz{Time: thisMonthStart, Valid: true}
-		case "previous_month":
-			input.HasCreatedFrom = true
-			input.CreatedFrom = pgtype.Timestamptz{Time: lastMonthStart, Valid: true}
-			input.HasCreatedTo = true
-			input.CreatedTo = pgtype.Timestamptz{Time: thisMonthStart, Valid: true}
-		default:
-			if window, ok := postDateWindows[postDate]; ok {
-				input.HasCreatedFrom = true
-				input.CreatedFrom = pgtype.Timestamptz{Time: nowUTC.Add(-window), Valid: true}
-			}
-		}
-	}
-
 	if payload.SalaryMin != nil && *payload.SalaryMin > 0 {
 		input.HasMinSalary = true
 		input.MinSalary = *payload.SalaryMin
@@ -162,15 +113,23 @@ func BuildJobsWhereSQLForEmailFilters(payload LastJobFiltersPayload) (string, []
 	return buildJobsWhereSQL(input)
 }
 
-func BuildEmailJobsQuery(payload LastJobFiltersPayload, limit int) (string, []any) {
+func BuildEmailJobsQuery(payload LastJobFiltersPayload, userID int64, limit int) (string, []any) {
 	whereSQL, whereArgs := BuildJobsWhereSQLForEmailFilters(payload)
 	b := sqlArgsBuilder{args: append([]any{}, whereArgs...)}
 
 	sqlText := `SELECT p.role_title, c.name, c.profile_pic_url, p.url, p.slug, p.created_at_source, p.categorized_job_title, p.categorized_job_function, p.salary_human_text
 		FROM parsed_jobs p
 		LEFT JOIN parsed_companies c ON c.id = p.company_id`
+	clauses := []string{}
 	if whereSQL != "" {
-		sqlText += " WHERE " + whereSQL
+		clauses = append(clauses, whereSQL)
+	}
+	userIDAppliedPh := b.add(userID)
+	userIDHiddenPh := b.add(userID)
+	clauses = append(clauses, fmt.Sprintf("NOT EXISTS (SELECT 1 FROM user_job_actions uja WHERE uja.user_id = %s::bigint AND uja.parsed_job_id = p.id AND uja.is_applied = true)", userIDAppliedPh))
+	clauses = append(clauses, fmt.Sprintf("NOT EXISTS (SELECT 1 FROM user_job_actions uja WHERE uja.user_id = %s::bigint AND uja.parsed_job_id = p.id AND uja.is_hidden = true)", userIDHiddenPh))
+	if len(clauses) > 0 {
+		sqlText += " WHERE " + strings.Join(clauses, " AND ")
 	}
 	sqlText += " ORDER BY p.created_at_source DESC NULLS LAST"
 	sqlText += fmt.Sprintf(" LIMIT %s::int", b.add(limit))

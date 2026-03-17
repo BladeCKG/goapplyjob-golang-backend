@@ -306,7 +306,7 @@ func (h *Handler) sendMarketingEmail(c *gin.Context) {
 			}
 		}
 
-		jobQuery, args := jobs.BuildEmailJobsQuery(filters, limit)
+		jobQuery, args := jobs.BuildEmailJobsQuery(filters, userID, limit)
 		rows, err := h.db.SQL.QueryContext(c.Request.Context(), jobQuery, args...)
 		if err != nil {
 			results = append(results, resultRow{UserID: userID, Email: emailAddr, Status: "error", Message: "Query failed"})
