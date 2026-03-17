@@ -35,6 +35,8 @@ type Config struct {
 	BrevoFromEmail                string
 	BrevoFromName                 string
 	BrevoAPIURL                   string
+	SiteName                      string
+	SiteURL                       string
 	SupabaseURL                   string
 	SupabaseAnonKey               string
 	SMTPHost                      string
@@ -79,7 +81,7 @@ func Load() Config {
 		DatabaseURL:                   normalizeDatabaseURL(getenv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable")),
 		AuthCodeTTLMinutes:            getenvInt("AUTH_CODE_TTL_MINUTES", 10),
 		AuthSessionTTLMin:             getenvInt("AUTH_SESSION_TTL_MINUTES", 60*24*7),
-		AuthMagicLinkBaseURL:          getenv("AUTH_MAGIC_LINK_BASE_URL", "http://localhost:3000/auth/verify"),
+		AuthMagicLinkBaseURL:          getenv("AUTH_MAGIC_LINK_BASE_URL", "/auth/verify"),
 		AuthCookieName:                getenv("AUTH_COOKIE_NAME", "session_token"),
 		AuthCookieSecure:              getenvBool("AUTH_COOKIE_SECURE", false),
 		AuthCookieSameSite:            getenv("AUTH_COOKIE_SAMESITE", "lax"),
@@ -101,6 +103,8 @@ func Load() Config {
 		BrevoFromEmail:                getenv("BREVO_FROM_EMAIL", ""),
 		BrevoFromName:                 getenv("BREVO_FROM_NAME", "GoApplyJob"),
 		BrevoAPIURL:                   getenv("BREVO_API_URL", "https://api.brevo.com/v3/smtp/email"),
+		SiteName:                      getenv("SITE_NAME", "GoApplyJob"),
+		SiteURL:                       getenv("SITE_URL", "http://localhost:3000"),
 		SupabaseURL:                   getenv("SUPABASE_URL", ""),
 		SupabaseAnonKey:               getenv("SUPABASE_ANON_KEY", ""),
 		SMTPHost:                      getenv("SMTP_HOST", ""),

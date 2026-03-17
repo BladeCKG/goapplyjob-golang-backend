@@ -20,7 +20,7 @@ var mailtrapKeyRing = struct {
 	next int
 }{}
 
-func (s *Service) sendViaMailtrap(toEmail, siteName, code, textContent, htmlContent string) error {
+func (s *Service) sendViaMailtrap(toEmail, subject, textContent, htmlContent string) error {
 	keys := collectMailtrapKeys(s.cfg)
 	if len(keys) == 0 || strings.TrimSpace(s.cfg.MailtrapFromEmail) == "" {
 		return fmt.Errorf("Mailtrap API is not configured")
@@ -32,10 +32,10 @@ func (s *Service) sendViaMailtrap(toEmail, siteName, code, textContent, htmlCont
 	body := map[string]any{
 		"from": map[string]any{
 			"email": s.cfg.MailtrapFromEmail,
-			"name":  firstNonEmpty(s.cfg.MailtrapFromName, siteName),
+			"name":  s.cfg.MailtrapFromName,
 		},
 		"to":      []map[string]any{{"email": toEmail}},
-		"subject": siteName + " verification code: " + code,
+		"subject": subject,
 		"text":    textContent,
 		"html":    htmlContent,
 	}

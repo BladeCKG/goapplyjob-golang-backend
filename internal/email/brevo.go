@@ -20,7 +20,7 @@ var brevoKeyRing = struct {
 	next int
 }{}
 
-func (s *Service) sendViaBrevo(toEmail, siteName, code, textContent, htmlContent string) error {
+func (s *Service) sendViaBrevo(toEmail, subject, textContent, htmlContent string) error {
 	keys := collectBrevoKeys(s.cfg)
 	if len(keys) == 0 || strings.TrimSpace(s.cfg.BrevoFromEmail) == "" {
 		return fmt.Errorf("Brevo email API is not configured")
@@ -31,11 +31,11 @@ func (s *Service) sendViaBrevo(toEmail, siteName, code, textContent, htmlContent
 	}
 	body := map[string]any{
 		"sender": map[string]any{
-			"name":  firstNonEmpty(s.cfg.BrevoFromName, siteName),
+			"name":  s.cfg.BrevoFromName,
 			"email": s.cfg.BrevoFromEmail,
 		},
 		"to":          []map[string]any{{"email": toEmail}},
-		"subject":     siteName + " verification code: " + code,
+		"subject":     subject,
 		"htmlContent": htmlContent,
 		"textContent": textContent,
 	}

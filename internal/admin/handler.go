@@ -1,12 +1,15 @@
 package admin
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"goapplyjob-golang-backend/internal/auth"
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/email"
+	"goapplyjob-golang-backend/internal/jobs"
 	"goapplyjob-golang-backend/internal/parsed"
 	"net/http"
 	"strconv"
@@ -19,18 +22,26 @@ import (
 const adminEmailsEnv = "ADMIN_EMAILS"
 
 type Handler struct {
-	db   *database.DB
-	auth *auth.Handler
+	cfg          config.Config
+	db           *database.DB
+	auth         *auth.Handler
+	emailService *email.Service
 }
 
-func NewHandler(db *database.DB, authHandler *auth.Handler) *Handler {
-	return &Handler{db: db, auth: authHandler}
+func NewHandler(cfg config.Config, db *database.DB, authHandler *auth.Handler) *Handler {
+	return &Handler{
+		cfg:          cfg,
+		db:           db,
+		auth:         authHandler,
+		emailService: email.NewService(cfg),
+	}
 }
 
 func (h *Handler) Register(router gin.IRouter) {
 	router.GET("/admin/status", h.status)
 	router.GET("/admin/users", h.listUsers)
 	router.PATCH("/admin/users/:userID/subscription", h.upsertUserSubscription)
+	router.POST("/admin/users/marketing-email", h.sendMarketingEmail)
 	router.GET("/admin/watcher-payloads", h.listWatcherPayloads)
 	router.PATCH("/admin/watcher-payloads/:payloadID", h.updateWatcherPayload)
 	router.GET("/admin/raw-us-jobs", h.listRawUSJobs)
@@ -235,6 +246,135 @@ func (h *Handler) upsertUserSubscription(c *gin.Context) {
 		"ends_at":   payload.EndsAt,
 		"is_active": isActive && isFutureTimestamp(payload.EndsAt),
 	})
+}
+
+func (h *Handler) sendMarketingEmail(c *gin.Context) {
+	if _, ok := h.requireAdmin(c); !ok {
+		return
+	}
+	var payload struct {
+		UserIDs   []int64 `json:"user_ids"`
+		JobsLimit int     `json:"jobs_limit"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid request"})
+		return
+	}
+	if len(payload.UserIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "user_ids is required"})
+		return
+	}
+	limit := payload.JobsLimit
+	if limit <= 0 {
+		limit = 8
+	}
+	if limit > 25 {
+		limit = 25
+	}
+
+	type resultRow struct {
+		UserID  int64  `json:"user_id"`
+		Email   string `json:"email"`
+		Status  string `json:"status"`
+		Message string `json:"message,omitempty"`
+	}
+	results := []resultRow{}
+
+	siteURL := strings.TrimRight(h.cfg.SiteURL, "/")
+	siteName := strings.TrimSpace(h.cfg.SiteName)
+
+	for _, userID := range payload.UserIDs {
+		var emailAddr string
+		var rawFilters sql.NullString
+		if err := h.db.SQL.QueryRowContext(
+			c.Request.Context(),
+			`SELECT email, last_job_filters_json::text FROM auth_users WHERE id = ?`,
+			userID,
+		).Scan(&emailAddr, &rawFilters); err != nil {
+			results = append(results, resultRow{UserID: userID, Status: "error", Message: "User not found"})
+			continue
+		}
+		if strings.TrimSpace(emailAddr) == "" {
+			results = append(results, resultRow{UserID: userID, Status: "error", Message: "Missing email"})
+			continue
+		}
+
+		var filters jobs.LastJobFiltersPayload
+		if rawFilters.Valid && strings.TrimSpace(rawFilters.String) != "" {
+			if err := json.Unmarshal([]byte(rawFilters.String), &filters); err != nil {
+				results = append(results, resultRow{UserID: userID, Email: emailAddr, Status: "error", Message: "Invalid filters JSON"})
+				continue
+			}
+		}
+
+		jobQuery, args := jobs.BuildEmailJobsQuery(filters, limit)
+		rows, err := h.db.SQL.QueryContext(c.Request.Context(), jobQuery, args...)
+		if err != nil {
+			results = append(results, resultRow{UserID: userID, Email: emailAddr, Status: "error", Message: "Query failed"})
+			continue
+		}
+		jobsList := []email.MarketingJob{}
+		for rows.Next() {
+			var roleTitle, companyName, jobURL, slug sql.NullString
+			var createdAt sql.NullString
+			if err := rows.Scan(&roleTitle, &companyName, &jobURL, &slug, &createdAt); err != nil {
+				continue
+			}
+			link := strings.TrimSpace(jobURL.String)
+			if link == "" && strings.TrimSpace(slug.String) != "" {
+				link = siteURL + "/jobs/" + strings.TrimSpace(slug.String)
+			}
+			jobsList = append(jobsList, email.MarketingJob{
+				Title:    strings.TrimSpace(roleTitle.String),
+				Company:  strings.TrimSpace(companyName.String),
+				URL:      link,
+				PostedAt: strings.TrimSpace(createdAt.String),
+			})
+		}
+		rows.Close()
+
+		whereSQL, whereArgs := jobs.BuildJobsWhereSQLForEmailFilters(filters)
+		dailyCount := h.countMarketingJobs(c.Request.Context(), whereSQL, whereArgs, time.Now().UTC().Add(-24*time.Hour))
+		weeklyCount := h.countMarketingJobs(c.Request.Context(), whereSQL, whereArgs, time.Now().UTC().Add(-7*24*time.Hour))
+
+		firstName := strings.Split(strings.TrimSpace(emailAddr), "@")[0]
+		mailData := email.MarketingEmailData{
+			SiteName:       siteName,
+			SiteURL:        siteURL,
+			SiteLogoURL:    siteURL + "/logo.png",
+			FirstName:      firstName,
+			BrowseJobsURL:  siteURL + "/us-remote-jobs",
+			ManagePrefsURL: siteURL + "/account",
+			UnsubscribeURL: siteURL + "/account",
+			DailyNewJobs:   dailyCount,
+			WeeklyNewJobs:  weeklyCount,
+			Jobs:           jobsList,
+		}
+
+		if err := h.emailService.SendMarketingEmail(emailAddr, mailData); err != nil {
+			results = append(results, resultRow{UserID: userID, Email: emailAddr, Status: "error", Message: err.Error()})
+			continue
+		}
+		results = append(results, resultRow{UserID: userID, Email: emailAddr, Status: "sent"})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"items": results})
+}
+
+func (h *Handler) countMarketingJobs(ctx context.Context, whereSQL string, whereArgs []any, cutoff time.Time) int {
+	query := `SELECT COUNT(1) FROM parsed_jobs p LEFT JOIN parsed_companies c ON c.id = p.company_id`
+	args := append([]any{}, whereArgs...)
+	if whereSQL != "" {
+		query += " WHERE " + whereSQL + " AND p.created_at_source >= ?"
+	} else {
+		query += " WHERE p.created_at_source >= ?"
+	}
+	args = append(args, cutoff)
+	var count int
+	if err := h.db.SQL.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0
+	}
+	return count
 }
 
 func (h *Handler) listWatcherPayloads(c *gin.Context) {

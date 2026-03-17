@@ -8,8 +8,8 @@ import (
 
 	"goapplyjob-golang-backend/internal/admin"
 	"goapplyjob-golang-backend/internal/auth"
-	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/companies"
+	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/employer"
 	"goapplyjob-golang-backend/internal/jobactions"
@@ -25,7 +25,7 @@ func NewRouter(cfg config.Config, db *database.DB) *gin.Engine {
 	router.Use(accessLog())
 
 	authHandler := auth.NewHandler(cfg, db)
-	adminHandler := admin.NewHandler(db, authHandler)
+	adminHandler := admin.NewHandler(cfg, db, authHandler)
 	jobsHandler := jobs.NewHandler(cfg, db, authHandler)
 	companiesHandler := companies.NewHandler(cfg, db, authHandler)
 	if err := jobsHandler.WarmFilterCache(context.Background()); err != nil {

@@ -1,24 +1,16 @@
 package auth
 
 import (
+	"goapplyjob-golang-backend/internal/config"
 	"log"
 	"net/url"
 	"strings"
 
-	"goapplyjob-golang-backend/internal/config"
 	emailservice "goapplyjob-golang-backend/internal/email"
 )
 
-const (
-	siteName = "GoApplyJob"
-	siteURL  = "https://www.goapplyjob.online/"
-)
-
 func buildMagicLoginURL(cfg config.Config, token string) string {
-	baseURL := strings.TrimSpace(cfg.AuthMagicLinkBaseURL)
-	if baseURL == "" {
-		baseURL = strings.TrimRight(siteURL, "/") + "/auth/verify"
-	}
+	baseURL := cfg.SiteURL + cfg.AuthMagicLinkBaseURL
 	separator := "?"
 	if strings.Contains(baseURL, "?") {
 		separator = "&"
@@ -27,7 +19,7 @@ func buildMagicLoginURL(cfg config.Config, token string) string {
 }
 
 func sendVerificationEmail(cfg config.Config, email, code string, ttlMinutes int, magicLink string) error {
-	return emailservice.NewService(cfg).SendVerificationEmail(email, siteName, siteURL, code, ttlMinutes, magicLink)
+	return emailservice.NewService(cfg).SendVerificationEmail(email, cfg.SiteName, cfg.SiteURL, code, ttlMinutes, magicLink)
 }
 
 func logVerificationEmailFailure(email string, err error) {

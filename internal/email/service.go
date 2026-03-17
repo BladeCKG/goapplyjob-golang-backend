@@ -16,7 +16,7 @@ const (
 	defaultProvider = "brevo"
 )
 
-//go:embed templates/verification_email.html templates/verification_email_light.html
+//go:embed templates/verification_email.html templates/verification_email_light.html templates/marketing_email.html templates/marketing_email_light.html
 var templates embed.FS
 
 type Service struct {
@@ -57,6 +57,11 @@ func (s *Service) SendVerificationEmail(toEmail, siteName, siteURL, code string,
 		"Sign in at: " + siteURL + "\r\n\r\n" +
 		"If you did not request this code, you can ignore this email.\r\n"
 
+	subject := siteName + " verification code: " + code
+	return s.SendEmail(toEmail, subject, textContent, htmlContent)
+}
+
+func (s *Service) SendEmail(toEmail, subject, textContent, htmlContent string) error {
 	providers := s.resolveProviders()
 	if len(providers) == 0 {
 		return fmt.Errorf("No usable email providers configured")
@@ -66,11 +71,11 @@ func (s *Service) SendVerificationEmail(toEmail, siteName, siteURL, code string,
 		var err error
 		switch provider {
 		case "mailtrap":
-			err = s.sendViaMailtrap(toEmail, siteName, code, textContent, htmlContent)
+			err = s.sendViaMailtrap(toEmail, subject, textContent, htmlContent)
 		case "brevo":
-			err = s.sendViaBrevo(toEmail, siteName, code, textContent, htmlContent)
+			err = s.sendViaBrevo(toEmail, subject, textContent, htmlContent)
 		case "smtp":
-			err = s.sendViaSMTP(toEmail, siteName, code, textContent, htmlContent)
+			err = s.sendViaSMTP(toEmail, subject, textContent, htmlContent)
 		default:
 			err = fmt.Errorf("unsupported provider")
 		}
@@ -150,7 +155,7 @@ func (s *Service) resolveProviders() []string {
 	return out
 }
 
-func (s *Service) sendViaSMTP(toEmail, siteName, code, textContent, htmlContent string) error {
+func (s *Service) sendViaSMTP(toEmail, subject, textContent, htmlContent string) error {
 	smtpHost := strings.TrimSpace(s.cfg.SMTPHost)
 	smtpUser := strings.TrimSpace(s.cfg.SMTPUser)
 	smtpFrom := strings.TrimSpace(s.cfg.SMTPFrom)
@@ -163,9 +168,7 @@ func (s *Service) sendViaSMTP(toEmail, siteName, code, textContent, htmlContent 
 
 	var body bytes.Buffer
 	body.WriteString("Subject: ")
-	body.WriteString(siteName)
-	body.WriteString(" verification code: ")
-	body.WriteString(code)
+	body.WriteString(subject)
 	body.WriteString("\r\n")
 	body.WriteString("MIME-Version: 1.0\r\n")
 	body.WriteString("From: ")
