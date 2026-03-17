@@ -166,7 +166,7 @@ func BuildEmailJobsQuery(payload LastJobFiltersPayload, limit int) (string, []an
 	whereSQL, whereArgs := BuildJobsWhereSQLForEmailFilters(payload)
 	b := sqlArgsBuilder{args: append([]any{}, whereArgs...)}
 
-	sqlText := `SELECT p.role_title, c.name, p.url, p.slug, p.created_at_source
+	sqlText := `SELECT p.role_title, c.name, c.profile_pic_url, p.url, p.slug, p.created_at_source, p.categorized_job_title, p.categorized_job_function, p.salary_human_text
 		FROM parsed_jobs p
 		LEFT JOIN parsed_companies c ON c.id = p.company_id`
 	if whereSQL != "" {

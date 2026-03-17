@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -315,9 +314,10 @@ func (h *Handler) sendMarketingEmail(c *gin.Context) {
 		}
 		jobsList := []email.MarketingJob{}
 		for rows.Next() {
-			var roleTitle, companyName, jobURL, slug sql.NullString
+			var roleTitle, companyName, companyLogoURL, jobURL, slug sql.NullString
 			var createdAt sql.NullString
-			if err := rows.Scan(&roleTitle, &companyName, &jobURL, &slug, &createdAt); err != nil {
+			var categorizedTitle, categorizedFunction, salaryHumanText sql.NullString
+			if err := rows.Scan(&roleTitle, &companyName, &companyLogoURL, &jobURL, &slug, &createdAt, &categorizedTitle, &categorizedFunction, &salaryHumanText); err != nil {
 				continue
 			}
 			link := strings.TrimSpace(jobURL.String)
@@ -325,17 +325,17 @@ func (h *Handler) sendMarketingEmail(c *gin.Context) {
 				link = siteURL + "/jobs/" + strings.TrimSpace(slug.String)
 			}
 			jobsList = append(jobsList, email.MarketingJob{
-				Title:    strings.TrimSpace(roleTitle.String),
-				Company:  strings.TrimSpace(companyName.String),
-				URL:      link,
-				PostedAt: strings.TrimSpace(createdAt.String),
+				Title:               strings.TrimSpace(roleTitle.String),
+				Company:             strings.TrimSpace(companyName.String),
+				CompanyLogoURL:      strings.TrimSpace(companyLogoURL.String),
+				URL:                 link,
+				PostedAt:            strings.TrimSpace(createdAt.String),
+				CategorizedTitle:    strings.TrimSpace(categorizedTitle.String),
+				CategorizedFunction: strings.TrimSpace(categorizedFunction.String),
+				Salary:              strings.TrimSpace(salaryHumanText.String),
 			})
 		}
 		rows.Close()
-
-		whereSQL, whereArgs := jobs.BuildJobsWhereSQLForEmailFilters(filters)
-		dailyCount := h.countMarketingJobs(c.Request.Context(), whereSQL, whereArgs, time.Now().UTC().Add(-24*time.Hour))
-		weeklyCount := h.countMarketingJobs(c.Request.Context(), whereSQL, whereArgs, time.Now().UTC().Add(-7*24*time.Hour))
 
 		firstName := strings.Split(strings.TrimSpace(emailAddr), "@")[0]
 		mailData := email.MarketingEmailData{
@@ -346,8 +346,6 @@ func (h *Handler) sendMarketingEmail(c *gin.Context) {
 			BrowseJobsURL:  siteURL + "/us-remote-jobs",
 			ManagePrefsURL: siteURL + "/account",
 			UnsubscribeURL: siteURL + "/account",
-			DailyNewJobs:   dailyCount,
-			WeeklyNewJobs:  weeklyCount,
 			Jobs:           jobsList,
 		}
 
@@ -359,22 +357,6 @@ func (h *Handler) sendMarketingEmail(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"items": results})
-}
-
-func (h *Handler) countMarketingJobs(ctx context.Context, whereSQL string, whereArgs []any, cutoff time.Time) int {
-	query := `SELECT COUNT(1) FROM parsed_jobs p LEFT JOIN parsed_companies c ON c.id = p.company_id`
-	args := append([]any{}, whereArgs...)
-	if whereSQL != "" {
-		query += " WHERE " + whereSQL + " AND p.created_at_source >= ?"
-	} else {
-		query += " WHERE p.created_at_source >= ?"
-	}
-	args = append(args, cutoff)
-	var count int
-	if err := h.db.SQL.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
-		return 0
-	}
-	return count
 }
 
 func (h *Handler) listWatcherPayloads(c *gin.Context) {
