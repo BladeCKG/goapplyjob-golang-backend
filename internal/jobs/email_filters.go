@@ -3,9 +3,8 @@ package jobs
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
-
 	"goapplyjob-golang-backend/internal/locationnorm"
+	"strings"
 )
 
 type LastJobFiltersPayload struct {
@@ -26,15 +25,15 @@ type LastJobFiltersPayload struct {
 
 func BuildJobsWhereSQLForEmailFilters(payload LastJobFiltersPayload) (string, []any) {
 	input := listingFilterInput{
-		JobCategories:          []string{},
-		JobFunctions:           []string{},
-		TitleTokenGroups:       [][]string{},
-		TitleTokenGroupsJSON:   []byte("[]"),
-		USStates:               []string{},
-		Countries:              []string{},
-		LocationPatterns:       []string{},
-		TechStacks:             []string{},
-		EmploymentTypePatterns: []string{},
+		JobCategories:        []string{},
+		JobFunctions:         []string{},
+		TitleTokenGroups:     [][]string{},
+		TitleTokenGroupsJSON: []byte("[]"),
+		USStates:             []string{},
+		Countries:            []string{},
+		LocationPatterns:     []string{},
+		TechStacks:           []string{},
+		EmploymentTypes:      []string{},
 	}
 
 	for _, category := range uniqueStrings(payload.JobCategories) {
@@ -85,7 +84,7 @@ func BuildJobsWhereSQLForEmailFilters(payload LastJobFiltersPayload) (string, []
 	}
 	for _, employment := range uniqueStrings(payload.EmploymentTypes) {
 		if trimmed := strings.TrimSpace(employment); trimmed != "" {
-			input.EmploymentTypePatterns = append(input.EmploymentTypePatterns, "%"+trimmed+"%")
+			input.EmploymentTypes = append(input.EmploymentTypes, "%"+trimmed+"%")
 		}
 	}
 

@@ -96,18 +96,22 @@ AND (
 )
 AND (
 	cardinality($13::text[]) = 0
-	OR p.employment_type ILIKE ANY($13::text[])
+	OR p.location_type ILIKE ANY($13::text[])
 )
 AND (
-	NOT $14::boolean
-	OR p.created_at_source >= $15::timestamptz
+	cardinality($14::text[]) = 0
+	OR p.employment_type ILIKE ANY($14::text[])
 )
 AND (
-	NOT $16::boolean
-	OR p.created_at_source < $17::timestamptz
+	NOT $15::boolean
+	OR p.created_at_source >= $16::timestamptz
 )
 AND (
-	NOT $18::boolean
+	NOT $17::boolean
+	OR p.created_at_source < $18::timestamptz
+)
+AND (
+	NOT $19::boolean
 	OR (
 		(
 			COALESCE(p.salary_max_usd, p.salary_min_usd) * CASE
@@ -120,7 +124,7 @@ AND (
 				WHEN lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%minute%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%/min%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%per min%' THEN 124800.0
 				ELSE 1.0
 			END
-		) >= $19::float8
+		) >= $20::float8
 		OR (
 			COALESCE(p.salary_max, p.salary_min) * CASE
 				WHEN lower(trim(COALESCE(p.salary_type, 'yearly'))) IN ('yearly', 'year', 'annual') OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%year%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%annual%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%annually%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%per year%' THEN 1.0
@@ -132,42 +136,42 @@ AND (
 				WHEN lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%minute%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%/min%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%per min%' THEN 124800.0
 				ELSE 1.0
 			END
-		) >= $19::float8
+		) >= $20::float8
 	)
 )
 AND (
-	NOT $20::boolean
+	NOT $21::boolean
 	OR (
-		($21::boolean AND p.is_entry_level = true)
-		OR ($22::boolean AND p.is_junior = true)
-		OR ($23::boolean AND p.is_mid_level = true)
-		OR ($24::boolean AND p.is_senior = true)
-		OR ($25::boolean AND p.is_lead = true)
+		($22::boolean AND p.is_entry_level = true)
+		OR ($23::boolean AND p.is_junior = true)
+		OR ($24::boolean AND p.is_mid_level = true)
+		OR ($25::boolean AND p.is_senior = true)
+		OR ($26::boolean AND p.is_lead = true)
 	)
 )
 AND (
-	NOT $26::boolean
+	NOT $27::boolean
 	OR (
-		CASE $27::text
+		CASE $28::text
 			WHEN 'hidden' THEN EXISTS (
-				SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $28::bigint AND uja.parsed_job_id = p.id AND uja.is_hidden = true
+				SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $29::bigint AND uja.parsed_job_id = p.id AND uja.is_hidden = true
 			)
 			WHEN 'applied' THEN EXISTS (
-				SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $28::bigint AND uja.parsed_job_id = p.id AND uja.is_applied = true
+				SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $29::bigint AND uja.parsed_job_id = p.id AND uja.is_applied = true
 			)
 			WHEN 'not_applied' THEN (
 				NOT EXISTS (
-					SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $28::bigint AND uja.parsed_job_id = p.id AND uja.is_applied = true
+					SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $29::bigint AND uja.parsed_job_id = p.id AND uja.is_applied = true
 				)
 				AND NOT EXISTS (
-					SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $28::bigint AND uja.parsed_job_id = p.id AND uja.is_hidden = true
+					SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $29::bigint AND uja.parsed_job_id = p.id AND uja.is_hidden = true
 				)
 			)
 			WHEN 'saved' THEN EXISTS (
-				SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $28::bigint AND uja.parsed_job_id = p.id AND uja.is_saved = true
+				SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $29::bigint AND uja.parsed_job_id = p.id AND uja.is_saved = true
 			)
 			ELSE NOT EXISTS (
-				SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $28::bigint AND uja.parsed_job_id = p.id AND uja.is_hidden = true
+				SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $29::bigint AND uja.parsed_job_id = p.id AND uja.is_hidden = true
 			)
 		END
 	)
@@ -175,34 +179,35 @@ AND (
 `
 
 type CountJobsForListingFilteredParams struct {
-	CompanyFilter          string             `json:"company_filter"`
-	HasTitleFilters        bool               `json:"has_title_filters"`
-	JobCategories          []string           `json:"job_categories"`
-	JobFunctions           []string           `json:"job_functions"`
-	TitleExactTerms        []string           `json:"title_exact_terms"`
-	TitleLikePatterns      []string           `json:"title_like_patterns"`
-	TitleTokenGroupsJson   []byte             `json:"title_token_groups_json"`
-	HasStructuredLocation  bool               `json:"has_structured_location"`
-	UsStates               []string           `json:"us_states"`
-	Countries              []string           `json:"countries"`
-	LocationPatterns       []string           `json:"location_patterns"`
-	TechStacks             []string           `json:"tech_stacks"`
-	EmploymentTypePatterns []string           `json:"employment_type_patterns"`
-	HasCreatedFrom         bool               `json:"has_created_from"`
-	CreatedFrom            pgtype.Timestamptz `json:"created_from"`
-	HasCreatedTo           bool               `json:"has_created_to"`
-	CreatedTo              pgtype.Timestamptz `json:"created_to"`
-	HasMinSalary           bool               `json:"has_min_salary"`
-	MinSalary              float64            `json:"min_salary"`
-	HasSeniority           bool               `json:"has_seniority"`
-	SeniorityEntry         bool               `json:"seniority_entry"`
-	SeniorityJunior        bool               `json:"seniority_junior"`
-	SeniorityMid           bool               `json:"seniority_mid"`
-	SenioritySenior        bool               `json:"seniority_senior"`
-	SeniorityLead          bool               `json:"seniority_lead"`
-	HasUser                bool               `json:"has_user"`
-	UserActionFilter       string             `json:"user_action_filter"`
-	UserID                 int64              `json:"user_id"`
+	CompanyFilter         string             `json:"company_filter"`
+	HasTitleFilters       bool               `json:"has_title_filters"`
+	JobCategories         []string           `json:"job_categories"`
+	JobFunctions          []string           `json:"job_functions"`
+	TitleExactTerms       []string           `json:"title_exact_terms"`
+	TitleLikePatterns     []string           `json:"title_like_patterns"`
+	TitleTokenGroupsJson  []byte             `json:"title_token_groups_json"`
+	HasStructuredLocation bool               `json:"has_structured_location"`
+	UsStates              []string           `json:"us_states"`
+	Countries             []string           `json:"countries"`
+	LocationPatterns      []string           `json:"location_patterns"`
+	TechStacks            []string           `json:"tech_stacks"`
+	LocationTypes         []string           `json:"location_types"`
+	EmploymentTypes       []string           `json:"employment_types"`
+	HasCreatedFrom        bool               `json:"has_created_from"`
+	CreatedFrom           pgtype.Timestamptz `json:"created_from"`
+	HasCreatedTo          bool               `json:"has_created_to"`
+	CreatedTo             pgtype.Timestamptz `json:"created_to"`
+	HasMinSalary          bool               `json:"has_min_salary"`
+	MinSalary             float64            `json:"min_salary"`
+	HasSeniority          bool               `json:"has_seniority"`
+	SeniorityEntry        bool               `json:"seniority_entry"`
+	SeniorityJunior       bool               `json:"seniority_junior"`
+	SeniorityMid          bool               `json:"seniority_mid"`
+	SenioritySenior       bool               `json:"seniority_senior"`
+	SeniorityLead         bool               `json:"seniority_lead"`
+	HasUser               bool               `json:"has_user"`
+	UserActionFilter      string             `json:"user_action_filter"`
+	UserID                int64              `json:"user_id"`
 }
 
 type CountJobsForListingFilteredRow struct {
@@ -224,7 +229,8 @@ func (q *Queries) CountJobsForListingFiltered(ctx context.Context, arg CountJobs
 		arg.Countries,
 		arg.LocationPatterns,
 		arg.TechStacks,
-		arg.EmploymentTypePatterns,
+		arg.LocationTypes,
+		arg.EmploymentTypes,
 		arg.HasCreatedFrom,
 		arg.CreatedFrom,
 		arg.HasCreatedTo,
@@ -493,18 +499,22 @@ WITH filtered AS (
 	)
 	AND (
 		cardinality($15::text[]) = 0
-		OR p.employment_type ILIKE ANY($15::text[])
+		OR p.location_type ILIKE ANY($15::text[])
 	)
 	AND (
-		NOT $16::boolean
-		OR p.created_at_source >= $17::timestamptz
+		cardinality($16::text[]) = 0
+		OR p.employment_type ILIKE ANY($16::text[])
 	)
 	AND (
-		NOT $18::boolean
-		OR p.created_at_source < $19::timestamptz
+		NOT $17::boolean
+		OR p.created_at_source >= $18::timestamptz
 	)
 	AND (
-		NOT $20::boolean
+		NOT $19::boolean
+		OR p.created_at_source < $20::timestamptz
+	)
+	AND (
+		NOT $21::boolean
 		OR (
 			(
 				COALESCE(p.salary_max_usd, p.salary_min_usd) * CASE
@@ -517,7 +527,7 @@ WITH filtered AS (
 					WHEN lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%minute%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%/min%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%per min%' THEN 124800.0
 					ELSE 1.0
 				END
-			) >= $21::float8
+			) >= $22::float8
 			OR (
 				COALESCE(p.salary_max, p.salary_min) * CASE
 					WHEN lower(trim(COALESCE(p.salary_type, 'yearly'))) IN ('yearly', 'year', 'annual') OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%year%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%annual%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%annually%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%per year%' THEN 1.0
@@ -529,42 +539,42 @@ WITH filtered AS (
 					WHEN lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%minute%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%/min%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%per min%' THEN 124800.0
 					ELSE 1.0
 				END
-			) >= $21::float8
+			) >= $22::float8
 		)
 	)
 	AND (
-		NOT $22::boolean
+		NOT $23::boolean
 		OR (
-			($23::boolean AND p.is_entry_level = true)
-			OR ($24::boolean AND p.is_junior = true)
-			OR ($25::boolean AND p.is_mid_level = true)
-			OR ($26::boolean AND p.is_senior = true)
-			OR ($27::boolean AND p.is_lead = true)
+			($24::boolean AND p.is_entry_level = true)
+			OR ($25::boolean AND p.is_junior = true)
+			OR ($26::boolean AND p.is_mid_level = true)
+			OR ($27::boolean AND p.is_senior = true)
+			OR ($28::boolean AND p.is_lead = true)
 		)
 	)
 	AND (
-		NOT $28::boolean
+		NOT $29::boolean
 		OR (
-			CASE $29::text
+			CASE $30::text
 				WHEN 'hidden' THEN EXISTS (
-					SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $30::bigint AND uja.parsed_job_id = p.id AND uja.is_hidden = true
+					SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $31::bigint AND uja.parsed_job_id = p.id AND uja.is_hidden = true
 				)
 				WHEN 'applied' THEN EXISTS (
-					SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $30::bigint AND uja.parsed_job_id = p.id AND uja.is_applied = true
+					SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $31::bigint AND uja.parsed_job_id = p.id AND uja.is_applied = true
 				)
 				WHEN 'not_applied' THEN (
 					NOT EXISTS (
-						SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $30::bigint AND uja.parsed_job_id = p.id AND uja.is_applied = true
+						SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $31::bigint AND uja.parsed_job_id = p.id AND uja.is_applied = true
 					)
 					AND NOT EXISTS (
-						SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $30::bigint AND uja.parsed_job_id = p.id AND uja.is_hidden = true
+						SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $31::bigint AND uja.parsed_job_id = p.id AND uja.is_hidden = true
 					)
 				)
 				WHEN 'saved' THEN EXISTS (
-					SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $30::bigint AND uja.parsed_job_id = p.id AND uja.is_saved = true
+					SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $31::bigint AND uja.parsed_job_id = p.id AND uja.is_saved = true
 				)
 				ELSE NOT EXISTS (
-					SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $30::bigint AND uja.parsed_job_id = p.id AND uja.is_hidden = true
+					SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $31::bigint AND uja.parsed_job_id = p.id AND uja.is_hidden = true
 				)
 			END
 		)
@@ -578,36 +588,37 @@ FROM filtered
 `
 
 type GetJobsMetricsFilteredParams struct {
-	TodayCutoff            pgtype.Timestamptz `json:"today_cutoff"`
-	LastHourCutoff         pgtype.Timestamptz `json:"last_hour_cutoff"`
-	HasTitleFilters        bool               `json:"has_title_filters"`
-	JobCategories          []string           `json:"job_categories"`
-	JobFunctions           []string           `json:"job_functions"`
-	TitleExactTerms        []string           `json:"title_exact_terms"`
-	TitleLikePatterns      []string           `json:"title_like_patterns"`
-	TitleTokenGroupsJson   []byte             `json:"title_token_groups_json"`
-	CompanyFilter          string             `json:"company_filter"`
-	HasStructuredLocation  bool               `json:"has_structured_location"`
-	UsStates               []string           `json:"us_states"`
-	Countries              []string           `json:"countries"`
-	LocationPatterns       []string           `json:"location_patterns"`
-	TechStacks             []string           `json:"tech_stacks"`
-	EmploymentTypePatterns []string           `json:"employment_type_patterns"`
-	HasCreatedFrom         bool               `json:"has_created_from"`
-	CreatedFrom            pgtype.Timestamptz `json:"created_from"`
-	HasCreatedTo           bool               `json:"has_created_to"`
-	CreatedTo              pgtype.Timestamptz `json:"created_to"`
-	HasMinSalary           bool               `json:"has_min_salary"`
-	MinSalary              float64            `json:"min_salary"`
-	HasSeniority           bool               `json:"has_seniority"`
-	SeniorityEntry         bool               `json:"seniority_entry"`
-	SeniorityJunior        bool               `json:"seniority_junior"`
-	SeniorityMid           bool               `json:"seniority_mid"`
-	SenioritySenior        bool               `json:"seniority_senior"`
-	SeniorityLead          bool               `json:"seniority_lead"`
-	HasUser                bool               `json:"has_user"`
-	UserActionFilter       string             `json:"user_action_filter"`
-	UserID                 int64              `json:"user_id"`
+	TodayCutoff           pgtype.Timestamptz `json:"today_cutoff"`
+	LastHourCutoff        pgtype.Timestamptz `json:"last_hour_cutoff"`
+	HasTitleFilters       bool               `json:"has_title_filters"`
+	JobCategories         []string           `json:"job_categories"`
+	JobFunctions          []string           `json:"job_functions"`
+	TitleExactTerms       []string           `json:"title_exact_terms"`
+	TitleLikePatterns     []string           `json:"title_like_patterns"`
+	TitleTokenGroupsJson  []byte             `json:"title_token_groups_json"`
+	CompanyFilter         string             `json:"company_filter"`
+	HasStructuredLocation bool               `json:"has_structured_location"`
+	UsStates              []string           `json:"us_states"`
+	Countries             []string           `json:"countries"`
+	LocationPatterns      []string           `json:"location_patterns"`
+	TechStacks            []string           `json:"tech_stacks"`
+	LocationTypes         []string           `json:"location_types"`
+	EmploymentTypes       []string           `json:"employment_types"`
+	HasCreatedFrom        bool               `json:"has_created_from"`
+	CreatedFrom           pgtype.Timestamptz `json:"created_from"`
+	HasCreatedTo          bool               `json:"has_created_to"`
+	CreatedTo             pgtype.Timestamptz `json:"created_to"`
+	HasMinSalary          bool               `json:"has_min_salary"`
+	MinSalary             float64            `json:"min_salary"`
+	HasSeniority          bool               `json:"has_seniority"`
+	SeniorityEntry        bool               `json:"seniority_entry"`
+	SeniorityJunior       bool               `json:"seniority_junior"`
+	SeniorityMid          bool               `json:"seniority_mid"`
+	SenioritySenior       bool               `json:"seniority_senior"`
+	SeniorityLead         bool               `json:"seniority_lead"`
+	HasUser               bool               `json:"has_user"`
+	UserActionFilter      string             `json:"user_action_filter"`
+	UserID                int64              `json:"user_id"`
 }
 
 type GetJobsMetricsFilteredRow struct {
@@ -632,7 +643,8 @@ func (q *Queries) GetJobsMetricsFiltered(ctx context.Context, arg GetJobsMetrics
 		arg.Countries,
 		arg.LocationPatterns,
 		arg.TechStacks,
-		arg.EmploymentTypePatterns,
+		arg.LocationTypes,
+		arg.EmploymentTypes,
 		arg.HasCreatedFrom,
 		arg.CreatedFrom,
 		arg.HasCreatedTo,
@@ -783,6 +795,32 @@ func (q *Queries) ListDistinctJobCategoryFunctionPairs(ctx context.Context) ([]*
 	return items, nil
 }
 
+const listDistinctLocationTypes = `-- name: ListDistinctLocationTypes :many
+SELECT DISTINCT location_type
+FROM parsed_jobs
+WHERE location_type IS NOT NULL
+`
+
+func (q *Queries) ListDistinctLocationTypes(ctx context.Context) ([]pgtype.Text, error) {
+	rows, err := q.db.Query(ctx, listDistinctLocationTypes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.Text
+	for rows.Next() {
+		var location_type pgtype.Text
+		if err := rows.Scan(&location_type); err != nil {
+			return nil, err
+		}
+		items = append(items, location_type)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDistinctTechStackTexts = `-- name: ListDistinctTechStackTexts :many
 SELECT DISTINCT tech_stack
 FROM parsed_jobs
@@ -875,18 +913,22 @@ AND (
 )
 AND (
 	cardinality($13::text[]) = 0
-	OR p.employment_type ILIKE ANY($13::text[])
+	OR p.location_type ILIKE ANY($13::text[])
 )
 AND (
-	NOT $14::boolean
-	OR p.created_at_source >= $15::timestamptz
+	cardinality($14::text[]) = 0
+	OR p.employment_type ILIKE ANY($14::text[])
 )
 AND (
-	NOT $16::boolean
-	OR p.created_at_source < $17::timestamptz
+	NOT $15::boolean
+	OR p.created_at_source >= $16::timestamptz
 )
 AND (
-	NOT $18::boolean
+	NOT $17::boolean
+	OR p.created_at_source < $18::timestamptz
+)
+AND (
+	NOT $19::boolean
 	OR (
 		(
 			COALESCE(p.salary_max_usd, p.salary_min_usd) * CASE
@@ -899,7 +941,7 @@ AND (
 				WHEN lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%minute%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%/min%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%per min%' THEN 124800.0
 				ELSE 1.0
 			END
-		) >= $19::float8
+		) >= $20::float8
 		OR (
 			COALESCE(p.salary_max, p.salary_min) * CASE
 				WHEN lower(trim(COALESCE(p.salary_type, 'yearly'))) IN ('yearly', 'year', 'annual') OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%year%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%annual%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%annually%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%per year%' THEN 1.0
@@ -911,49 +953,49 @@ AND (
 				WHEN lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%minute%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%/min%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%per min%' THEN 124800.0
 				ELSE 1.0
 			END
-		) >= $19::float8
+		) >= $20::float8
 	)
 )
 AND (
-	NOT $20::boolean
+	NOT $21::boolean
 	OR (
-		($21::boolean AND p.is_entry_level = true)
-		OR ($22::boolean AND p.is_junior = true)
-		OR ($23::boolean AND p.is_mid_level = true)
-		OR ($24::boolean AND p.is_senior = true)
-		OR ($25::boolean AND p.is_lead = true)
+		($22::boolean AND p.is_entry_level = true)
+		OR ($23::boolean AND p.is_junior = true)
+		OR ($24::boolean AND p.is_mid_level = true)
+		OR ($25::boolean AND p.is_senior = true)
+		OR ($26::boolean AND p.is_lead = true)
 	)
 )
 AND (
-	NOT $26::boolean
+	NOT $27::boolean
 	OR (
-		CASE $27::text
+		CASE $28::text
 			WHEN 'hidden' THEN EXISTS (
-				SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $28::bigint AND uja.parsed_job_id = p.id AND uja.is_hidden = true
+				SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $29::bigint AND uja.parsed_job_id = p.id AND uja.is_hidden = true
 			)
 			WHEN 'applied' THEN EXISTS (
-				SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $28::bigint AND uja.parsed_job_id = p.id AND uja.is_applied = true
+				SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $29::bigint AND uja.parsed_job_id = p.id AND uja.is_applied = true
 			)
 			WHEN 'not_applied' THEN (
 				NOT EXISTS (
-					SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $28::bigint AND uja.parsed_job_id = p.id AND uja.is_applied = true
+					SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $29::bigint AND uja.parsed_job_id = p.id AND uja.is_applied = true
 				)
 				AND NOT EXISTS (
-					SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $28::bigint AND uja.parsed_job_id = p.id AND uja.is_hidden = true
+					SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $29::bigint AND uja.parsed_job_id = p.id AND uja.is_hidden = true
 				)
 			)
 			WHEN 'saved' THEN EXISTS (
-				SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $28::bigint AND uja.parsed_job_id = p.id AND uja.is_saved = true
+				SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $29::bigint AND uja.parsed_job_id = p.id AND uja.is_saved = true
 			)
 			ELSE NOT EXISTS (
-				SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $28::bigint AND uja.parsed_job_id = p.id AND uja.is_hidden = true
+				SELECT 1 FROM user_job_actions uja WHERE uja.user_id = $29::bigint AND uja.parsed_job_id = p.id AND uja.is_hidden = true
 			)
 		END
 	)
 )
 ORDER BY
 	CASE
-		WHEN $29::boolean THEN (
+		WHEN $30::boolean THEN (
 			COALESCE(p.salary_max_usd, p.salary_min_usd) * CASE
 				WHEN lower(trim(COALESCE(p.salary_type, 'yearly'))) IN ('yearly', 'year', 'annual') OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%year%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%annual%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%annually%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%per year%' THEN 1.0
 				WHEN lower(trim(COALESCE(p.salary_type, 'yearly'))) IN ('monthly', 'month') OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%month%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%/mo%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '% mo%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%per month%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%month-salary%' THEN 12.0
@@ -967,7 +1009,7 @@ ORDER BY
 		)
 	END DESC NULLS LAST,
 	CASE
-		WHEN $29::boolean THEN (
+		WHEN $30::boolean THEN (
 			COALESCE(p.salary_max, p.salary_min) * CASE
 				WHEN lower(trim(COALESCE(p.salary_type, 'yearly'))) IN ('yearly', 'year', 'annual') OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%year%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%annual%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%annually%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%per year%' THEN 1.0
 				WHEN lower(trim(COALESCE(p.salary_type, 'yearly'))) IN ('monthly', 'month') OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%month%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%/mo%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '% mo%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%per month%' OR lower(trim(COALESCE(p.salary_type, 'yearly'))) LIKE '%month-salary%' THEN 12.0
@@ -982,41 +1024,42 @@ ORDER BY
 	END DESC NULLS LAST,
 	p.created_at_source DESC,
 	p.id DESC
-LIMIT $31 OFFSET $30
+LIMIT $32 OFFSET $31
 `
 
 type ListFilteredJobIDsParams struct {
-	HasTitleFilters        bool               `json:"has_title_filters"`
-	JobCategories          []string           `json:"job_categories"`
-	JobFunctions           []string           `json:"job_functions"`
-	TitleExactTerms        []string           `json:"title_exact_terms"`
-	TitleLikePatterns      []string           `json:"title_like_patterns"`
-	TitleTokenGroupsJson   []byte             `json:"title_token_groups_json"`
-	CompanyFilter          string             `json:"company_filter"`
-	HasStructuredLocation  bool               `json:"has_structured_location"`
-	UsStates               []string           `json:"us_states"`
-	Countries              []string           `json:"countries"`
-	LocationPatterns       []string           `json:"location_patterns"`
-	TechStacks             []string           `json:"tech_stacks"`
-	EmploymentTypePatterns []string           `json:"employment_type_patterns"`
-	HasCreatedFrom         bool               `json:"has_created_from"`
-	CreatedFrom            pgtype.Timestamptz `json:"created_from"`
-	HasCreatedTo           bool               `json:"has_created_to"`
-	CreatedTo              pgtype.Timestamptz `json:"created_to"`
-	HasMinSalary           bool               `json:"has_min_salary"`
-	MinSalary              float64            `json:"min_salary"`
-	HasSeniority           bool               `json:"has_seniority"`
-	SeniorityEntry         bool               `json:"seniority_entry"`
-	SeniorityJunior        bool               `json:"seniority_junior"`
-	SeniorityMid           bool               `json:"seniority_mid"`
-	SenioritySenior        bool               `json:"seniority_senior"`
-	SeniorityLead          bool               `json:"seniority_lead"`
-	HasUser                bool               `json:"has_user"`
-	UserActionFilter       string             `json:"user_action_filter"`
-	UserID                 int64              `json:"user_id"`
-	SortSalary             bool               `json:"sort_salary"`
-	OffsetRows             int32              `json:"offset_rows"`
-	LimitRows              int32              `json:"limit_rows"`
+	HasTitleFilters       bool               `json:"has_title_filters"`
+	JobCategories         []string           `json:"job_categories"`
+	JobFunctions          []string           `json:"job_functions"`
+	TitleExactTerms       []string           `json:"title_exact_terms"`
+	TitleLikePatterns     []string           `json:"title_like_patterns"`
+	TitleTokenGroupsJson  []byte             `json:"title_token_groups_json"`
+	CompanyFilter         string             `json:"company_filter"`
+	HasStructuredLocation bool               `json:"has_structured_location"`
+	UsStates              []string           `json:"us_states"`
+	Countries             []string           `json:"countries"`
+	LocationPatterns      []string           `json:"location_patterns"`
+	TechStacks            []string           `json:"tech_stacks"`
+	LocationTypes         []string           `json:"location_types"`
+	EmploymentTypes       []string           `json:"employment_types"`
+	HasCreatedFrom        bool               `json:"has_created_from"`
+	CreatedFrom           pgtype.Timestamptz `json:"created_from"`
+	HasCreatedTo          bool               `json:"has_created_to"`
+	CreatedTo             pgtype.Timestamptz `json:"created_to"`
+	HasMinSalary          bool               `json:"has_min_salary"`
+	MinSalary             float64            `json:"min_salary"`
+	HasSeniority          bool               `json:"has_seniority"`
+	SeniorityEntry        bool               `json:"seniority_entry"`
+	SeniorityJunior       bool               `json:"seniority_junior"`
+	SeniorityMid          bool               `json:"seniority_mid"`
+	SenioritySenior       bool               `json:"seniority_senior"`
+	SeniorityLead         bool               `json:"seniority_lead"`
+	HasUser               bool               `json:"has_user"`
+	UserActionFilter      string             `json:"user_action_filter"`
+	UserID                int64              `json:"user_id"`
+	SortSalary            bool               `json:"sort_salary"`
+	OffsetRows            int32              `json:"offset_rows"`
+	LimitRows             int32              `json:"limit_rows"`
 }
 
 func (q *Queries) ListFilteredJobIDs(ctx context.Context, arg ListFilteredJobIDsParams) ([]int32, error) {
@@ -1033,7 +1076,8 @@ func (q *Queries) ListFilteredJobIDs(ctx context.Context, arg ListFilteredJobIDs
 		arg.Countries,
 		arg.LocationPatterns,
 		arg.TechStacks,
-		arg.EmploymentTypePatterns,
+		arg.LocationTypes,
+		arg.EmploymentTypes,
 		arg.HasCreatedFrom,
 		arg.CreatedFrom,
 		arg.HasCreatedTo,

@@ -40,6 +40,7 @@ type filterOptionsCache struct {
 	jobCategoryParents map[string]any
 	locationParents    map[string][]string
 	techStacks         []string
+	locationTypes      []string
 	employmentTypes    []string
 	lastRefreshAt      time.Time
 	refreshRunning     bool
@@ -531,6 +532,11 @@ func buildEmploymentTypes(rows []string) []string {
 	return values
 }
 
+func buildLocationTypes(rows []string) []string {
+	sort.Slice(rows, func(i, j int) bool { return strings.ToLower(rows[i]) < strings.ToLower(rows[j]) })
+	return rows
+}
+
 func (h *Handler) getMaxParsedJobID(ctx context.Context) (sql.NullInt64, error) {
 	maxID, err := h.q.GetMaxParsedJobID(ctx)
 	if err != nil {
@@ -587,11 +593,17 @@ func (h *Handler) refreshFilterCache(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	locationTypeRowsRaw, err := h.q.ListDistinctLocationTypes(ctx)
+	if err != nil {
+		return err
+	}
+	locationRows := []string{}
+	for _, locationType := range locationTypeRowsRaw {
+		locationRows = append(locationRows, locationType.String)
+	}
 	employmentRows := []string{}
 	for _, employmentType := range employmentTypeRowsRaw {
-		if employmentType.Valid && strings.TrimSpace(employmentType.String) != "" {
-			employmentRows = append(employmentRows, employmentType.String)
-		}
+		employmentRows = append(employmentRows, employmentType.String)
 	}
 
 	h.filterCache.jobCategoryParents = buildJobCategoryParentsMap(categoryRows)
@@ -603,6 +615,7 @@ func (h *Handler) refreshFilterCache(ctx context.Context) error {
 	locationParents[unitedStatesCountry] = []string{}
 	h.filterCache.locationParents = locationParents
 	h.filterCache.techStacks = buildTechStacks(techRows)
+	h.filterCache.locationTypes = buildLocationTypes(locationRows)
 	h.filterCache.employmentTypes = buildEmploymentTypes(employmentRows)
 	return nil
 }
@@ -668,6 +681,7 @@ func (h *Handler) filterOptions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"job_category_parents": h.filterCache.jobCategoryParents,
 		"location_parents":     h.filterCache.locationParents,
+		"location_types":       h.filterCache.locationTypes,
 		"employment_types":     h.filterCache.employmentTypes,
 		"post_date_options":    postDateOptions,
 		"tech_stacks":          h.filterCache.techStacks,
@@ -959,8 +973,12 @@ func buildJobsWhereSQL(input listingFilterInput) (string, []any) {
 		}
 	}
 
-	if len(input.EmploymentTypePatterns) > 0 {
-		clauses = append(clauses, fmt.Sprintf("p.employment_type ILIKE ANY(%s::text[])", b.add(input.EmploymentTypePatterns)))
+	if len(input.LocationTypes) > 0 {
+		clauses = append(clauses, fmt.Sprintf("p.location_type ILIKE ANY(%s::text[])", b.add(input.LocationTypes)))
+	}
+
+	if len(input.EmploymentTypes) > 0 {
+		clauses = append(clauses, fmt.Sprintf("p.employment_type ILIKE ANY(%s::text[])", b.add(input.EmploymentTypes)))
 	}
 
 	if input.HasCreatedFrom {
@@ -1137,34 +1155,35 @@ func (h *Handler) metrics(c *gin.Context) {
 	todayCutoff := now.Add(-24 * time.Hour)
 	lastHourCutoff := now.Add(-1 * time.Hour)
 	metrics, err := h.q.GetJobsMetricsFiltered(c.Request.Context(), gensqlc.GetJobsMetricsFilteredParams{
-		TodayCutoff:            pgtype.Timestamptz{Time: todayCutoff, Valid: true},
-		LastHourCutoff:         pgtype.Timestamptz{Time: lastHourCutoff, Valid: true},
-		HasTitleFilters:        filterInput.HasTitleFilters,
-		JobCategories:          filterInput.JobCategories,
-		JobFunctions:           filterInput.JobFunctions,
-		TitleTokenGroupsJson:   filterInput.TitleTokenGroupsJSON,
-		CompanyFilter:          filterInput.CompanyFilter,
-		HasStructuredLocation:  filterInput.HasStructuredLocation,
-		UsStates:               filterInput.USStates,
-		Countries:              filterInput.Countries,
-		LocationPatterns:       filterInput.LocationPatterns,
-		TechStacks:             filterInput.TechStacks,
-		EmploymentTypePatterns: filterInput.EmploymentTypePatterns,
-		HasCreatedFrom:         filterInput.HasCreatedFrom,
-		CreatedFrom:            filterInput.CreatedFrom,
-		HasCreatedTo:           filterInput.HasCreatedTo,
-		CreatedTo:              filterInput.CreatedTo,
-		HasMinSalary:           filterInput.HasMinSalary,
-		MinSalary:              filterInput.MinSalary,
-		HasSeniority:           filterInput.HasSeniority,
-		SeniorityEntry:         filterInput.SeniorityEntry,
-		SeniorityJunior:        filterInput.SeniorityJunior,
-		SeniorityMid:           filterInput.SeniorityMid,
-		SenioritySenior:        filterInput.SenioritySenior,
-		SeniorityLead:          filterInput.SeniorityLead,
-		HasUser:                filterInput.HasUser,
-		UserActionFilter:       filterInput.UserActionFilter,
-		UserID:                 filterInput.UserID,
+		TodayCutoff:           pgtype.Timestamptz{Time: todayCutoff, Valid: true},
+		LastHourCutoff:        pgtype.Timestamptz{Time: lastHourCutoff, Valid: true},
+		HasTitleFilters:       filterInput.HasTitleFilters,
+		JobCategories:         filterInput.JobCategories,
+		JobFunctions:          filterInput.JobFunctions,
+		TitleTokenGroupsJson:  filterInput.TitleTokenGroupsJSON,
+		CompanyFilter:         filterInput.CompanyFilter,
+		HasStructuredLocation: filterInput.HasStructuredLocation,
+		UsStates:              filterInput.USStates,
+		Countries:             filterInput.Countries,
+		LocationPatterns:      filterInput.LocationPatterns,
+		TechStacks:            filterInput.TechStacks,
+		LocationTypes:         filterInput.LocationTypes,
+		EmploymentTypes:       filterInput.EmploymentTypes,
+		HasCreatedFrom:        filterInput.HasCreatedFrom,
+		CreatedFrom:           filterInput.CreatedFrom,
+		HasCreatedTo:          filterInput.HasCreatedTo,
+		CreatedTo:             filterInput.CreatedTo,
+		HasMinSalary:          filterInput.HasMinSalary,
+		MinSalary:             filterInput.MinSalary,
+		HasSeniority:          filterInput.HasSeniority,
+		SeniorityEntry:        filterInput.SeniorityEntry,
+		SeniorityJunior:       filterInput.SeniorityJunior,
+		SeniorityMid:          filterInput.SeniorityMid,
+		SenioritySenior:       filterInput.SenioritySenior,
+		SeniorityLead:         filterInput.SeniorityLead,
+		HasUser:               filterInput.HasUser,
+		UserActionFilter:      filterInput.UserActionFilter,
+		UserID:                filterInput.UserID,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load jobs metrics"})
@@ -1318,47 +1337,49 @@ func mustJSONStringArray(value string) string {
 }
 
 type listingFilterInput struct {
-	HasTitleFilters        bool
-	JobCategories          []string
-	JobFunctions           []string
-	TitleTokenGroups       [][]string
-	TitleTokenGroupsJSON   []byte
-	CompanyFilter          string
-	HasStructuredLocation  bool
-	USStates               []string
-	Countries              []string
-	LocationPatterns       []string
-	TechStacks             []string
-	EmploymentTypePatterns []string
-	HasCreatedFrom         bool
-	CreatedFrom            pgtype.Timestamptz
-	HasCreatedTo           bool
-	CreatedTo              pgtype.Timestamptz
-	HasMinSalary           bool
-	MinSalary              float64
-	HasSeniority           bool
-	SeniorityEntry         bool
-	SeniorityJunior        bool
-	SeniorityMid           bool
-	SenioritySenior        bool
-	SeniorityLead          bool
-	HasUser                bool
-	UserActionFilter       string
-	UserID                 int64
-	SortSalary             bool
+	HasTitleFilters       bool
+	JobCategories         []string
+	JobFunctions          []string
+	TitleTokenGroups      [][]string
+	TitleTokenGroupsJSON  []byte
+	CompanyFilter         string
+	HasStructuredLocation bool
+	USStates              []string
+	Countries             []string
+	LocationPatterns      []string
+	TechStacks            []string
+	LocationTypes         []string
+	EmploymentTypes       []string
+	HasCreatedFrom        bool
+	CreatedFrom           pgtype.Timestamptz
+	HasCreatedTo          bool
+	CreatedTo             pgtype.Timestamptz
+	HasMinSalary          bool
+	MinSalary             float64
+	HasSeniority          bool
+	SeniorityEntry        bool
+	SeniorityJunior       bool
+	SeniorityMid          bool
+	SenioritySenior       bool
+	SeniorityLead         bool
+	HasUser               bool
+	UserActionFilter      string
+	UserID                int64
+	SortSalary            bool
 }
 
 func (h *Handler) buildListingFilterInput(c *gin.Context, currentUser *auth.User, includePostDate bool) listingFilterInput {
 	input := listingFilterInput{
-		JobCategories:          []string{},
-		JobFunctions:           []string{},
-		TitleTokenGroups:       [][]string{},
-		TitleTokenGroupsJSON:   []byte("[]"),
-		USStates:               []string{},
-		Countries:              []string{},
-		LocationPatterns:       []string{},
-		TechStacks:             []string{},
-		EmploymentTypePatterns: []string{},
+		JobCategories:        []string{},
+		JobFunctions:         []string{},
+		TitleTokenGroups:     [][]string{},
+		TitleTokenGroupsJSON: []byte("[]"),
+		USStates:             []string{},
+		Countries:            []string{},
+		LocationPatterns:     []string{},
+		TechStacks:           []string{},
+		LocationTypes:        []string{},
+		EmploymentTypes:      []string{},
 	}
 
 	if categories := uniqueStrings(parseCSVQuery(c.Query("job_categories"))); len(categories) > 0 {
@@ -1442,9 +1463,14 @@ func (h *Handler) buildListingFilterInput(c *gin.Context, currentUser *auth.User
 			input.TechStacks = append(input.TechStacks, trimmed)
 		}
 	}
+	for _, locationType := range uniqueStrings(parseCSVQuery(c.Query("location_type"))) {
+		if trimmed := strings.TrimSpace(locationType); trimmed != "" {
+			input.LocationTypes = append(input.LocationTypes, "%"+trimmed+"%")
+		}
+	}
 	for _, employment := range uniqueStrings(parseCSVQuery(c.Query("employment_type"))) {
 		if trimmed := strings.TrimSpace(employment); trimmed != "" {
-			input.EmploymentTypePatterns = append(input.EmploymentTypePatterns, "%"+trimmed+"%")
+			input.EmploymentTypes = append(input.EmploymentTypes, "%"+trimmed+"%")
 		}
 	}
 

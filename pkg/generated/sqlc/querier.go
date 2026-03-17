@@ -75,6 +75,7 @@ type Querier interface {
 	ListCompanySitemapPage(ctx context.Context, arg ListCompanySitemapPageParams) ([]*ListCompanySitemapPageRow, error)
 	ListDistinctEmploymentTypes(ctx context.Context) ([]pgtype.Text, error)
 	ListDistinctJobCategoryFunctionPairs(ctx context.Context) ([]*ListDistinctJobCategoryFunctionPairsRow, error)
+	ListDistinctLocationTypes(ctx context.Context) ([]pgtype.Text, error)
 	ListDistinctTechStackTexts(ctx context.Context) ([][]byte, error)
 	ListEmployerJobIDsByUser(ctx context.Context, arg ListEmployerJobIDsByUserParams) ([]int32, error)
 	ListEmployerOrganizationsByUser(ctx context.Context, userID int32) ([]*ListEmployerOrganizationsByUserRow, error)

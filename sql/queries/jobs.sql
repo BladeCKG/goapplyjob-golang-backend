@@ -18,6 +18,11 @@ SELECT DISTINCT employment_type
 FROM parsed_jobs
 WHERE employment_type IS NOT NULL;
 
+-- name: ListDistinctLocationTypes :many
+SELECT DISTINCT location_type
+FROM parsed_jobs
+WHERE location_type IS NOT NULL;
+
 -- name: GetJobDetailByID :one
 SELECT p.id, p.raw_us_job_id, c.name, c.slug, c.tagline, c.profile_pic_url, c.home_page_url, c.linkedin_url, c.employee_range, c.founded_year, c.sponsors_h1b, p.categorized_job_title, p.categorized_job_function, p.role_title, p.location_city, p.location_type, p.location_us_states, p.location_countries, p.employment_type, p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_type, p.updated_at, p.created_at_source, p.role_description, p.role_requirements, p.education_requirements_credential_category, p.experience_requirements_months, p.experience_in_place_of_education, p.required_languages, p.tech_stack, p.benefits, p.url
 FROM parsed_jobs p
@@ -183,8 +188,12 @@ AND (
 	)
 )
 AND (
-	cardinality(sqlc.arg(employment_type_patterns)::text[]) = 0
-	OR p.employment_type ILIKE ANY(sqlc.arg(employment_type_patterns)::text[])
+	cardinality(sqlc.arg(location_types)::text[]) = 0
+	OR p.location_type ILIKE ANY(sqlc.arg(location_types)::text[])
+)
+AND (
+	cardinality(sqlc.arg(employment_types)::text[]) = 0
+	OR p.employment_type ILIKE ANY(sqlc.arg(employment_types)::text[])
 )
 AND (
 	NOT sqlc.arg(has_created_from)::boolean
@@ -326,8 +335,12 @@ AND (
 	)
 )
 AND (
-	cardinality(sqlc.arg(employment_type_patterns)::text[]) = 0
-	OR p.employment_type ILIKE ANY(sqlc.arg(employment_type_patterns)::text[])
+	cardinality(sqlc.arg(location_types)::text[]) = 0
+	OR p.location_type ILIKE ANY(sqlc.arg(location_types)::text[])
+)
+AND (
+	cardinality(sqlc.arg(employment_types)::text[]) = 0
+	OR p.employment_type ILIKE ANY(sqlc.arg(employment_types)::text[])
 )
 AND (
 	NOT sqlc.arg(has_created_from)::boolean
@@ -509,8 +522,12 @@ WITH filtered AS (
 		)
 	)
 	AND (
-		cardinality(sqlc.arg(employment_type_patterns)::text[]) = 0
-		OR p.employment_type ILIKE ANY(sqlc.arg(employment_type_patterns)::text[])
+		cardinality(sqlc.arg(location_types)::text[]) = 0
+		OR p.location_type ILIKE ANY(sqlc.arg(location_types)::text[])
+	)
+	AND (
+		cardinality(sqlc.arg(employment_types)::text[]) = 0
+		OR p.employment_type ILIKE ANY(sqlc.arg(employment_types)::text[])
 	)
 	AND (
 		NOT sqlc.arg(has_created_from)::boolean
