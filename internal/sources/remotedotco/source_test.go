@@ -4,8 +4,17 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
+
+func TestFilterUSStatesNormalizesNames(t *testing.T) {
+	got := filterUSStates([]string{"CA", "California", " texas ", "NSW", "Ontario", "DC"})
+	want := []string{"California", "Texas", "District Of Columbia"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("filterUSStates mismatch got=%#v want=%#v", got, want)
+	}
+}
 
 func TestParseRawHTMLStrictFields(t *testing.T) {
 	htmlPath := filepath.Join("..", "..", "..", "test-extract", "remotedotco", "raw-job-1.html")

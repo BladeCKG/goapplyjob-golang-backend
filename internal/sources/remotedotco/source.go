@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"goapplyjob-golang-backend/internal/locationnorm"
 )
 
 const (
@@ -400,29 +402,25 @@ func filterUSStates(values []string) []string {
 	if len(values) == 0 {
 		return values
 	}
-	allowed := map[string]struct{}{
-		"AL": {}, "AK": {}, "AZ": {}, "AR": {}, "CA": {}, "CO": {}, "CT": {}, "DE": {}, "FL": {}, "GA": {},
-		"HI": {}, "ID": {}, "IL": {}, "IN": {}, "IA": {}, "KS": {}, "KY": {}, "LA": {}, "ME": {}, "MD": {},
-		"MA": {}, "MI": {}, "MN": {}, "MS": {}, "MO": {}, "MT": {}, "NE": {}, "NV": {}, "NH": {}, "NJ": {},
-		"NM": {}, "NY": {}, "NC": {}, "ND": {}, "OH": {}, "OK": {}, "OR": {}, "PA": {}, "RI": {}, "SC": {},
-		"SD": {}, "TN": {}, "TX": {}, "UT": {}, "VT": {}, "VA": {}, "WA": {}, "WV": {}, "WI": {}, "WY": {},
-		"DC": {}, "PR": {}, "VI": {}, "GU": {}, "MP": {}, "AS": {},
+	allowed := map[string]struct{}{}
+	for _, state := range locationnorm.USStateNames() {
+		allowed[state] = struct{}{}
 	}
 	filtered := make([]string, 0, len(values))
 	seen := map[string]struct{}{}
 	for _, value := range values {
-		trimmed := strings.ToUpper(strings.TrimSpace(value))
-		if trimmed == "" {
+		normalized := locationnorm.NormalizeUSStateName(value)
+		if normalized == "" {
 			continue
 		}
-		if _, ok := allowed[trimmed]; !ok {
+		if _, ok := allowed[normalized]; !ok {
 			continue
 		}
-		if _, ok := seen[trimmed]; ok {
+		if _, ok := seen[normalized]; ok {
 			continue
 		}
-		seen[trimmed] = struct{}{}
-		filtered = append(filtered, trimmed)
+		seen[normalized] = struct{}{}
+		filtered = append(filtered, normalized)
 	}
 	return filtered
 }
