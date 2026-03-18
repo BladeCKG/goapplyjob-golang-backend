@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -15,83 +16,25 @@ import (
 	"goapplyjob-golang-backend/internal/database"
 )
 
-var techStackAliases = map[string]string{
-	"nodejs":                   "Node.js",
-	"node.js":                  "Node.js",
-	"node js":                  "Node.js",
-	"reactjs":                  "React",
-	"react.js":                 "React",
-	"nextjs":                   "Next.js",
-	"next.js":                  "Next.js",
-	"vuejs":                    "Vue.js",
-	"vue.js":                   "Vue.js",
-	"angularjs":                "AngularJS",
-	"javascript":               "JavaScript",
-	"typescript":               "TypeScript",
-	"c#":                       "C#",
-	"csharp":                   "C#",
-	"c++":                      "C++",
-	"cplusplus":                "C++",
-	"golang":                   "Go",
-	"postgres":                 "PostgreSQL",
-	"postgresql":               "PostgreSQL",
-	"mongodb":                  "MongoDB",
-	"graphql":                  "GraphQL",
-	"graph ql":                 "GraphQL",
-	"rest api":                 "REST API",
-	"restful api":              "REST API",
-	"rest apis":                "REST API",
-	"restful apis":             "REST API",
-	"apis":                     "API",
-	"aws":                      "AWS",
-	"gcp":                      "GCP",
-	"azure":                    "Azure",
-	".net":                     ".NET",
-	"dotnet":                   ".NET",
-	"asp.net":                  "ASP.NET",
-	"asp.net core":             "ASP.NET Core",
-	"grpc":                     "gRPC",
-	"json":                     "JSON",
-	"xml":                      "XML",
-	"html":                     "HTML",
-	"html5":                    "HTML5",
-	"css":                      "CSS",
-	"css3":                     "CSS3",
-	"scss":                     "SCSS",
-	"sass":                     "Sass",
-	"sql":                      "SQL",
-	"nosql":                    "NoSQL",
-	"no-sql":                   "NoSQL",
-	"etl":                      "ETL",
-	"elt":                      "ELT",
-	"etl/elt":                  "ETL/ELT",
-	"ci/cd":                    "CI/CD",
-	"cicd":                     "CI/CD",
-	"iac":                      "IaC",
-	"infrastructure as code":   "Infrastructure as Code",
-	"k8s":                      "Kubernetes",
-	"kubernetes (k8s)":         "Kubernetes",
-	"tailwindcss":              "Tailwind CSS",
-	"tailwind css":             "Tailwind CSS",
-	"google tag manager (gtm)": "Google Tag Manager",
-	"google tag manager":       "Google Tag Manager",
-	"gtm":                      "Google Tag Manager",
-	"sfdc":                     "Salesforce",
-	"sfdc crm":                 "Salesforce",
-	"salesforce.com":           "Salesforce",
-	"salesforce crm":           "Salesforce",
-}
-
 var techStackDropValues = map[string]struct{}{
 	"n/a": {}, "na": {}, "none": {}, "null": {}, "unknown": {}, "tbd": {},
 }
 
 func main() {
 	_ = config.LoadDotEnvIfExists(".env")
+	mappingPath := flag.String("mapping-json", "", "required path to JSON object mapping original tech stack to normalized value")
 	sourcesCSV := flag.String("sources", "builtin,workable", "optional comma-separated sources (example: builtin,workable,hiringcafe)")
 	dryRun := flag.Bool("dry-run", false, "preview only; do not write updates")
 	batchSize := flag.Int("batch-size", 500, "commit every N updates")
 	flag.Parse()
+	if strings.TrimSpace(*mappingPath) == "" {
+		log.Fatal("--mapping-json is required")
+	}
+
+	techStackAliases, err := loadTechStackAliases(*mappingPath)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	db, err := database.Open(config.Getenv("DATABASE_URL", "file:page_extract.db?_foreign_keys=on"))
 	if err != nil {
@@ -100,7 +43,7 @@ func main() {
 	defer db.Close()
 
 	sources := splitSources(*sourcesCSV)
-	scanned, updated, err := run(context.Background(), db.SQL, sources, *dryRun, max(*batchSize, 1))
+	scanned, updated, err := run(context.Background(), db.SQL, sources, techStackAliases, *dryRun, max(*batchSize, 1))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -115,7 +58,7 @@ func main() {
 	fmt.Printf("[%s] scanned=%d updated=%d sources=%v\n", mode, scanned, updated, label)
 }
 
-func run(ctx context.Context, db *database.SQLConn, sources []string, dryRun bool, batchSize int) (int, int, error) {
+func run(ctx context.Context, db *database.SQLConn, sources []string, techStackAliases map[string]string, dryRun bool, batchSize int) (int, int, error) {
 	query := `SELECT p.id, p.tech_stack
 		FROM parsed_jobs p
 		JOIN raw_us_jobs r ON r.id = p.raw_us_job_id`
@@ -146,7 +89,7 @@ func run(ctx context.Context, db *database.SQLConn, sources []string, dryRun boo
 		}
 		scanned++
 		current := parseTechStack(rawTech)
-		next := normalizeTechStack(current)
+		next := normalizeTechStack(current, techStackAliases)
 		currentJSON, _ := json.Marshal(current)
 		nextJSON, _ := json.Marshal(next)
 		if string(currentJSON) == string(nextJSON) {
@@ -195,7 +138,7 @@ func parseTechStack(value sql.NullString) []string {
 	return out
 }
 
-func normalizeTechStackValue(value string) string {
+func normalizeTechStackValue(value string, techStackAliases map[string]string) string {
 	normalized := strings.TrimSpace(value)
 	normalized = strings.Trim(normalized, "\"'")
 	normalized = regexpReplace(`\([^)]*\)`, normalized, "")
@@ -218,19 +161,19 @@ func normalizeTechStackValue(value string) string {
 		return ""
 	}
 	if alias, ok := techStackAliases[lowered]; ok {
-		return alias
+		return strings.TrimSpace(alias)
 	}
 	return normalized
 }
 
-func normalizeTechStack(values []string) []string {
+func normalizeTechStack(values []string, techStackAliases map[string]string) []string {
 	if len(values) == 0 {
 		return nil
 	}
 	out := make([]string, 0, len(values))
 	seen := map[string]struct{}{}
 	for _, value := range values {
-		next := normalizeTechStackValue(value)
+		next := normalizeTechStackValue(value, techStackAliases)
 		if next == "" {
 			continue
 		}
@@ -245,6 +188,33 @@ func normalizeTechStack(values []string) []string {
 		return nil
 	}
 	return out
+}
+
+func loadTechStackAliases(path string) (map[string]string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read mapping json: %w", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, fmt.Errorf("parse mapping json: %w", err)
+	}
+	out := make(map[string]string, len(payload))
+	for key, value := range payload {
+		normalizedKey := strings.ToLower(strings.TrimSpace(key))
+		if normalizedKey == "" {
+			continue
+		}
+		switch typed := value.(type) {
+		case string:
+			out[normalizedKey] = strings.TrimSpace(typed)
+		case nil:
+			out[normalizedKey] = ""
+		default:
+			out[normalizedKey] = strings.TrimSpace(fmt.Sprint(typed))
+		}
+	}
+	return out, nil
 }
 
 func splitSources(csv string) []string {

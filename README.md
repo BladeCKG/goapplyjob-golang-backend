@@ -6,12 +6,12 @@ A boilerplate project for a Gin webserver.
 Idea is to follow best practices and have a good starting point for any
 project which involves one of the following or all of them:
 
-* **PostgreSQL** database access with **sqlc**
-* Local PostgreSQL integration tests
-* **Gin Gonic** Web server
-* Additional yet useful static code analysis with **golangci-lint**
-* Have a nice structured logging with tracing offered by **Zerolog**
-* Enable **OpenTelemetry** tracing for better view on performance insights
+- **PostgreSQL** database access with **sqlc**
+- Local PostgreSQL integration tests
+- **Gin Gonic** Web server
+- Additional yet useful static code analysis with **golangci-lint**
+- Have a nice structured logging with tracing offered by **Zerolog**
+- Enable **OpenTelemetry** tracing for better view on performance insights
 
 Example logging with Zerolog middleware hooked to Gin Gonic:
 
@@ -25,28 +25,28 @@ Example screenshot of OTEL tracing captured and shown in Jeager UI:
 
 ## Prerequisites
 
-* [Docker](https://docker-docs.netlify.app/install/) acting as a local development database and for integration tests.
+- [Docker](https://docker-docs.netlify.app/install/) acting as a local development database and for integration tests.
   Also a step towards reproducible builds.
-* [Gin](https://gin-gonic.com/) as a web framework.
-* [Golangci-lint](https://golangci-lint.run/) for linting and static code analysis.
-* [govulncheck](https://go.dev/security/vuln/) for package vulnerability analysis.
-* [golang-migrate](https://github.com/golang-migrate/migrate) for versioned database migrations.
-* [sqlc](https://sqlc.dev/) for database access.
-* [Zerolog](https://zerolog.io/) for structured and leveled logging.
+- [Gin](https://gin-gonic.com/) as a web framework.
+- [Golangci-lint](https://golangci-lint.run/) for linting and static code analysis.
+- [govulncheck](https://go.dev/security/vuln/) for package vulnerability analysis.
+- [golang-migrate](https://github.com/golang-migrate/migrate) for versioned database migrations.
+- [sqlc](https://sqlc.dev/) for database access.
+- [Zerolog](https://zerolog.io/) for structured and leveled logging.
 
 ## Features
 
-* Logging has an unique ID `uniq_id` column that can be used to track
+- Logging has an unique ID `uniq_id` column that can be used to track
   log events in clustered application and other places where same service
   has many instances.
-* Graceful shutdown for HTTP server and for the database connections.
-  * Useful with Lambdas or with AWS Fargate where signal handling speeds up
+- Graceful shutdown for HTTP server and for the database connections.
+  - Useful with Lambdas or with AWS Fargate where signal handling speeds up
     the shutdown.
-* Database retry with exponential backoff and connection pooling.
-* Gin middlewares for logging and database.
-* Enable OpenTelemetry tracing with Gin Gonic integration by default.
-* Live performance statistics and profiling via separate web service (pprof HTTP server)
-* No logging for certain routes/paths (currently /health and /metrics).
+- Database retry with exponential backoff and connection pooling.
+- Gin middlewares for logging and database.
+- Enable OpenTelemetry tracing with Gin Gonic integration by default.
+- Live performance statistics and profiling via separate web service (pprof HTTP server)
+- No logging for certain routes/paths (currently /health and /metrics).
 
 ## Usage
 
@@ -123,34 +123,34 @@ Linux:
 
 ```bash
 cd <backend-directory>
-chmod +x scripts/bootstrap_and_start.sh
-./scripts/bootstrap_and_start.sh
+chmod +x bootstrap/bootstrap_and_start/main.sh
+./bootstrap/bootstrap_and_start/main.sh
 ```
 
 Windows PowerShell:
 
 ```powershell
 cd <backend-directory>
-.\scripts\bootstrap_and_start.ps1
+.\bootstrap\bootstrap_and_start\main.ps1
 ```
 
 What these scripts do:
 
-* create `.env` from `.env.example` if missing
-* validate `DATABASE_URL` is PostgreSQL
-* ensure `logs/` exists
-* run `go run ./cmd/migrate`
-* start the Go API and all workers (`watcher`, `importer`, `rawjobworker`, `parsedjobworker`) in background
+- create `.env` from `.env.example` if missing
+- validate `DATABASE_URL` is PostgreSQL
+- ensure `logs/` exists
+- run `go run ./cmd/migrate`
+- start the Go API and all workers (`watcher`, `importer`, `rawjobworker`, `parsedjobworker`) in background
 
 To use the worker chain instead of individual workers:
 
 ```bash
-WORKER_CHAIN_ENABLED=true ./scripts/bootstrap_and_start.sh
+WORKER_CHAIN_ENABLED=true ./bootstrap/bootstrap_and_start/main.sh
 ```
 
 ```powershell
 $env:WORKER_CHAIN_ENABLED="true"
-.\scripts\bootstrap_and_start.ps1
+.\bootstrap\bootstrap_and_start\main.ps1
 ```
 
 Source selection is runtime-configurable through `ENABLED_SOURCES`.
@@ -176,15 +176,15 @@ Linux:
 
 ```bash
 cd <backend-directory>
-chmod +x scripts/docker_bootstrap_and_start.sh
-./scripts/docker_bootstrap_and_start.sh
+chmod +x scripts/docker_bootstrap_and_start/main.sh
+./bootstrap/docker_bootstrap_and_start/main.sh
 ```
 
 Windows PowerShell:
 
 ```powershell
 cd <backend-directory>
-.\scripts\docker_bootstrap_and_start.ps1
+.\bootstrap\docker_bootstrap_and_start\main.ps1
 ```
 
 Run migrations before API or workers:
@@ -199,13 +199,13 @@ DB health endpoint: `http://127.0.0.1:8080/db/health`.
 
 This repo includes `render.yaml` for one-click Render Blueprint deployment with:
 
-* 1 PostgreSQL database
-* 1 web service for the Gin API
-* 1 cron service that runs every 2 hours and executes, in order:
-  * `watcher` (run once)
-  * `importer` (run once, tuned batch sizes)
-  * `raw` (run once)
-  * `parsed` (run once)
+- 1 PostgreSQL database
+- 1 web service for the Gin API
+- 1 cron service that runs every 2 hours and executes, in order:
+  - `watcher` (run once)
+  - `importer` (run once, tuned batch sizes)
+  - `raw` (run once)
+  - `parsed` (run once)
 
 Steps:
 
@@ -216,22 +216,22 @@ Steps:
 
 Required manual env vars:
 
-* `WATCH_URL`
-* `ENABLED_SOURCES`
-* `SMTP_HOST`
-* `SMTP_USER`
-* `SMTP_PASS`
-* `SMTP_FROM`
-* `AUTH_MAGIC_LINK_BASE_URL`
-* `PAYMENT_SUCCESS_URL`
-* `PAYMENT_CANCEL_URL`
-* `CRYPTO_IPN_CALLBACK_URL`
-* `OXAPAY_MERCHANT_API_KEY`
+- `WATCH_URL`
+- `ENABLED_SOURCES`
+- `SMTP_HOST`
+- `SMTP_USER`
+- `SMTP_PASS`
+- `SMTP_FROM`
+- `AUTH_MAGIC_LINK_BASE_URL`
+- `PAYMENT_SUCCESS_URL`
+- `PAYMENT_CANCEL_URL`
+- `CRYPTO_IPN_CALLBACK_URL`
+- `OXAPAY_MERCHANT_API_KEY`
 
 Notes:
 
-* `DATABASE_URL` is wired from Render Postgres.
-* `AUTH_COOKIE_SECURE=true` is already set in `render.yaml`.
+- `DATABASE_URL` is wired from Render Postgres.
+- `AUTH_COOKIE_SECURE=true` is already set in `render.yaml`.
 
 ### GitHub Actions Worker Runner
 
@@ -239,25 +239,25 @@ This repo includes `.github/workflows/workers-cron.yml` for scheduled worker exe
 
 Schedule:
 
-* every 2 hours: `watcher`, `importer`, `rawjobworker`, `parsedjobworker`
-* manual `workflow_dispatch`: runs all configured worker steps immediately
+- every 2 hours: `watcher`, `importer`, `rawjobworker`, `parsedjobworker`
+- manual `workflow_dispatch`: runs all configured worker steps immediately
 
 Required repository secrets:
 
-* `DATABASE_URL`
-* `WATCH_URL`
-* `ENABLED_SOURCES`
+- `DATABASE_URL`
+- `WATCH_URL`
+- `ENABLED_SOURCES`
 
 ### Adding new database migrations
 
 PostgreSQL migrations are versioned SQL files under:
 
-* [internal/database/migrations](internal/database/migrations)
+- [internal/database/migrations](internal/database/migrations)
 
 Add a new pair:
 
-* `00000N_description.up.sql`
-* `00000N_description.down.sql`
+- `00000N_description.up.sql`
+- `00000N_description.down.sql`
 
 Then apply:
 
@@ -269,5 +269,5 @@ go run ./cmd/migrate
 
 ## TODO
 
-* Create separate unprivileged API users for Postgres access
-* Add an example of proper database transaction cancellation with Golang's cancel
+- Create separate unprivileged API users for Postgres access
+- Add an example of proper database transaction cancellation with Golang's cancel
