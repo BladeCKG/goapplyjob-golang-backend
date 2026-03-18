@@ -156,6 +156,11 @@ type jobDetail struct {
 	SalaryMinUSD                            *float64 `json:"salary_min_usd"`
 	SalaryMaxUSD                            *float64 `json:"salary_max_usd"`
 	SalaryType                              *string  `json:"salary_type"`
+	IsEntryLevel                            *bool    `json:"is_entry_level"`
+	IsJunior                                *bool    `json:"is_junior"`
+	IsMidLevel                              *bool    `json:"is_mid_level"`
+	IsSenior                                *bool    `json:"is_senior"`
+	IsLead                                  *bool    `json:"is_lead"`
 	UpdatedAt                               *string  `json:"updated_at"`
 	CreatedAtSource                         *string  `json:"created_at_source"`
 	RoleDescription                         *string  `json:"role_description"`
@@ -1783,6 +1788,11 @@ func mapJobDetailRow(row *gensqlc.GetJobDetailByIDRow) jobDetail {
 		LocationType:                            pgTextPtr(row.LocationType),
 		EmploymentType:                          pgTextPtr(row.EmploymentType),
 		SalaryType:                              pgTextPtr(row.SalaryType),
+		IsEntryLevel:                            pgBoolPtr(row.IsEntryLevel),
+		IsJunior:                                pgBoolPtr(row.IsJunior),
+		IsMidLevel:                              pgBoolPtr(row.IsMidLevel),
+		IsSenior:                                pgBoolPtr(row.IsSenior),
+		IsLead:                                  pgBoolPtr(row.IsLead),
 		UpdatedAt:                               timestamptzStringPtr(row.UpdatedAt),
 		CreatedAtSource:                         timestamptzStringPtr(row.CreatedAtSource),
 		RoleDescription:                         pgTextPtr(row.RoleDescription),
