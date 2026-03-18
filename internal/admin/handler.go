@@ -976,6 +976,7 @@ func (h *Handler) autoCategorizeParsedJob(c *gin.Context) {
 		roleTitle.String,
 		roleDescription.String,
 		parseJSONStringArray(techStack),
+		true, // overrideTechStack
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to auto-categorize parsed job"})

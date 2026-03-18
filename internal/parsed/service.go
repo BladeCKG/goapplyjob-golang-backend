@@ -312,12 +312,12 @@ func (s *Service) RunForever() error {
 	}
 }
 
-func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, roleTitle, roleDescription string, techStack any) (string, string, []string, error) {
+func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, roleTitle, roleDescription string, techStack any, overrideTechStack bool) (string, string, []string, error) {
 	normalizedTechStack := normalizeTechStack(techStack)
 	categorizedTitle := ""
 	categorizedFunction := ""
 
-	if len(normalizedTechStack) == 0 {
+	if len(normalizedTechStack) == 0 || overrideTechStack {
 		allowedCategories, categoryFunctions, _ := s.loadAllowedJobCategoriesAndFunctionsForGroq(ctx)
 		if shouldUseGroqClassification(stringValue(roleTitle)) {
 			groqCategory, groqRequiredSkills := classifyJobTitleWithGroqSync(

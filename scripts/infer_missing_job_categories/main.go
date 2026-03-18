@@ -72,6 +72,7 @@ func main() {
 			roleTitle.String,
 			roleDesc.String,
 			techStackValue,
+			false, // overrideTechStack
 		)
 		if err != nil {
 			log.Printf("infer failed id=%d error=%v", id, err)
