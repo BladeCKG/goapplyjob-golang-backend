@@ -6,24 +6,18 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
-	"os"
-	"regexp"
-	"strings"
-	"time"
-
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
+	"log"
+	"os"
+	"strings"
+	"time"
 )
-
-var techStackDropValues = map[string]struct{}{
-	"n/a": {}, "na": {}, "none": {}, "null": {}, "unknown": {}, "tbd": {},
-}
 
 func main() {
 	_ = config.LoadDotEnvIfExists(".env")
-	mappingPath := flag.String("mapping-json", "", "required path to JSON object mapping original tech stack to normalized value")
-	sourcesCSV := flag.String("sources", "builtin,workable", "optional comma-separated sources (example: builtin,workable,hiringcafe)")
+	mappingPath := flag.String("mapping-json", "mapping.json", "required path to JSON object mapping original tech stack to normalized value")
+	sourcesCSV := flag.String("sources", "remoterocketship,workable,remotive,dailyremote,builtin,remotedotco", "optional comma-separated sources (example: builtin,workable,hiringcafe)")
 	dryRun := flag.Bool("dry-run", false, "preview only; do not write updates")
 	batchSize := flag.Int("batch-size", 500, "commit every N updates")
 	flag.Parse()
@@ -69,7 +63,7 @@ func run(ctx context.Context, db *database.SQLConn, sources []string, techStackA
 			placeholders = append(placeholders, "?")
 			args = append(args, source)
 		}
-		query += ` WHERE r.source IN (` + strings.Join(placeholders, ", ") + `)`
+		query += ` WHERE p.tech_stack IS NOT NULL AND p.tech_stack != '[]'::jsonb AND r.source IN (` + strings.Join(placeholders, ", ") + `)`
 	}
 	query += ` ORDER BY p.id ASC`
 
@@ -138,34 +132,6 @@ func parseTechStack(value sql.NullString) []string {
 	return out
 }
 
-func normalizeTechStackValue(value string, techStackAliases map[string]string) string {
-	normalized := strings.TrimSpace(value)
-	normalized = strings.Trim(normalized, "\"'")
-	normalized = regexpReplace(`\([^)]*\)`, normalized, "")
-	if strings.Contains(normalized, "(") && !strings.Contains(normalized, ")") {
-		normalized = strings.SplitN(normalized, "(", 2)[0]
-	}
-	normalized = strings.ReplaceAll(normalized, ")", "")
-	normalized = strings.ReplaceAll(normalized, "]", "")
-	normalized = strings.ReplaceAll(normalized, "}", "")
-	normalized = regexpReplace(`\s*/\s*`, normalized, "/")
-	normalized = regexpReplace(`\s*-\s*`, normalized, "-")
-	normalized = regexpReplace(`[;,:]+$`, normalized, "")
-	normalized = regexpReplace(`\s+`, normalized, " ")
-	normalized = strings.Trim(normalized, " .-_/")
-	if normalized == "" {
-		return ""
-	}
-	lowered := strings.ToLower(normalized)
-	if _, ok := techStackDropValues[lowered]; ok {
-		return ""
-	}
-	if alias, ok := techStackAliases[lowered]; ok {
-		return strings.TrimSpace(alias)
-	}
-	return normalized
-}
-
 func normalizeTechStack(values []string, techStackAliases map[string]string) []string {
 	if len(values) == 0 {
 		return nil
@@ -173,19 +139,19 @@ func normalizeTechStack(values []string, techStackAliases map[string]string) []s
 	out := make([]string, 0, len(values))
 	seen := map[string]struct{}{}
 	for _, value := range values {
-		next := normalizeTechStackValue(value, techStackAliases)
-		if next == "" {
+		normalized := strings.ToLower(value)
+		toInsert := value
+		if techStackAliases[normalized] != "" {
+			toInsert = techStackAliases[normalized]
+		}
+
+		if _, ok := seen[toInsert]; ok {
 			continue
 		}
-		key := strings.ToLower(next)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, next)
-	}
-	if len(out) == 0 {
-		return nil
+		seen[toInsert] = struct{}{}
+
+		out = append(out, toInsert)
+
 	}
 	return out
 }
@@ -227,22 +193,6 @@ func splitSources(csv string) []string {
 		out = append(out, value)
 	}
 	return out
-}
-
-func regexpReplace(pattern, value, replacement string) string {
-	re := regexpCache(pattern)
-	return re.ReplaceAllString(value, replacement)
-}
-
-var reCache = map[string]*regexp.Regexp{}
-
-func regexpCache(pattern string) *regexp.Regexp {
-	if existing, ok := reCache[pattern]; ok {
-		return existing
-	}
-	compiled := regexp.MustCompile(pattern)
-	reCache[pattern] = compiled
-	return compiled
 }
 
 func max(a, b int) int {
