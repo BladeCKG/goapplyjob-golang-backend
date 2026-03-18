@@ -1017,6 +1017,7 @@ func (h *Handler) listParsedCompanies(c *gin.Context) {
 		"founded_year":        {columnExpr: "founded_year", valueType: "text"},
 		"home_page_url":       {columnExpr: "home_page_url", valueType: "text"},
 		"linkedin_url":        {columnExpr: "linkedin_url", valueType: "text"},
+		"profile_pic_url":     {columnExpr: "profile_pic_url", valueType: "text"},
 		"sponsors_h1b":        {columnExpr: "sponsors_h1b", valueType: "bool"},
 		"employee_range":      {columnExpr: "employee_range", valueType: "text"},
 	}
@@ -1043,7 +1044,7 @@ func (h *Handler) listParsedCompanies(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list parsed companies"})
 		return
 	}
-	query := `SELECT id, external_company_id, name, slug, tagline, founded_year, home_page_url, linkedin_url, sponsors_h1b, employee_range FROM parsed_companies` + where + ` ORDER BY id DESC LIMIT ? OFFSET ?`
+	query := `SELECT id, external_company_id, name, slug, tagline, founded_year, home_page_url, linkedin_url, profile_pic_url, sponsors_h1b, employee_range FROM parsed_companies` + where + ` ORDER BY id DESC LIMIT ? OFFSET ?`
 	queryArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, queryArgs...)
 	if err != nil {
@@ -1057,10 +1058,11 @@ func (h *Handler) listParsedCompanies(c *gin.Context) {
 			id                              int64
 			externalID, name, slug, tagline sql.NullString
 			foundedYear, homePage, linkedin sql.NullString
+			profilePicURL                   sql.NullString
 			sponsors                        sql.NullBool
 			employeeRange                   sql.NullString
 		)
-		if err := rows.Scan(&id, &externalID, &name, &slug, &tagline, &foundedYear, &homePage, &linkedin, &sponsors, &employeeRange); err != nil {
+		if err := rows.Scan(&id, &externalID, &name, &slug, &tagline, &foundedYear, &homePage, &linkedin, &profilePicURL, &sponsors, &employeeRange); err != nil {
 			continue
 		}
 		items = append(items, gin.H{
@@ -1072,6 +1074,7 @@ func (h *Handler) listParsedCompanies(c *gin.Context) {
 			"founded_year":        nullableString(foundedYear),
 			"home_page_url":       nullableString(homePage),
 			"linkedin_url":        nullableString(linkedin),
+			"profile_pic_url":     nullableString(profilePicURL),
 			"sponsors_h1b":        nullableBool(sponsors),
 			"employee_range":      nullableString(employeeRange),
 		})
@@ -1101,6 +1104,7 @@ func (h *Handler) updateParsedCompany(c *gin.Context) {
 		"founded_year":        jsonPatchStringOrNull,
 		"home_page_url":       jsonPatchStringOrNull,
 		"linkedin_url":        jsonPatchStringOrNull,
+		"profile_pic_url":     jsonPatchStringOrNull,
 		"sponsors_h1b":        jsonPatchBoolOrNull,
 		"employee_range":      jsonPatchStringOrNull,
 	})
