@@ -58,7 +58,7 @@ type mergeStats struct {
 
 func main() {
 	dryRun := flag.Bool("dry-run", false, "preview changes without committing")
-	limitGroups := flag.Int("limit-groups", 0, "limit number of merge groups to process")
+	limitGroups := flag.Int("limit-groups", 1000, "limit number of merge groups to process")
 	flag.Parse()
 
 	_ = config.LoadDotEnvIfExists(".env")
