@@ -56,7 +56,7 @@ var groqPromptCache = struct {
 
 var groqHTMLTagPattern = regexp.MustCompile(`(?is)<[^>]+>`)
 
-//go:embed prompts\job_title_classification.txt
+//go:embed prompts/job_title_classification.txt
 var groqPromptFS embed.FS
 
 func SetCachedGroqCategorizedJobTitles(titles []string, functions map[string]string) {
