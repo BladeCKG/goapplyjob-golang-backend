@@ -73,6 +73,17 @@ func (h *Handler) listUsers(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
 		return
 	}
+	orderClause, err := queryOrderClause(c, map[string]string{
+		"id":                    "id",
+		"email":                 "email",
+		"created_at":            "created_at",
+		"last_seen_at":          "last_seen_at",
+		"last_job_filters_json": "last_job_filters_json",
+	}, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
 
 	filters := []string{}
 	args := []any{}
@@ -112,7 +123,7 @@ func (h *Handler) listUsers(c *gin.Context) {
 		return
 	}
 
-	query += ` ORDER BY id DESC LIMIT ? OFFSET ?`
+	query += orderClause + ` LIMIT ? OFFSET ?`
 	queryArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, queryArgs...)
 	if err != nil {
@@ -367,6 +378,19 @@ func (h *Handler) listWatcherPayloads(c *gin.Context) {
 	source := strings.TrimSpace(c.Query("source"))
 	payloadType := strings.TrimSpace(c.Query("payload_type"))
 	onlyUnconsumed := queryBoolDefault(c, "only_unconsumed", true)
+	orderClause, err := queryOrderClause(c, map[string]string{
+		"id":           "id",
+		"source":       "source",
+		"source_url":   "source_url",
+		"payload_type": "payload_type",
+		"body_text":    "body_text",
+		"created_at":   "created_at",
+		"consumed_at":  "consumed_at",
+	}, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
 
 	filters := []string{}
 	args := []any{}
@@ -390,7 +414,7 @@ func (h *Handler) listWatcherPayloads(c *gin.Context) {
 		query += where
 		totalQuery += where
 	}
-	query += " ORDER BY id DESC LIMIT ? OFFSET ?"
+	query += orderClause + " LIMIT ? OFFSET ?"
 	total := 0
 	if err := h.db.SQL.QueryRowContext(c.Request.Context(), totalQuery, args...).Scan(&total); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list watcher payloads"})
@@ -485,6 +509,21 @@ func (h *Handler) listRawUSJobs(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
 		return
 	}
+	orderClause, err := queryOrderClause(c, map[string]string{
+		"id":           "id",
+		"source":       "source",
+		"url":          "url",
+		"post_date":    "post_date",
+		"is_ready":     "is_ready",
+		"is_skippable": "is_skippable",
+		"is_parsed":    "is_parsed",
+		"retry_count":  "retry_count",
+		"raw_json":     "raw_json",
+	}, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
 
 	filters := []string{}
 	args := []any{}
@@ -528,7 +567,7 @@ func (h *Handler) listRawUSJobs(c *gin.Context) {
 		query += where
 		totalQuery += where
 	}
-	query += " ORDER BY id DESC LIMIT ? OFFSET ?"
+	query += orderClause + " LIMIT ? OFFSET ?"
 	total := 0
 	if err := h.db.SQL.QueryRowContext(c.Request.Context(), totalQuery, args...).Scan(&total); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list raw jobs"})
@@ -623,6 +662,16 @@ func (h *Handler) listWatcherStates(c *gin.Context) {
 	}
 	limit, offset := queryLimitOffset(c, 200, 1000)
 	source := strings.TrimSpace(c.Query("source"))
+	orderClause, err := queryOrderClause(c, map[string]string{
+		"id":         "id",
+		"source":     "source",
+		"state_json": "state_json",
+		"updated_at": "updated_at",
+	}, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
 
 	query := `SELECT id, source, state_json, updated_at
 		FROM watcher_states`
@@ -633,7 +682,7 @@ func (h *Handler) listWatcherStates(c *gin.Context) {
 		totalQuery += " WHERE source = ?"
 		args = append(args, source)
 	}
-	query += " ORDER BY id DESC LIMIT ? OFFSET ?"
+	query += orderClause + " LIMIT ? OFFSET ?"
 	total := 0
 	if err := h.db.SQL.QueryRowContext(c.Request.Context(), totalQuery, args...).Scan(&total); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list watcher states"})
@@ -723,6 +772,41 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
 		return
 	}
+	orderClause, err := queryOrderClause(c, map[string]string{
+		"id":                       "p.id",
+		"raw_us_job_id":            "p.raw_us_job_id",
+		"source":                   "r.source",
+		"company_id":               "p.company_id",
+		"external_job_id":          "p.external_job_id",
+		"role_title":               "p.role_title",
+		"role_description":         "p.role_description",
+		"url":                      "p.url",
+		"slug":                     "p.slug",
+		"employment_type":          "p.employment_type",
+		"location_type":            "p.location_type",
+		"location_city":            "p.location_city",
+		"location_us_states":       "p.location_us_states",
+		"location_countries":       "p.location_countries",
+		"categorized_job_title":    "p.categorized_job_title",
+		"categorized_job_function": "p.categorized_job_function",
+		"tech_stack":               "p.tech_stack",
+		"salary_type":              "p.salary_type",
+		"salary_currency_code":     "p.salary_currency_code",
+		"salary_currency_symbol":   "p.salary_currency_symbol",
+		"salary_min_usd":           "p.salary_min_usd",
+		"salary_max_usd":           "p.salary_max_usd",
+		"is_entry_level":           "p.is_entry_level",
+		"is_junior":                "p.is_junior",
+		"is_mid_level":             "p.is_mid_level",
+		"is_senior":                "p.is_senior",
+		"is_lead":                  "p.is_lead",
+		"created_at_source":        "p.created_at_source",
+		"updated_at":               "p.updated_at",
+	}, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
 
 	filters := []string{}
 	args := []any{}
@@ -794,7 +878,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 		return
 	}
 	query := `SELECT p.id, p.raw_us_job_id, r.source, p.company_id, p.external_job_id, p.role_title, p.role_description, p.url, p.slug, p.employment_type, p.location_type, p.location_city, p.location_us_states::text, p.location_countries::text, p.categorized_job_title, p.categorized_job_function, p.tech_stack::text, p.salary_type, p.salary_currency_code, p.salary_currency_symbol, p.salary_min_usd, p.salary_max_usd, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.created_at_source, p.updated_at` +
-		baseFrom + where + ` ORDER BY p.id DESC LIMIT ? OFFSET ?`
+		baseFrom + where + orderClause + ` LIMIT ? OFFSET ?`
 	queryArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, queryArgs...)
 	if err != nil {
@@ -1000,6 +1084,25 @@ func (h *Handler) listParsedCompanies(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
 		return
 	}
+	orderClause, err := queryOrderClause(c, map[string]string{
+		"id":                    "id",
+		"external_company_id":   "external_company_id",
+		"name":                  "name",
+		"slug":                  "slug",
+		"tagline":               "tagline",
+		"founded_year":          "founded_year",
+		"home_page_url":         "home_page_url",
+		"linkedin_url":          "linkedin_url",
+		"profile_pic_url":       "profile_pic_url",
+		"sponsors_h1b":          "sponsors_h1b",
+		"employee_range":        "employee_range",
+		"industry_specialities": "industry_specialities",
+		"updated_at":            "updated_at",
+	}, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
 	filters := []string{}
 	args := []any{}
 	if q != "" {
@@ -1045,7 +1148,7 @@ func (h *Handler) listParsedCompanies(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list parsed companies"})
 		return
 	}
-	query := `SELECT id, external_company_id, name, slug, tagline, founded_year, home_page_url, linkedin_url, profile_pic_url, sponsors_h1b, employee_range FROM parsed_companies` + where + ` ORDER BY id DESC LIMIT ? OFFSET ?`
+	query := `SELECT id, external_company_id, name, slug, tagline, founded_year, home_page_url, linkedin_url, profile_pic_url, sponsors_h1b, employee_range FROM parsed_companies` + where + orderClause + ` LIMIT ? OFFSET ?`
 	queryArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, queryArgs...)
 	if err != nil {
@@ -1270,6 +1373,26 @@ func queryLimitOffset(c *gin.Context, defaultLimit, maxLimit int) (int, int) {
 	return limit, offset
 }
 
+func queryOrderClause(c *gin.Context, allowed map[string]string, defaultColumn string) (string, error) {
+	column := strings.TrimSpace(c.Query("order_by"))
+	if column == "" {
+		column = defaultColumn
+	}
+	expr, ok := allowed[column]
+	if !ok {
+		return "", fmt.Errorf("Unsupported order column: %s", column)
+	}
+
+	direction := strings.ToLower(strings.TrimSpace(c.Query("order_dir")))
+	if direction == "" {
+		direction = "desc"
+	}
+	if direction != "asc" && direction != "desc" {
+		return "", fmt.Errorf("Unsupported order direction: %s", direction)
+	}
+	return fmt.Sprintf(" ORDER BY %s %s NULLS LAST", expr, strings.ToUpper(direction)), nil
+}
+
 func queryBoolDefault(c *gin.Context, key string, fallback bool) bool {
 	value := strings.TrimSpace(c.Query(key))
 	if value == "" {
@@ -1291,6 +1414,18 @@ func parseTimestamp(value string) (time.Time, error) {
 		return time.Time{}, sql.ErrNoRows
 	}
 	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return parsed, nil
+	}
+	if parsed, err := time.Parse("2006-01-02T15:04", value); err == nil {
+		return parsed, nil
+	}
+	if parsed, err := time.Parse("2006-01-02T15:04:05", value); err == nil {
+		return parsed, nil
+	}
+	if parsed, err := time.ParseInLocation("2006-01-02T15:04", value, time.Local); err == nil {
+		return parsed, nil
+	}
+	if parsed, err := time.ParseInLocation("2006-01-02T15:04:05", value, time.Local); err == nil {
 		return parsed, nil
 	}
 	return time.Parse(time.RFC3339, value)
