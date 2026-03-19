@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"embed"
 	"encoding/json"
+	"goapplyjob-golang-backend/internal/config"
 	"html"
 	"io"
 	"log"
@@ -16,8 +18,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"goapplyjob-golang-backend/internal/config"
 )
 
 const (
@@ -27,7 +27,7 @@ const (
 	envGroqClassifierPromptSource = "GROQ_CLASSIFIER_PROMPT_SOURCE"
 
 	defaultGroqModel                = "moonshotai/kimi-k2-instruct-0905"
-	defaultGroqClassifierPromptPath = "internal/sources/prompts/job_title_classification.txt"
+	defaultGroqClassifierPromptPath = "internal/parsed/prompts/job_title_classification.txt"
 )
 
 type GroqJobClassifier struct {
@@ -55,6 +55,9 @@ var groqPromptCache = struct {
 }{}
 
 var groqHTMLTagPattern = regexp.MustCompile(`(?is)<[^>]+>`)
+
+//go:embed prompts\job_title_classification.txt
+var groqPromptFS embed.FS
 
 func SetCachedGroqCategorizedJobTitles(titles []string, functions map[string]string) {
 	groqCategoryCache.mu.Lock()
@@ -311,28 +314,16 @@ func (g *GroqJobClassifier) loadClassifierPromptContent() string {
 	content, err := g.readPromptContentSource(source)
 	if err != nil {
 		log.Printf("parsed-job-worker groq_prompt_load_failed source=%q error=%v", source, err)
-		if source != defaultGroqClassifierPromptPath {
-			content, err = g.readPromptContentSource(defaultGroqClassifierPromptPath)
-			if err != nil {
-				log.Printf("parsed-job-worker groq_prompt_default_load_failed source=%q error=%v", defaultGroqClassifierPromptPath, err)
-				return ""
-			}
-			source = defaultGroqClassifierPromptPath
-		} else {
+		content = loadEmbeddedDefaultGroqPrompt()
+		if content == "" {
 			return ""
 		}
+		source = defaultGroqClassifierPromptPath
 	}
 	content = strings.TrimSpace(content)
 	if content == "" {
-		if source != defaultGroqClassifierPromptPath {
-			content, err = g.readPromptContentSource(defaultGroqClassifierPromptPath)
-			if err != nil {
-				log.Printf("parsed-job-worker groq_prompt_default_load_failed source=%q error=%v", defaultGroqClassifierPromptPath, err)
-				return ""
-			}
-			content = strings.TrimSpace(content)
-			source = defaultGroqClassifierPromptPath
-		}
+		content = loadEmbeddedDefaultGroqPrompt()
+		source = defaultGroqClassifierPromptPath
 		if content == "" {
 			return ""
 		}
@@ -343,6 +334,15 @@ func (g *GroqJobClassifier) loadClassifierPromptContent() string {
 	groqPromptCache.content = content
 	groqPromptCache.mu.Unlock()
 	return content
+}
+
+func loadEmbeddedDefaultGroqPrompt() string {
+	body, err := groqPromptFS.ReadFile("prompts/job_title_classification.txt")
+	if err != nil {
+		log.Printf("parsed-job-worker groq_prompt_embedded_load_failed error=%v", err)
+		return ""
+	}
+	return strings.TrimSpace(string(body))
 }
 
 func (g *GroqJobClassifier) readPromptContentSource(source string) (string, error) {
