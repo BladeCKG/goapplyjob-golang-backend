@@ -11,15 +11,17 @@ Include only concrete, directly usable hard skills (tools, equipment, software, 
 Strictly EXCLUDE:
 - preferred or optional skills
 - soft skills, responsibilities, or role titles
-- umbrella terms, broad concepts, or vague categories (e.g., “management”, “analysis”, “operations”)
+- umbrella terms, broad concepts, or vague categories
 - fields, disciplines, or areas of work
 
-A valid skill must be specific and independently usable (a named tool, system, technique, certification, or equipment).
+A valid skill must be specific and independently usable.
 
-Normalize all skills to canonical industry-standard form:
-- fix casing, spacing, punctuation
-- merge equivalent variants
-- normalize unambiguous shorthand (e.g., js → JavaScript, cdl → Commercial Driver’s License, cpr → CPR)
+Normalization rules (strict):
+- convert all skills to canonical industry-standard names
+- fix casing, spacing, punctuation, and formatting
+- resolve abbreviations, acronyms, and shorthand to their full standard form when the mapping is clear and unambiguous in context
+- expand common programming language, tool, certification, and system abbreviations when uniquely identifiable
+- merge equivalent variants into one canonical value
 - do NOT expand ambiguous terms
 - preserve exact meaning
 
