@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"goapplyjob-golang-backend/internal/locationnorm"
+	"goapplyjob-golang-backend/internal/scraper"
+	"goapplyjob-golang-backend/internal/sources/currency"
 	"html"
 	"net/url"
 	"regexp"
@@ -11,16 +14,13 @@ import (
 	"strings"
 	"time"
 
-	"goapplyjob-golang-backend/internal/locationnorm"
-	"goapplyjob-golang-backend/internal/scraper"
-	"goapplyjob-golang-backend/internal/sources/currency"
-
 	nethtml "golang.org/x/net/html"
 )
 
 const (
-	Source      = "dailyremote"
-	PayloadType = "delta_dailyremote_json"
+	Source                = "dailyremote"
+	PayloadType           = "delta_dailyremote_json"
+	dailyRemoteFaviconURL = "https://dailyremote.com/assets/favicon.png"
 )
 
 var (
@@ -268,6 +268,9 @@ func parseCompany(value any) map[string]any {
 	name := normalizeText(item["name"])
 	homeURL := normalizeText(firstNonEmpty(stringValue(item["sameAs"]), stringValue(item["url"])))
 	profilePic := normalizeText(item["logo"])
+	if strings.EqualFold(profilePic, dailyRemoteFaviconURL) {
+		profilePic = ""
+	}
 	slug := slugify(name)
 	if slug == "" {
 		slug = "dailyremote-company"

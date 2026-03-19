@@ -144,6 +144,36 @@ func TestParseRawHTMLMarksRetryWhenUnresolvedApplyURL(t *testing.T) {
 	}
 }
 
+func TestParseRawHTMLDropsDailyRemoteFaviconProfilePic(t *testing.T) {
+	html := `
+<script type="application/ld+json">
+{
+  "@type":"JobPosting",
+  "url":"https://dailyremote.com/remote-job/test-4683998",
+  "title":"Backend Engineer",
+  "description":"&lt;p&gt;Role&lt;/p&gt;",
+  "datePosted":"2026-03-04T14:00:16.000Z",
+  "employmentType":"FULL_TIME",
+  "jobLocationType":"TELECOMMUTE",
+  "applicantLocationRequirements":[{"@type":"Country","name":"United States"}],
+  "hiringOrganization":{
+    "@type":"Organization",
+    "name":"Acme",
+    "logo":"https://dailyremote.com/assets/favicon.png"
+  }
+}
+</script>`
+
+	payload := ParseRawHTML(html, "https://dailyremote.com/remote-job/test-4683998")
+	company, _ := payload["company"].(map[string]any)
+	if company == nil {
+		t.Fatalf("expected company payload")
+	}
+	if company["profilePicURL"] != nil {
+		t.Fatalf("expected favicon profilePicURL to be nil, got %#v", company["profilePicURL"])
+	}
+}
+
 func TestParseSalaryRangeFromTextNormalizesMojibakeGBP(t *testing.T) {
 	raw := parseSalaryRangeFromText("Â£70K - Â£90K /year")
 	payload, _ := raw.(map[string]any)
