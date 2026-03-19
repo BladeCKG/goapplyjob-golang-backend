@@ -4,35 +4,25 @@ job_category must be exactly one enum value from the schema.
 
 required_skills must be a flat, deduplicated list of atomic hard skills explicitly stated in the job description.
 
-Do NOT infer, assume, expand, generalize, or add related skills.
-If a skill is not directly mentioned in the job description, exclude it.
+Do NOT infer, assume, or add skills. If not explicitly stated, exclude it.
 
-Include only concrete, verifiable hard skills such as tools, software, systems, platforms, databases, protocols, methods, techniques, equipment, certifications, licenses, or standards.
+Include only concrete, directly usable hard skills (tools, equipment, software, systems, databases, protocols, methods, techniques, certifications, licenses, standards).
 
-Exclude:
-- preferred, optional, bonus, or nice-to-have skills
-- role titles, seniority labels, responsibilities, or soft skills
-- broad, vague, abstract, or umbrella terms
-- any term that describes a field, discipline, function, department, work area, or type of work rather than a specific hard skill
+Strictly EXCLUDE:
+- preferred or optional skills
+- soft skills, responsibilities, or role titles
+- umbrella terms, broad concepts, or vague categories (e.g., “management”, “analysis”, “operations”)
+- fields, disciplines, or areas of work
 
-A valid skill must name something a person can directly use, operate, perform, apply, or be certified in.
+A valid skill must be specific and independently usable (a named tool, system, technique, certification, or equipment).
 
-Normalization is mandatory.
-Output every skill in its canonical standard form rather than copying raw text verbatim when the raw text is an abbreviation, shorthand, malformed variant, casing variant, punctuation variant, spacing variant, singular/plural variant, or equivalent surface form of the same skill.
+Normalize all skills to canonical industry-standard form:
+- fix casing, spacing, punctuation
+- merge equivalent variants
+- normalize unambiguous shorthand (e.g., js → JavaScript, cdl → Commercial Driver’s License, cpr → CPR)
+- do NOT expand ambiguous terms
+- preserve exact meaning
 
-Normalization rules:
-- use the most widely recognized professional or industry-standard written form
-- fix casing, spacing, punctuation, separators, and formatting
-- merge equivalent variants into one canonical value
-- do not output malformed or partial variants
-- preserve meaning exactly; normalize form, not substance
-
-Each skill must:
-- appear explicitly in the job description before normalization
-- be specific and independently recognizable
-- be a true hard skill, not a category or responsibility
-- be concise, ideally 1–3 words when possible
-
-If a term is broad, ambiguous, malformed, not clearly a concrete hard skill, or cannot be confidently normalized to a standard canonical form, exclude it.
+Each skill must be explicit, specific, and concise (1–3 words).
 
 Return only schema-compliant JSON.
