@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/json"
-	"goapplyjob-golang-backend/internal/config"
 	"html"
 	"io"
 	"log"
@@ -18,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"goapplyjob-golang-backend/internal/config"
 )
 
 const (
@@ -29,6 +30,14 @@ const (
 	defaultGroqModel                = "moonshotai/kimi-k2-instruct-0905"
 	defaultGroqClassifierPromptPath = "internal/parsed/prompts/job_title_classification.txt"
 )
+
+var groq503FallbackModels = []string{
+	"moonshotai/kimi-k2-instruct-0905",
+	"openai/gpt-oss-20b",
+	"openai/gpt-oss-safeguard-20b",
+	"openai/gpt-oss-120b",
+	// "meta-llama/llama-4-scout-17b-16e-instruct", //--- IGNORE --- does not support strict mode
+}
 
 type GroqJobClassifier struct {
 	HTTPClient *http.Client
@@ -258,6 +267,38 @@ func collectGroqAPIKeys() []string {
 	return keys
 }
 
+func collectGroqModels() []string {
+	models := make([]string, 0, 1+len(groq503FallbackModels))
+	seen := map[string]struct{}{}
+
+	primary := strings.TrimSpace(os.Getenv(envGroqModel))
+	if primary == "" {
+		primary = defaultGroqModel
+	}
+	if primary != "" {
+		models = append(models, primary)
+		seen[primary] = struct{}{}
+	}
+
+	for _, candidate := range groq503FallbackModels {
+		model := strings.TrimSpace(candidate)
+		if model == "" {
+			continue
+		}
+		if _, exists := seen[model]; exists {
+			continue
+		}
+		seen[model] = struct{}{}
+		models = append(models, model)
+	}
+
+	return models
+}
+
+func shouldIncludeGroqReasoningEffort(model string) bool {
+	return model != "moonshotai/kimi-k2-instruct-0905"
+}
+
 func buildGroqJobClassifierSchema(allowedCategories []string) map[string]any {
 	return map[string]any{
 		"name":   "job_classifier",
@@ -416,37 +457,10 @@ func (g *GroqJobClassifier) classifySync(jobTitle, jobDescription string, allowe
 		return "", nil
 	}
 
-	model := strings.TrimSpace(os.Getenv(envGroqModel))
-	if model == "" {
-		model = defaultGroqModel
-	}
+	models := collectGroqModels()
 	description := cleanGroqDescription(jobDescription)
 	schema := buildGroqJobClassifierSchema(allowedCategories)
 	systemPrompt := g.loadClassifierPromptContent()
-
-	reqPayload := map[string]any{
-		"model": model,
-		"messages": []map[string]string{
-			{
-				"role":    "system",
-				"content": systemPrompt,
-			},
-			{
-				"role":    "user",
-				"content": "Job title:\n" + normalizedTitle + "\n\nJob description:\n" + description,
-			},
-		},
-		"temperature":           0,
-		"max_completion_tokens": 512,
-		"top_p":                 1,
-		"stream":                false,
-		"stop":                  nil,
-		"response_format": map[string]any{
-			"type":        "json_schema",
-			"json_schema": schema,
-		},
-	}
-	body, _ := json.Marshal(reqPayload)
 
 	client := g.HTTPClient
 	if client == nil {
@@ -454,56 +468,92 @@ func (g *GroqJobClassifier) classifySync(jobTitle, jobDescription string, allowe
 	}
 
 	start := groqKeyRingStart(keys)
+keyAttempts:
 	for attempt := 0; attempt < len(keys); attempt++ {
 		keyIndex := (start + attempt) % len(keys)
 		apiKey := keys[keyIndex]
-		req, err := http.NewRequest(http.MethodPost, "https://api.groq.com/openai/v1/chat/completions", bytes.NewReader(body))
-		if err != nil {
-			return "", nil
-		}
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-		req.Header.Set("Content-Type", "application/json")
+		for modelIndex, model := range models {
+			reqPayload := map[string]any{
+				"model": model,
+				"messages": []map[string]string{
+					{
+						"role":    "system",
+						"content": systemPrompt,
+					},
+					{
+						"role":    "user",
+						"content": "Job title:\n" + normalizedTitle + "\n\nJob description:\n" + description,
+					},
+				},
+				"temperature":           0,
+				"max_completion_tokens": 512,
+				"top_p":                 1,
+				"stream":                false,
+				"stop":                  nil,
+				"response_format": map[string]any{
+					"type":        "json_schema",
+					"json_schema": schema,
+				},
+			}
+			if shouldIncludeGroqReasoningEffort(model) {
+				reqPayload["reasoning_effort"] = "low"
+			}
+			body, _ := json.Marshal(reqPayload)
 
-		resp, err := client.Do(req)
-		if err != nil {
-			log.Printf("parsed-job-worker groq_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
-			groqKeyRingSetNext(keys, keyIndex+1)
-			continue
-		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			log.Printf("parsed-job-worker groq_classify_failed key_index=%d model=%s status=%d", keyIndex, model, resp.StatusCode)
+			req, err := http.NewRequest(http.MethodPost, "https://api.groq.com/openai/v1/chat/completions", bytes.NewReader(body))
+			if err != nil {
+				return "", nil
+			}
+			req.Header.Set("Authorization", "Bearer "+apiKey)
+			req.Header.Set("Content-Type", "application/json")
+
+			resp, err := client.Do(req)
+			if err != nil {
+				log.Printf("parsed-job-worker groq_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+				groqKeyRingSetNext(keys, keyIndex+1)
+				continue keyAttempts
+			}
+			if resp.StatusCode == http.StatusServiceUnavailable {
+				log.Printf("parsed-job-worker groq_classify_failed key_index=%d model=%s status=%d model_index=%d", keyIndex, model, resp.StatusCode, modelIndex)
+				resp.Body.Close()
+				continue
+			}
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				log.Printf("parsed-job-worker groq_classify_failed key_index=%d model=%s status=%d", keyIndex, model, resp.StatusCode)
+				resp.Body.Close()
+				groqKeyRingSetNext(keys, keyIndex+1)
+				continue keyAttempts
+			}
+			rawResp, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
 			resp.Body.Close()
-			groqKeyRingSetNext(keys, keyIndex+1)
-			continue
+			if err != nil {
+				log.Printf("parsed-job-worker groq_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+				groqKeyRingSetNext(keys, keyIndex+1)
+				continue keyAttempts
+			}
+			var envelope map[string]any
+			if err := json.Unmarshal(rawResp, &envelope); err != nil {
+				log.Printf("parsed-job-worker groq_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+				groqKeyRingSetNext(keys, keyIndex+1)
+				continue keyAttempts
+			}
+			choices, _ := envelope["choices"].([]any)
+			if len(choices) == 0 {
+				groqKeyRingSetNext(keys, keyIndex+1)
+				continue keyAttempts
+			}
+			firstChoice, _ := choices[0].(map[string]any)
+			message, _ := firstChoice["message"].(map[string]any)
+			content, _ := message["content"].(string)
+			if strings.TrimSpace(content) == "" {
+				groqKeyRingSetNext(keys, keyIndex+1)
+				continue keyAttempts
+			}
+			category, skills := extractGroqClassification(content, allowedCategories)
+			groqKeyRingSetNext(keys, keyIndex)
+			return category, skills
 		}
-		rawResp, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
-		resp.Body.Close()
-		if err != nil {
-			log.Printf("parsed-job-worker groq_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
-			groqKeyRingSetNext(keys, keyIndex+1)
-			continue
-		}
-		var envelope map[string]any
-		if err := json.Unmarshal(rawResp, &envelope); err != nil {
-			log.Printf("parsed-job-worker groq_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
-			groqKeyRingSetNext(keys, keyIndex+1)
-			continue
-		}
-		choices, _ := envelope["choices"].([]any)
-		if len(choices) == 0 {
-			groqKeyRingSetNext(keys, keyIndex+1)
-			continue
-		}
-		firstChoice, _ := choices[0].(map[string]any)
-		message, _ := firstChoice["message"].(map[string]any)
-		content, _ := message["content"].(string)
-		if strings.TrimSpace(content) == "" {
-			groqKeyRingSetNext(keys, keyIndex+1)
-			continue
-		}
-		category, skills := extractGroqClassification(content, allowedCategories)
-		groqKeyRingSetNext(keys, keyIndex)
-		return category, skills
+		groqKeyRingSetNext(keys, keyIndex+1)
 	}
 
 	return "", nil
@@ -520,38 +570,8 @@ func (g *GroqJobClassifier) classifyCategoryOnlySync(jobTitle string, allowedCat
 		return ""
 	}
 
-	model := strings.TrimSpace(os.Getenv(envGroqModel))
-	if model == "" {
-		model = defaultGroqModel
-	}
+	models := collectGroqModels()
 	schema := buildGroqJobCategoryOnlySchema(allowedCategories)
-
-	reqPayload := map[string]any{
-		"model": model,
-		"messages": []map[string]string{
-			{
-				"role": "system",
-				"content": "You are a strict job classifier. " +
-					"Classify the given job title into exactly one job_category from the schema enum. " +
-					"Use only the job title. " +
-					"Return only schema-compliant JSON.",
-			},
-			{
-				"role":    "user",
-				"content": "Job title:\n" + normalizedTitle,
-			},
-		},
-		"temperature":           0,
-		"max_completion_tokens": 128,
-		"top_p":                 1,
-		"stream":                false,
-		"stop":                  nil,
-		"response_format": map[string]any{
-			"type":        "json_schema",
-			"json_schema": schema,
-		},
-	}
-	body, _ := json.Marshal(reqPayload)
 
 	client := g.HTTPClient
 	if client == nil {
@@ -559,55 +579,94 @@ func (g *GroqJobClassifier) classifyCategoryOnlySync(jobTitle string, allowedCat
 	}
 
 	start := groqKeyRingStart(keys)
+keyAttempts:
 	for attempt := 0; attempt < len(keys); attempt++ {
 		keyIndex := (start + attempt) % len(keys)
 		apiKey := keys[keyIndex]
-		req, err := http.NewRequest(http.MethodPost, "https://api.groq.com/openai/v1/chat/completions", bytes.NewReader(body))
-		if err != nil {
-			return ""
-		}
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-		req.Header.Set("Content-Type", "application/json")
+		for modelIndex, model := range models {
+			reqPayload := map[string]any{
+				"model": model,
+				"messages": []map[string]string{
+					{
+						"role": "system",
+						"content": "You are a strict job classifier. " +
+							"Classify the given job title into exactly one job_category from the schema enum. " +
+							"Use only the job title. " +
+							"Return only schema-compliant JSON.",
+					},
+					{
+						"role":    "user",
+						"content": "Job title:\n" + normalizedTitle,
+					},
+				},
+				"temperature":           0,
+				"max_completion_tokens": 128,
+				"top_p":                 1,
+				"stream":                false,
+				"stop":                  nil,
+				"response_format": map[string]any{
+					"type":        "json_schema",
+					"json_schema": schema,
+				},
+			}
+			if shouldIncludeGroqReasoningEffort(model) {
+				reqPayload["reasoning_effort"] = "low"
+			}
+			body, _ := json.Marshal(reqPayload)
 
-		resp, err := client.Do(req)
-		if err != nil {
-			log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
-			groqKeyRingSetNext(keys, keyIndex+1)
-			continue
-		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s status=%d", keyIndex, model, resp.StatusCode)
+			req, err := http.NewRequest(http.MethodPost, "https://api.groq.com/openai/v1/chat/completions", bytes.NewReader(body))
+			if err != nil {
+				return ""
+			}
+			req.Header.Set("Authorization", "Bearer "+apiKey)
+			req.Header.Set("Content-Type", "application/json")
+
+			resp, err := client.Do(req)
+			if err != nil {
+				log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+				groqKeyRingSetNext(keys, keyIndex+1)
+				continue keyAttempts
+			}
+			if resp.StatusCode == http.StatusServiceUnavailable {
+				log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s status=%d model_index=%d", keyIndex, model, resp.StatusCode, modelIndex)
+				resp.Body.Close()
+				continue
+			}
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s status=%d", keyIndex, model, resp.StatusCode)
+				resp.Body.Close()
+				groqKeyRingSetNext(keys, keyIndex+1)
+				continue keyAttempts
+			}
+			rawResp, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
 			resp.Body.Close()
-			groqKeyRingSetNext(keys, keyIndex+1)
-			continue
+			if err != nil {
+				log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+				groqKeyRingSetNext(keys, keyIndex+1)
+				continue keyAttempts
+			}
+			var envelope map[string]any
+			if err := json.Unmarshal(rawResp, &envelope); err != nil {
+				log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+				groqKeyRingSetNext(keys, keyIndex+1)
+				continue keyAttempts
+			}
+			choices, _ := envelope["choices"].([]any)
+			if len(choices) == 0 {
+				groqKeyRingSetNext(keys, keyIndex+1)
+				continue keyAttempts
+			}
+			firstChoice, _ := choices[0].(map[string]any)
+			message, _ := firstChoice["message"].(map[string]any)
+			content, _ := message["content"].(string)
+			if strings.TrimSpace(content) == "" {
+				groqKeyRingSetNext(keys, keyIndex+1)
+				continue keyAttempts
+			}
+			groqKeyRingSetNext(keys, keyIndex)
+			return extractGroqCategoryOnly(content, allowedCategories)
 		}
-		rawResp, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
-		resp.Body.Close()
-		if err != nil {
-			log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
-			groqKeyRingSetNext(keys, keyIndex+1)
-			continue
-		}
-		var envelope map[string]any
-		if err := json.Unmarshal(rawResp, &envelope); err != nil {
-			log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
-			groqKeyRingSetNext(keys, keyIndex+1)
-			continue
-		}
-		choices, _ := envelope["choices"].([]any)
-		if len(choices) == 0 {
-			groqKeyRingSetNext(keys, keyIndex+1)
-			continue
-		}
-		firstChoice, _ := choices[0].(map[string]any)
-		message, _ := firstChoice["message"].(map[string]any)
-		content, _ := message["content"].(string)
-		if strings.TrimSpace(content) == "" {
-			groqKeyRingSetNext(keys, keyIndex+1)
-			continue
-		}
-		groqKeyRingSetNext(keys, keyIndex)
-		return extractGroqCategoryOnly(content, allowedCategories)
+		groqKeyRingSetNext(keys, keyIndex+1)
 	}
 
 	return ""

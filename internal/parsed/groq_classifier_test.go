@@ -3,8 +3,17 @@ package parsed
 import (
 	"context"
 	"goapplyjob-golang-backend/internal/database"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 func TestCleanGroqDescriptionStripsHTML(t *testing.T) {
 	raw := "  <p>Hello&nbsp;<b>World</b></p>\n<div>Line&nbsp;Two</div> "
@@ -111,5 +120,51 @@ func TestLoadAllowedJobCategoriesAndFunctionsForGroq(t *testing.T) {
 	}
 	if _, ok := functions["Product Manager"]; ok {
 		t.Fatalf("did not expect function mapping for Product Manager when function is empty")
+	}
+}
+
+func TestClassifySyncRotatesModelOn503(t *testing.T) {
+	t.Setenv(envGroqAPIKey, "test-key")
+	t.Setenv(envGroqModel, "openai/gpt-oss-20b")
+
+	requestModels := make([]string, 0, 2)
+	classifier := &GroqJobClassifier{
+		HTTPClient: &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				body, err := io.ReadAll(req.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				requestModels = append(requestModels, string(body))
+				if strings.Contains(string(body), `"model":"openai/gpt-oss-20b"`) {
+					return &http.Response{
+						StatusCode: http.StatusServiceUnavailable,
+						Body:       io.NopCloser(strings.NewReader(`{"error":"temporarily unavailable"}`)),
+						Header:     make(http.Header),
+					}, nil
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body: io.NopCloser(strings.NewReader(`{
+						"choices":[{"message":{"content":"{\"job_category\":\"Software Engineer\",\"required_skills\":[\"Go\"]}"}}]
+					}`)),
+					Header: make(http.Header),
+				}, nil
+			}),
+		},
+	}
+
+	category, skills := classifier.classifySync("Software Engineer", "Build services", []string{"Software Engineer", "Blank"})
+	if category != "Software Engineer" {
+		t.Fatalf("expected rotated model to classify category, got %q", category)
+	}
+	if len(skills) != 1 || skills[0] != "Go" {
+		t.Fatalf("expected rotated model to return skills, got %#v", skills)
+	}
+	if len(requestModels) < 2 {
+		t.Fatalf("expected at least two model attempts, got %d", len(requestModels))
+	}
+	if !strings.Contains(requestModels[1], `"model":"openai/gpt-oss-120b"`) {
+		t.Fatalf("expected second attempt to rotate to fallback model, got %s", requestModels[1])
 	}
 }
