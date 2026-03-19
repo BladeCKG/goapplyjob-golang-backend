@@ -335,8 +335,6 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, ro
 					categorizedFunction,
 					len(groqRequiredSkills),
 				)
-			}
-			if len(groqRequiredSkills) > 0 {
 				normalizedTechStack = normalizeTechStack(groqRequiredSkills)
 			}
 		} else {

@@ -9,19 +9,25 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"goapplyjob-golang-backend/internal/config"
 )
 
 const (
-	envGroqAPIKey  = "GROQ_API_KEY"
-	envGroqAPIKeys = "GROQ_API_KEYS"
-	envGroqModel   = "GROQ_MODEL"
+	envGroqAPIKey                 = "GROQ_API_KEY"
+	envGroqAPIKeys                = "GROQ_API_KEYS"
+	envGroqModel                  = "GROQ_MODEL"
+	envGroqClassifierPromptSource = "GROQ_CLASSIFIER_PROMPT_SOURCE"
 
-	defaultGroqModel = "moonshotai/kimi-k2-instruct-0905"
+	defaultGroqModel                = "moonshotai/kimi-k2-instruct-0905"
+	defaultGroqClassifierPromptPath = "internal/sources/prompts/job_title_classification.txt"
 )
 
 type GroqJobClassifier struct {
@@ -40,6 +46,12 @@ var groqAPIKeyRing = struct {
 	mu   sync.Mutex
 	keys []string
 	next int
+}{}
+
+var groqPromptCache = struct {
+	mu      sync.RWMutex
+	source  string
+	content string
 }{}
 
 var groqHTMLTagPattern = regexp.MustCompile(`(?is)<[^>]+>`)
@@ -285,6 +297,102 @@ func buildGroqJobCategoryOnlySchema(allowedCategories []string) map[string]any {
 	}
 }
 
+func (g *GroqJobClassifier) loadClassifierPromptContent() string {
+	source := config.Getenv(envGroqClassifierPromptSource, defaultGroqClassifierPromptPath)
+
+	groqPromptCache.mu.RLock()
+	if groqPromptCache.source == source && groqPromptCache.content != "" {
+		cached := groqPromptCache.content
+		groqPromptCache.mu.RUnlock()
+		return cached
+	}
+	groqPromptCache.mu.RUnlock()
+
+	content, err := g.readPromptContentSource(source)
+	if err != nil {
+		log.Printf("parsed-job-worker groq_prompt_load_failed source=%q error=%v", source, err)
+		if source != defaultGroqClassifierPromptPath {
+			content, err = g.readPromptContentSource(defaultGroqClassifierPromptPath)
+			if err != nil {
+				log.Printf("parsed-job-worker groq_prompt_default_load_failed source=%q error=%v", defaultGroqClassifierPromptPath, err)
+				return ""
+			}
+			source = defaultGroqClassifierPromptPath
+		} else {
+			return ""
+		}
+	}
+	content = strings.TrimSpace(content)
+	if content == "" {
+		if source != defaultGroqClassifierPromptPath {
+			content, err = g.readPromptContentSource(defaultGroqClassifierPromptPath)
+			if err != nil {
+				log.Printf("parsed-job-worker groq_prompt_default_load_failed source=%q error=%v", defaultGroqClassifierPromptPath, err)
+				return ""
+			}
+			content = strings.TrimSpace(content)
+			source = defaultGroqClassifierPromptPath
+		}
+		if content == "" {
+			return ""
+		}
+	}
+
+	groqPromptCache.mu.Lock()
+	groqPromptCache.source = source
+	groqPromptCache.content = content
+	groqPromptCache.mu.Unlock()
+	return content
+}
+
+func (g *GroqJobClassifier) readPromptContentSource(source string) (string, error) {
+	if !strings.Contains(source, "://") {
+		source = filepath.Clean(source)
+	}
+	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
+		client := g.HTTPClient
+		if client == nil {
+			client = &http.Client{Timeout: 20 * time.Second}
+		}
+		req, err := http.NewRequest(http.MethodGet, source, nil)
+		if err != nil {
+			return "", err
+		}
+		req.Header.Set("User-Agent", "goapplyjob-groq-classifier/1.0")
+		resp, err := client.Do(req)
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return "", &url.Error{Op: "GET", URL: source, Err: io.ErrUnexpectedEOF}
+		}
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
+		if err != nil {
+			return "", err
+		}
+		return string(body), nil
+	}
+
+	if strings.HasPrefix(source, "file://") {
+		parsed, err := url.Parse(source)
+		if err != nil {
+			return "", err
+		}
+		body, err := os.ReadFile(parsed.Path)
+		if err != nil {
+			return "", err
+		}
+		return string(body), nil
+	}
+
+	body, err := os.ReadFile(source)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
 func (g *GroqJobClassifier) classifySync(jobTitle, jobDescription string, allowedCategories []string) (string, []string) {
 	normalizedTitle := strings.TrimSpace(jobTitle)
 	if normalizedTitle == "" {
@@ -302,19 +410,14 @@ func (g *GroqJobClassifier) classifySync(jobTitle, jobDescription string, allowe
 	}
 	description := cleanGroqDescription(jobDescription)
 	schema := buildGroqJobClassifierSchema(allowedCategories)
+	systemPrompt := g.loadClassifierPromptContent()
 
 	reqPayload := map[string]any{
 		"model": model,
 		"messages": []map[string]string{
 			{
-				"role": "system",
-				"content": "You are a strict job classifier. " +
-					"job_category must be exactly one enum value from the schema. " +
-					"required_skills must be a flat deduplicated list of short atomic hard skills only. " +
-					"Exclude preferred or nice-to-have skills. " +
-					"Normalize skills such as js -> JavaScript, ts -> TypeScript, node -> Node.js, " +
-					"postgres -> PostgreSQL, aws -> AWS. " +
-					"Return only schema-compliant JSON.",
+				"role":    "system",
+				"content": systemPrompt,
 			},
 			{
 				"role":    "user",

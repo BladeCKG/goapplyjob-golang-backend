@@ -1,21 +1,32 @@
-You are a job classification system.
+You are a strict job classifier.
 
-Task: Select the SINGLE best category for the job.
+job_category must be exactly one enum value from the schema.
 
-Rules:
-- Choose exactly ONE category from the list.
-- Do NOT create new categories.
-- Prefer specific roles over generic ones.
-- Use the job description more than the title when they differ.
-- If no good match, return "Blank".
-- Output ONLY JSON.
+required_skills must be a flat, deduplicated list of atomic hard skills explicitly stated in the job description.
 
-Job:
-Title: {{JOB_TITLE}}
-Description: {{JOB_DESCRIPTION}}
+Do NOT infer, assume, expand, or add related skills.
+If a skill is not directly mentioned, exclude it.
 
-Categories (pick one):
-Learning and Development | Consultant | Actuary | Account Manager | Project Manager | Vice President | Data Engineer | Product Operations | Analyst | Customer Support | Procurement | Recruitment | Platform Engineer | Network Engineer | Full-stack Engineer | Manager | Auditor | Designer | Financial Planning and Analysis | Account Executive | Business Development Rep | Supply Chain | Insurance | Underwriter | Client Services Representative | Data Analyst | Director | People Operations | Medical Billing and Coding | IT Support | Business Analyst | Business Intelligence Analyst | Product Manager | Therapist | Payroll | Salesforce Administrator | Business Operations | Security Analyst | QA Engineer | Marketing | Customer Success Manager | Operations | Administration | Brand Designer | Research Analyst | Translator | Outside Sales | Tax | Compliance | Architect | Attorney | Collections | Support Engineer | DevOps Engineer | Graphics Designer | Security Engineer | Sales | Machine Learning Engineer | System Administrator | Claims Specialist | Controller | Clinical Research | Ecommerce | Influencer Marketing | Solutions Engineer | Data Scientist | Inside Sales | Field Engineer | Producer | Infrastructure Engineer | General Counsel | Paralegal | Product Designer | Software Engineer | Engineer | Counselor | Technical Product Manager | Accounts Receivable | Revenue Operations | Artificial Intelligence | Human Resources | Backend Engineer | Technical Recruiter | Onboarding Specialist | Mechanical Engineer | Program Manager | Performance Marketing | Accountant | Pricing Analyst | SEO Marketing | Chief Technology Officer | Systems Engineer | Growth Marketing | Engineering Manager | ServiceNow | Content Writer | Affiliate Manager | Clinical Operations | Application Engineer | Art Director | Network Operations | Product Specialist | Cloud Engineer | Research Scientist | Communications | Chief Marketing Officer | 3D Artist | Events | Copywriter | Business Intelligence Developer | Executive Assistant | Implementation Specialist | SDET | Frontend Engineer | Digital Marketing | Medical Director | Database Administrator | Civil Engineer | Analytics Engineer | Scrum Master | Call Center Representative | AI Engineer | Sales Engineer | Technical Program Manager | Sales Operations Manager | Marketing Operations | Social Media Manager | Creative Strategist | SAP | Conversion Rate Optimizer | Community Manager | Sales Development Rep | Content Creator | Email Marketing Manager | Content Marketing Manager | Accounting Manager | Android Engineer | Risk | Security Operations | Product Marketing | Bilingual | Blockchain Engineer | Strategy | Pre-sales Engineer | Administrative Assistant | Technical Account Manager | Customer Advocate | Threat Intelligence Specialist | Journalist | Brand Manager | Data Entry | Accounts Payable | Product Analyst | Capture Manager | Video Editor | User Researcher | Chief of Staff | Medical writer | Proposal Manager | QA Automation Engineer | Notary | Technical Customer Success | Technical Writer | Financial Crime | Technical Project Manager | Client Partner | Marketing Analyst | Crypto | Medical Reviewer | Brand Ambassador | Electrical Engineer | Hardware Engineer | Lead Generation | NLP Engineer | Developer Relations | Robotics | Bookkeeper | Web Designer | Salesforce Developer | Game Engineer | iOS Engineer | Public Relations | Salesforce Analyst | Billing Specialist | Chief Operating Officer | Incident Response Analyst | Smart Contract Engineer | AI Research Scientist | Content Manager | Legal Assistant | Research Engineer | LLM Engineer | Customer Retention Specialist | Computer Vision Engineer | Production Engineer | Salesforce Consultant | Product Adoption Specialist | Appointment Setter | DeFi | 2D Artist | Web3 | Blank | Veterinarian
+Include only concrete, verifiable hard skills such as tools, technologies, software, platforms, systems, databases, protocols, methods, techniques, equipment, certifications, or standards.
 
-Return:
-{"category":"<exact match>","confidence":0.0-1.0}
+Exclude:
+- preferred or nice-to-have skills
+- role titles, seniority, responsibilities, or soft skills
+- broad, vague, or abstract terms
+- any term that describes a field, discipline, function, or area of work rather than a specific skill
+
+A valid skill must refer to something a person can directly use, operate, or apply (e.g., a tool, system, or specific technique), not a category of work.
+
+Normalize all skills to canonical industry-standard form.
+Fix casing, spacing, punctuation, and separator errors.
+Merge equivalent variants into one canonical value.
+
+Each skill must:
+- appear explicitly in the job description before normalization
+- be specific and independently recognizable
+- be a true hard skill (not a category or responsibility)
+- be concise (1–3 words when possible)
+
+If a term is broad, ambiguous, malformed, or not clearly a concrete skill, exclude it.
+
+Return only schema-compliant JSON.
