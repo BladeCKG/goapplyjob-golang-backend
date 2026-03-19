@@ -311,6 +311,18 @@ func (g *GroqJobClassifier) loadClassifierPromptContent() string {
 	}
 	groqPromptCache.mu.RUnlock()
 
+	if source == defaultGroqClassifierPromptPath {
+		content := loadEmbeddedDefaultGroqPrompt()
+		if content == "" {
+			return ""
+		}
+		groqPromptCache.mu.Lock()
+		groqPromptCache.source = source
+		groqPromptCache.content = content
+		groqPromptCache.mu.Unlock()
+		return content
+	}
+
 	content, err := g.readPromptContentSource(source)
 	if err != nil {
 		log.Printf("parsed-job-worker groq_prompt_load_failed source=%q error=%v", source, err)
