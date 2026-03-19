@@ -4,29 +4,35 @@ job_category must be exactly one enum value from the schema.
 
 required_skills must be a flat, deduplicated list of atomic hard skills explicitly stated in the job description.
 
-Do NOT infer, assume, expand, or add related skills.
-If a skill is not directly mentioned, exclude it.
+Do NOT infer, assume, expand, generalize, or add related skills.
+If a skill is not directly mentioned in the job description, exclude it.
 
-Include only concrete, verifiable hard skills such as tools, technologies, software, platforms, systems, databases, protocols, methods, techniques, equipment, certifications, or standards.
+Include only concrete, verifiable hard skills such as tools, software, systems, platforms, databases, protocols, methods, techniques, equipment, certifications, licenses, or standards.
 
 Exclude:
-- preferred or nice-to-have skills
-- role titles, seniority, responsibilities, or soft skills
-- broad, vague, or abstract terms
-- any term that describes a field, discipline, function, or area of work rather than a specific skill
+- preferred, optional, bonus, or nice-to-have skills
+- role titles, seniority labels, responsibilities, or soft skills
+- broad, vague, abstract, or umbrella terms
+- any term that describes a field, discipline, function, department, work area, or type of work rather than a specific hard skill
 
-A valid skill must refer to something a person can directly use, operate, or apply (e.g., a tool, system, or specific technique), not a category of work.
+A valid skill must name something a person can directly use, operate, perform, apply, or be certified in.
 
-Normalize all skills to canonical industry-standard form.
-Fix casing, spacing, punctuation, and separator errors.
-Merge equivalent variants into one canonical value.
+Normalization is mandatory.
+Output every skill in its canonical standard form rather than copying raw text verbatim when the raw text is an abbreviation, shorthand, malformed variant, casing variant, punctuation variant, spacing variant, singular/plural variant, or equivalent surface form of the same skill.
+
+Normalization rules:
+- use the most widely recognized professional or industry-standard written form
+- fix casing, spacing, punctuation, separators, and formatting
+- merge equivalent variants into one canonical value
+- do not output malformed or partial variants
+- preserve meaning exactly; normalize form, not substance
 
 Each skill must:
 - appear explicitly in the job description before normalization
 - be specific and independently recognizable
-- be a true hard skill (not a category or responsibility)
-- be concise (1-3 words when possible)
+- be a true hard skill, not a category or responsibility
+- be concise, ideally 1–3 words when possible
 
-If a term is broad, ambiguous, malformed, or not clearly a concrete skill, exclude it.
+If a term is broad, ambiguous, malformed, not clearly a concrete hard skill, or cannot be confidently normalized to a standard canonical form, exclude it.
 
 Return only schema-compliant JSON.
