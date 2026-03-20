@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"goapplyjob-golang-backend/internal/employmentnorm"
 	"goapplyjob-golang-backend/internal/locationnorm"
 	"goapplyjob-golang-backend/internal/sources/currency"
 	"html"
@@ -462,21 +463,7 @@ func textContent(node *nethtml.Node) string {
 }
 
 func normalizeEmploymentType(value any) any {
-	switch item := value.(type) {
-	case string:
-		normalized := strings.ToLower(strings.TrimSpace(item))
-		if normalized == "" {
-			return nil
-		}
-		return normalized
-	case []any:
-		for _, entry := range item {
-			if text, ok := normalizeEmploymentType(entry).(string); ok && strings.TrimSpace(text) != "" {
-				return text
-			}
-		}
-	}
-	return nil
+	return employmentnorm.NormalizeEmploymentTypeAny(value)
 }
 
 func normalizeOccupationalCategory(value string) string {

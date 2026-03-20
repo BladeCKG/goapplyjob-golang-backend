@@ -3,6 +3,7 @@ package builtin
 import (
 	"encoding/json"
 	"errors"
+	"goapplyjob-golang-backend/internal/employmentnorm"
 	"goapplyjob-golang-backend/internal/locationnorm"
 	"html"
 	"net/url"
@@ -1242,12 +1243,8 @@ func toRawCompanyShape(parsedCompany map[string]any) any {
 	}
 }
 
-func normalizeEmploymentType(value string) any {
-	normalized := strings.ToLower(strings.TrimSpace(strings.ReplaceAll(value, "_", "-")))
-	if normalized == "" {
-		return nil
-	}
-	return normalized
+func normalizeEmploymentType(value string) string {
+	return employmentnorm.NormalizeEmploymentTypeString(value)
 }
 
 func normalizeLocationType(value string) any {

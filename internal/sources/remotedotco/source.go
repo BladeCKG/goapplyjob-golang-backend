@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"goapplyjob-golang-backend/internal/employmentnorm"
+	"goapplyjob-golang-backend/internal/locationnorm"
 	"html"
 	"regexp"
 	"strings"
 	"time"
-
-	"goapplyjob-golang-backend/internal/locationnorm"
 )
 
 const (
@@ -154,7 +154,7 @@ func ParseRawHTML(htmlText, _ string) map[string]any {
 		"roleDescription":              stringOrNil(roleDescription),
 		"jobDescriptionSummary":        stringOrNil(jobSummary),
 		"twoLineJobDescriptionSummary": stringOrNil(jobSummary),
-		"employmentType":               stringOrNil(employmentType),
+		"employmentType":               employmentType,
 		"locationType":                 stringOrNil(locationType),
 		"locationCity":                 stringOrNil(firstString(locationCities)),
 		"locationUSStates":             locationStates,
@@ -291,21 +291,7 @@ func normalizeRemoteOption(value any) string {
 }
 
 func normalizeJobSchedule(value any) string {
-	normalized := map[string]string{
-		"full-time":  "full_time",
-		"part-time":  "part_time",
-		"contract":   "contract",
-		"temporary":  "temporary",
-		"freelance":  "freelance",
-		"internship": "internship",
-	}
-	for _, raw := range stringSlice(value) {
-		key := strings.ToLower(strings.TrimSpace(raw))
-		if mapped, ok := normalized[key]; ok {
-			return mapped
-		}
-	}
-	return ""
+	return employmentnorm.NormalizeEmploymentTypeString(stringSlice(value)[0])
 }
 
 func inferSeniorityFromCareerLevel(value any) (bool, bool, bool, bool, bool) {

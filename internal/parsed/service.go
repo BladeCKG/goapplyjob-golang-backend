@@ -1338,30 +1338,7 @@ func min(a, b int) int {
 }
 
 func normalizeEmploymentTypeValue(value any) any {
-	text, ok := value.(string)
-	if !ok {
-		return nil
-	}
-	normalized := strings.TrimSpace(strings.ToLower(text))
-	normalized = regexp.MustCompile(`[\s_]+`).ReplaceAllString(normalized, "-")
-	normalized = regexp.MustCompile(`-{2,}`).ReplaceAllString(normalized, "-")
-	normalized = strings.Trim(normalized, "-")
-	switch normalized {
-	case "", "null":
-		return nil
-	case "fulltime", "full-time", "full time":
-		return "full-time"
-	case "parttime", "part-time", "part time":
-		return "part-time"
-	case "contract", "contractor":
-		return "contract"
-	case "intern", "internship":
-		return "internship"
-	case "temp", "temporary":
-		return "temporary"
-	default:
-		return normalized
-	}
+	return stringFromPayload(value)
 }
 
 func normalizeEducationCredentialCategory(value any) any {

@@ -1,14 +1,14 @@
 package hiringcafe
 
 import (
+	"goapplyjob-golang-backend/internal/employmentnorm"
+	"goapplyjob-golang-backend/internal/locationnorm"
+	"goapplyjob-golang-backend/internal/sources/remoterocketship"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-
-	"goapplyjob-golang-backend/internal/locationnorm"
-	"goapplyjob-golang-backend/internal/sources/remoterocketship"
 )
 
 const (
@@ -153,11 +153,11 @@ func NormalizeJobs(results []map[string]any) []NormalizedJob {
 				"locationCountries": []string{
 					locationCountry,
 				},
-				"isEntryLevel":                             isEntry,
-				"isJunior":                                 isJunior,
-				"isMidLevel":                               isMid,
-				"isSenior":                                 isSenior,
-				"isLead":                                   isLead,
+				"isEntryLevel": isEntry,
+				"isJunior":     isJunior,
+				"isMidLevel":   isMid,
+				"isSenior":     isSenior,
+				"isLead":       isLead,
 				"educationRequirementsCredentialCategory": nil,
 			},
 		})
@@ -165,22 +165,8 @@ func NormalizeJobs(results []map[string]any) []NormalizedJob {
 	return normalized
 }
 
-func normalizeEmploymentType(values []string) any {
-	for _, value := range values {
-		switch strings.ToLower(strings.TrimSpace(value)) {
-		case "full time":
-			return "full-time"
-		case "part time":
-			return "part-time"
-		case "contract":
-			return "contract"
-		case "internship":
-			return "internship"
-		case "temporary":
-			return "temporary"
-		}
-	}
-	return nil
+func normalizeEmploymentType(values []string) string {
+	return employmentnorm.NormalizeEmploymentTypeString(values[0])
 }
 
 func parseTime(value string) *time.Time {

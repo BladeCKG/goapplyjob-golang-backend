@@ -741,8 +741,8 @@ func TestJobsEmploymentTypeFilterAndOptions(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
 
-	insertEmploymentTypeJob(t, db, 101, "full-time")
-	insertEmploymentTypeJob(t, db, 102, "contract")
+	insertEmploymentTypeJob(t, db, 101, "full_time")
+	insertEmploymentTypeJob(t, db, 102, "contractor")
 
 	optionsReq := httptest.NewRequest(http.MethodGet, "/jobs/filter-options", nil)
 	optionsRec := httptest.NewRecorder()
@@ -763,7 +763,7 @@ func TestJobsEmploymentTypeFilterAndOptions(t *testing.T) {
 	var body map[string]any
 	decodeBody(t, rec.Body.Bytes(), &body)
 	items := body["items"].([]any)
-	if len(items) != 1 || items[0].(map[string]any)["employment_type"].(string) != "contract" {
+	if len(items) != 1 || items[0].(map[string]any)["employment_type"].(string) != "contractor" {
 		t.Fatalf("unexpected employment type filter response %#v", body)
 	}
 }
@@ -2157,7 +2157,7 @@ func TestEmployerPostingFlow(t *testing.T) {
 		"organization_id": orgID,
 		"title":           "Senior Backend Engineer",
 		"description":     "Build internal platform systems",
-		"employment_type": "full-time",
+		"employment_type": "full_time",
 		"location_type":   "remote",
 		"apply_url":       "https://example.com/jobs/backend",
 	})
@@ -2378,7 +2378,7 @@ func insertRichJob(t *testing.T, db *database.DB, companyID int64) int {
 	}
 	var id int64
 	err = db.SQL.QueryRowContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, company_id, categorized_job_title, role_title, role_description, role_requirements, location_countries, location_city, salary_min_usd, salary_max_usd, salary_type, employment_type, education_requirements_credential_category, experience_requirements_months, experience_in_place_of_education, required_languages, tech_stack, benefits, url) VALUES (999, ?, 'Software Engineer', 'Staff Backend Engineer', 'Build distributed systems.', 'Python
-FastAPI', '["United States"]', 'Austin', 150, 210, 'hourly', 'full-time', 'bachelor', 24, true, '["English"]', '["Go","SQL"]', 'Great benefits', 'https://jobs.example.com/detail') RETURNING id`, companyID).Scan(&id)
+ FastAPI', '["United States"]', 'Austin', 150, 210, 'hourly', 'full_time', 'bachelor', 24, true, '["English"]', '["Go","SQL"]', 'Great benefits', 'https://jobs.example.com/detail') RETURNING id`, companyID).Scan(&id)
 	if err != nil {
 		t.Fatal(err)
 	}

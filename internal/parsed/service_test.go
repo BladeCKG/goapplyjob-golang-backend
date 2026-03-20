@@ -362,17 +362,17 @@ func TestFindSimilarRemoteCategoriesFallsBackWhenTechStackFilterHasNoMatch(t *te
 	}
 }
 
-func TestNormalizeEmploymentTypeValueCollapsesToFullTime(t *testing.T) {
-	if got := normalizeEmploymentTypeValue("Full Time"); got != "full-time" {
-		t.Fatalf("expected full-time, got %#v", got)
+func TestNormalizeEmploymentTypeValuePreservesPayloadValue(t *testing.T) {
+	if got := normalizeEmploymentTypeValue("full_time"); got != "full_time" {
+		t.Fatalf("expected full_time, got %#v", got)
 	}
-	if got := normalizeEmploymentTypeValue("contractor"); got != "contract" {
-		t.Fatalf("expected contract, got %#v", got)
+	if got := normalizeEmploymentTypeValue("contractor"); got != "contractor" {
+		t.Fatalf("expected contractor, got %#v", got)
 	}
-	if got := normalizeEmploymentTypeValue("intern"); got != "internship" {
-		t.Fatalf("expected internship, got %#v", got)
+	if got := normalizeEmploymentTypeValue("intern"); got != "intern" {
+		t.Fatalf("expected intern, got %#v", got)
 	}
-	if got := normalizeEmploymentTypeValue("temp"); got != "temporary" {
+	if got := normalizeEmploymentTypeValue("temporary"); got != "temporary" {
 		t.Fatalf("expected temporary, got %#v", got)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"goapplyjob-golang-backend/internal/employmentnorm"
 	"goapplyjob-golang-backend/internal/locationnorm"
 	"goapplyjob-golang-backend/internal/scraper"
 	"goapplyjob-golang-backend/internal/sources/currency"
@@ -565,39 +566,7 @@ func decodeHTMLText(value string) string {
 }
 
 func normalizeEmploymentType(value any) any {
-	switch item := value.(type) {
-	case string:
-		token := strings.ToLower(strings.TrimSpace(item))
-		if token == "" {
-			return nil
-		}
-		return token
-	case []any:
-		seen := map[string]struct{}{}
-		for _, raw := range item {
-			token := strings.ToLower(strings.TrimSpace(stringValue(raw)))
-			if token == "" {
-				continue
-			}
-			seen[token] = struct{}{}
-		}
-		if _, ok := seen["full_time"]; ok {
-			return "full_time"
-		}
-		if _, ok := seen["full-time"]; ok {
-			return "full_time"
-		}
-		if _, ok := seen["part_time"]; ok {
-			return "part_time"
-		}
-		if _, ok := seen["part-time"]; ok {
-			return "part_time"
-		}
-		for token := range seen {
-			return token
-		}
-	}
-	return nil
+	return employmentnorm.NormalizeEmploymentTypeAny(value)
 }
 
 func extractRelativePostDate(articleHTML string, now time.Time) time.Time {

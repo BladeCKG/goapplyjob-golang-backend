@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"goapplyjob-golang-backend/internal/employmentnorm"
 )
 
 const (
@@ -219,7 +221,7 @@ func buildRawPayload(item map[string]any, urlValue string, postDate time.Time) m
 		"twoLineJobDescriptionSummary": item["socialSharingDescription"],
 		"url":                          urlValue,
 		"slug":                         jobSlug,
-		"employmentType":               stringOrNil(employmentType),
+		"employmentType":               employmentnorm.NormalizeEmploymentTypeString(employmentType),
 		"location":                     stringOrNil(strings.Join(locationParts, ", ")),
 		"locationType":                 stringOrNil(workplace),
 		"locationCity":                 stringOrNil(locationCity),

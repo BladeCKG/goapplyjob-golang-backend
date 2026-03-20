@@ -11,6 +11,7 @@ import (
 
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/employmentnorm"
 )
 
 var countryAliases = map[string]string{
@@ -146,24 +147,7 @@ func splitSources(raw string) []string {
 }
 
 func normalizeEmploymentType(value string) string {
-	normalized := strings.TrimSpace(strings.ToLower(value))
-	normalized = regexp.MustCompile(`[\s_]+`).ReplaceAllString(normalized, "-")
-	normalized = regexp.MustCompile(`-{2,}`).ReplaceAllString(normalized, "-")
-	normalized = strings.Trim(normalized, "-")
-	switch normalized {
-	case "fulltime", "full-time", "full time":
-		return "full-time"
-	case "parttime", "part-time", "part time":
-		return "part-time"
-	case "contract", "contractor":
-		return "contract"
-	case "intern", "internship":
-		return "internship"
-	case "temp", "temporary":
-		return "temporary"
-	default:
-		return normalized
-	}
+	return employmentnorm.NormalizeEmploymentTypeString(value)
 }
 
 func normalizeEducationCredentialCategory(value string) string {
