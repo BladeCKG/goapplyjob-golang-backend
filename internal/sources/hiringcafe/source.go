@@ -166,6 +166,9 @@ func NormalizeJobs(results []map[string]any) []NormalizedJob {
 }
 
 func normalizeEmploymentType(values []string) string {
+	if len(values) == 0 {
+		return employmentnorm.NormalizeEmploymentTypeString("")
+	}
 	return employmentnorm.NormalizeEmploymentTypeString(values[0])
 }
 

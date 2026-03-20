@@ -291,7 +291,11 @@ func normalizeRemoteOption(value any) string {
 }
 
 func normalizeJobSchedule(value any) string {
-	return employmentnorm.NormalizeEmploymentTypeString(stringSlice(value)[0])
+	values := stringSlice(value)
+	if len(values) == 0 {
+		return employmentnorm.NormalizeEmploymentTypeString("")
+	}
+	return employmentnorm.NormalizeEmploymentTypeString(values[0])
 }
 
 func inferSeniorityFromCareerLevel(value any) (bool, bool, bool, bool, bool) {

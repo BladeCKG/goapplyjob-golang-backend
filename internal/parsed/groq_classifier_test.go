@@ -164,7 +164,7 @@ func TestClassifySyncRotatesModelOn503(t *testing.T) {
 	if len(requestModels) < 2 {
 		t.Fatalf("expected at least two model attempts, got %d", len(requestModels))
 	}
-	if !strings.Contains(requestModels[1], `"model":"openai/gpt-oss-120b"`) {
-		t.Fatalf("expected second attempt to rotate to fallback model, got %s", requestModels[1])
+	if !strings.Contains(requestModels[1], `"model":"moonshotai/kimi-k2-instruct-0905"`) {
+		t.Fatalf("expected second attempt to rotate to current first fallback model, got %s", requestModels[1])
 	}
 }
