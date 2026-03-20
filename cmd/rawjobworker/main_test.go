@@ -7,8 +7,8 @@ import (
 )
 
 func TestMakeReadHTMLWith429RetrySwallowsNetworkError(t *testing.T) {
-	readHTML := makeReadHTMLWith429Retry(0, 0)
-	html, status, err := readHTML(context.Background(), "http://127.0.0.1:1/unreachable")
+	readHTML := makeReadHTMLForSourceWith429Retry(0, 0)
+	html, status, err := readHTML(context.Background(), "", "http://127.0.0.1:1/unreachable")
 	if err == nil {
 		if status != -1 {
 			t.Fatalf("expected status -1 for network error, got %d", status)
@@ -20,6 +20,6 @@ func TestMakeReadHTMLWith429RetrySwallowsNetworkError(t *testing.T) {
 }
 
 func TestMakeReadHTMLWith429RetryDoesNotErrorOnReadFailurePath(t *testing.T) {
-	readHTML := makeReadHTMLWith429Retry(1, 1*time.Millisecond)
-	_, _, _ = readHTML(context.Background(), "http://127.0.0.1:1/unreachable")
+	readHTML := makeReadHTMLForSourceWith429Retry(1, 1*time.Millisecond)
+	_, _, _ = readHTML(context.Background(), "", "http://127.0.0.1:1/unreachable")
 }

@@ -19,6 +19,10 @@ Invoke-Step "Go build all packages" {
   go build ./...
 }
 
+Invoke-Step "Go test all packages" {
+  go test ./...
+}
+
 $docker = Get-Command docker -ErrorAction SilentlyContinue
 if ($null -eq $docker) {
   Write-Host "==> Docker not found; skipping Docker image build checks"

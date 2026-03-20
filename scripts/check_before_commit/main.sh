@@ -8,6 +8,9 @@ cd "$REPO_ROOT"
 echo "==> Go build all packages"
 go build ./...
 
+echo "==> Go test all packages"
+go test ./...
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "==> Docker not found; skipping Docker image build checks"
   exit 0
