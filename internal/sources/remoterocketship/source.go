@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"goapplyjob-golang-backend/internal/employmentnorm"
+	"goapplyjob-golang-backend/internal/locationnorm"
 	"html"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
-
-	"goapplyjob-golang-backend/internal/locationnorm"
 )
 
 const (
@@ -79,6 +79,7 @@ func ParseRawHTML(htmlText, sourceUrl string) map[string]any {
 	if country := normalizeCountryToken(stringValue(jobData["location"])); country != "" {
 		jobData["locationCountries"] = []string{country}
 	}
+	jobData["employmentType"] = employmentnorm.NormalizeEmploymentTypeString(stringValue(jobData["employmentType"]))
 	return jobData
 }
 

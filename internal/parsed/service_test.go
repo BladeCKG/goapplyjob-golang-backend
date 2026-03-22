@@ -208,6 +208,7 @@ func TestBuiltinBackfillsCategoriesFromSimilarRemoteJob(t *testing.T) {
 		"created_at": "2026-02-12T09:00:00Z",
 		"url":        "https://builtin.com/job/acme/200",
 		"roleTitle":  "Backend Platform Engineer",
+		"techStack":  []string{"Python"},
 	})
 	if err != nil {
 		t.Fatal(err)

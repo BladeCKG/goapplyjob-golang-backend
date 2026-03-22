@@ -230,6 +230,8 @@ var groqTechStackExtractAllowedCategories = []string{
 	"ot",
 	"rt",
 	"spec",
+	"engineering",
+	"technology",
 }
 
 var techStackDropValues = map[string]struct{}{
