@@ -35,6 +35,11 @@ type Config struct {
 	BrevoFromEmail                string
 	BrevoFromName                 string
 	BrevoAPIURL                   string
+	CyberPanelAPIKey              string
+	CyberPanelAPIKeys             string
+	CyberPanelFromEmail           string
+	CyberPanelFromName            string
+	CyberPanelAPIURL              string
 	SiteName                      string
 	SiteURL                       string
 	SupabaseURL                   string
@@ -103,6 +108,11 @@ func Load() Config {
 		BrevoFromEmail:                getenv("BREVO_FROM_EMAIL", ""),
 		BrevoFromName:                 getenv("BREVO_FROM_NAME", "GoApplyJob"),
 		BrevoAPIURL:                   getenv("BREVO_API_URL", "https://api.brevo.com/v3/smtp/email"),
+		CyberPanelAPIKey:              getenv("CYBERPANEL_API_KEY", ""),
+		CyberPanelAPIKeys:             getenv("CYBERPANEL_API_KEYS", ""),
+		CyberPanelFromEmail:           getenv("CYBERPANEL_FROM_EMAIL", ""),
+		CyberPanelFromName:            getenv("CYBERPANEL_FROM_NAME", "GoApplyJob"),
+		CyberPanelAPIURL:              getenv("CYBERPANEL_API_URL", "https://platform.cyberpersons.com/email/v1/send"),
 		SiteName:                      getenv("SITE_NAME", "GoApplyJob"),
 		SiteURL:                       getenv("SITE_URL", "http://localhost:3000"),
 		SupabaseURL:                   getenv("SUPABASE_URL", ""),

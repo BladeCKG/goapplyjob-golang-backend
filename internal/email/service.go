@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
+	"goapplyjob-golang-backend/internal/config"
 	"net/http"
 	"net/smtp"
 	"strings"
 	"time"
-
-	"goapplyjob-golang-backend/internal/config"
 )
 
 const (
@@ -74,6 +73,8 @@ func (s *Service) SendEmail(toEmail, subject, textContent, htmlContent string) e
 			err = s.sendViaMailtrap(toEmail, subject, textContent, htmlContent)
 		case "brevo":
 			err = s.sendViaBrevo(toEmail, subject, textContent, htmlContent)
+		case "cyberpanel":
+			err = s.sendViaCyberPanel(toEmail, subject, textContent, htmlContent)
 		case "smtp":
 			err = s.sendViaSMTP(toEmail, subject, textContent, htmlContent)
 		default:
@@ -93,10 +94,12 @@ func (s *Service) normalizeProvider() string {
 		value = defaultProvider
 	}
 	switch value {
-	case "mailtrap", "mailtrap_api":
+	case "mailtrap":
 		return "mailtrap"
-	case "brevo", "brevo_api", "api":
+	case "brevo":
 		return "brevo"
+	case "cyberpanel":
+		return "cyberpanel"
 	case "smtp":
 		return "smtp"
 	case "auto":
@@ -115,10 +118,12 @@ func normalizeProviderList(raw string) []string {
 			continue
 		}
 		switch value {
-		case "mailtrap", "mailtrap_api":
+		case "mailtrap":
 			value = "mailtrap"
-		case "brevo", "brevo_api", "api":
+		case "brevo":
 			value = "brevo"
+		case "cyberpanel":
+			value = "cyberpanel"
 		case "smtp":
 			value = "smtp"
 		}
@@ -145,6 +150,9 @@ func (s *Service) resolveProviders() []string {
 	}
 	if len(collectBrevoKeys(s.cfg)) > 0 && strings.TrimSpace(s.cfg.BrevoFromEmail) != "" {
 		out = append(out, "brevo")
+	}
+	if len(collectCyberPanelKeys(s.cfg)) > 0 && strings.TrimSpace(s.cfg.CyberPanelFromEmail) != "" {
+		out = append(out, "cyberpanel")
 	}
 	if strings.TrimSpace(s.cfg.SMTPHost) != "" && (strings.TrimSpace(s.cfg.SMTPFrom) != "" || strings.TrimSpace(s.cfg.SMTPUser) != "") {
 		out = append(out, "smtp")

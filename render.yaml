@@ -41,6 +41,14 @@ services:
         sync: false
       - key: SMTP_TLS
         value: "true"
+      - key: CYBERPANEL_API_KEY
+        sync: false
+      - key: CYBERPANEL_FROM_EMAIL
+        sync: false
+      - key: CYBERPANEL_FROM_NAME
+        value: GoApplyJob
+      - key: CYBERPANEL_API_URL
+        value: https://platform.cyberpersons.com/email/v1/send
       - key: AUTH_MAGIC_LINK_BASE_URL
         sync: false
       - key: PAYMENT_SUCCESS_URL
