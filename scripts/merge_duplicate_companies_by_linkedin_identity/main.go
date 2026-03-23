@@ -17,6 +17,11 @@ import (
 
 var slugSuffixPattern = regexp.MustCompile(`^(?P<base>.+)-(?P<num>\d+)$`)
 
+const (
+	externalCompanyIDPrefix = "gaj("
+	externalCompanyIDSuffix = ")gaj"
+)
+
 type companyRow struct {
 	ID                          int64
 	ExternalCompanyID           sql.NullString
@@ -608,7 +613,7 @@ func mergeExternalCompanyIDs(current sql.NullString, losers []companyRow) sql.Nu
 	seen := map[string]struct{}{}
 	appendParts := func(raw string) {
 		for _, part := range strings.Split(raw, ",") {
-			normalized := normalizeString(part)
+			normalized := normalizeExternalCompanyIDToken(part)
 			if normalized == "" {
 				continue
 			}
@@ -629,6 +634,16 @@ func mergeExternalCompanyIDs(current sql.NullString, losers []companyRow) sql.Nu
 		return sql.NullString{}
 	}
 	return sql.NullString{String: strings.Join(ordered, ","), Valid: true}
+}
+
+func normalizeExternalCompanyIDToken(raw string) string {
+	normalized := normalizeString(strings.TrimSpace(raw))
+	normalized = strings.TrimPrefix(normalized, externalCompanyIDPrefix)
+	normalized = strings.TrimSuffix(normalized, externalCompanyIDSuffix)
+	if normalized == "" {
+		return ""
+	}
+	return externalCompanyIDPrefix + normalized + externalCompanyIDSuffix
 }
 
 func populatedString(value sql.NullString) bool {

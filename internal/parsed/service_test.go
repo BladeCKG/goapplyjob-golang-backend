@@ -463,7 +463,7 @@ func TestUpsertCompanyFromPayloadUsesExternalCompanyIDForRemoteRocketship(t *tes
 
 	_, err = db.SQL.ExecContext(context.Background(),
 		`INSERT INTO parsed_companies (external_company_id, name, home_page_url, updated_at) VALUES (?, ?, ?, ?)`,
-		"rr_company_1",
+		externalCompanyIDPrefix+"rr_company_1"+externalCompanyIDSuffix,
 		"Old Name",
 		"https://old.example",
 		time.Now().UTC().Format(time.RFC3339Nano),
@@ -493,7 +493,7 @@ func TestUpsertCompanyFromPayloadUsesExternalCompanyIDForRemoteRocketship(t *tes
 	}
 
 	var name, homePage string
-	if err := db.SQL.QueryRowContext(context.Background(), `SELECT name, home_page_url FROM parsed_companies WHERE external_company_id = ?`, "rr_company_1").Scan(&name, &homePage); err != nil {
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT name, home_page_url FROM parsed_companies WHERE external_company_id ILIKE ?`, "%"+externalCompanyIDPrefix+"rr_company_1"+externalCompanyIDSuffix+"%").Scan(&name, &homePage); err != nil {
 		t.Fatal(err)
 	}
 	if name != "New Name" || homePage != "https://new.example" {
@@ -510,7 +510,7 @@ func TestUpsertCompanyFromPayloadMatchesMergedExternalCompanyIDList(t *testing.T
 
 	_, err = db.SQL.ExecContext(context.Background(),
 		`INSERT INTO parsed_companies (external_company_id, name, home_page_url, updated_at) VALUES (?, ?, ?, ?)`,
-		"rr_company_1,rr_company_2",
+		externalCompanyIDPrefix+"rr_company_1"+externalCompanyIDSuffix+","+externalCompanyIDPrefix+"rr_company_2"+externalCompanyIDSuffix,
 		"Existing Name",
 		"https://existing.example",
 		time.Now().UTC().Format(time.RFC3339Nano),
@@ -548,7 +548,7 @@ func TestUpsertCompanyFromPayloadMatchesMergedExternalCompanyIDList(t *testing.T
 	}
 
 	var name, homePage string
-	if err := db.SQL.QueryRowContext(context.Background(), `SELECT name, home_page_url FROM parsed_companies WHERE external_company_id ILIKE ?`, "%rr_company_2%").Scan(&name, &homePage); err != nil {
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT name, home_page_url FROM parsed_companies WHERE external_company_id ILIKE ?`, "%"+externalCompanyIDPrefix+"rr_company_2"+externalCompanyIDSuffix+"%").Scan(&name, &homePage); err != nil {
 		t.Fatal(err)
 	}
 	if name != "Merged Match Name" || homePage != "https://merged.example" {
@@ -565,7 +565,7 @@ func TestUpsertCompanyFromPayloadAppendsIncomingExternalCompanyIDWhenMatchedByKe
 
 	_, err = db.SQL.ExecContext(context.Background(),
 		`INSERT INTO parsed_companies (external_company_id, name, slug, home_page_url, updated_at) VALUES (?, ?, ?, ?, ?)`,
-		"rr_company_1",
+		externalCompanyIDPrefix+"rr_company_1"+externalCompanyIDSuffix,
 		"Acme",
 		"acme",
 		"https://acme.example",
@@ -600,7 +600,7 @@ func TestUpsertCompanyFromPayloadAppendsIncomingExternalCompanyIDWhenMatchedByKe
 	if err := db.SQL.QueryRowContext(context.Background(), `SELECT external_company_id FROM parsed_companies WHERE name = ?`, "Acme").Scan(&externalIDs); err != nil {
 		t.Fatal(err)
 	}
-	if externalIDs != "rr_company_1,rr_company_2" {
+	if externalIDs != externalCompanyIDPrefix+"rr_company_1"+externalCompanyIDSuffix+","+externalCompanyIDPrefix+"rr_company_2"+externalCompanyIDSuffix {
 		t.Fatalf("expected appended external company ids, got %q", externalIDs)
 	}
 }

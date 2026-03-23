@@ -27,6 +27,8 @@ const (
 	similarCategoryScanBatch = 1000
 	similarCategoryMaxScan   = 2000
 	similarCategoryQueryTopN = 5
+	externalCompanyIDPrefix  = "gaj("
+	externalCompanyIDSuffix  = ")gaj"
 )
 
 var seniorityTokens = map[string]struct{}{
@@ -2236,25 +2238,35 @@ func linkedinIdentityFromURL(rawURL string) string {
 	return host + "/" + path
 }
 
+func externalCompanyIDToken(value string) string {
+	normalized := strings.TrimSpace(value)
+	normalized = strings.TrimPrefix(normalized, externalCompanyIDPrefix)
+	normalized = strings.TrimSuffix(normalized, externalCompanyIDSuffix)
+	if normalized == "" {
+		return ""
+	}
+	return externalCompanyIDPrefix + normalized + externalCompanyIDSuffix
+}
+
+func appendExternalCompanyIDParts(raw string, seen map[string]struct{}, ordered *[]string) {
+	for _, part := range strings.Split(raw, ",") {
+		token := externalCompanyIDToken(part)
+		if token == "" {
+			continue
+		}
+		if _, ok := seen[token]; ok {
+			continue
+		}
+		seen[token] = struct{}{}
+		*ordered = append(*ordered, token)
+	}
+}
+
 func appendExternalCompanyIDs(existing sql.NullString, incoming string) any {
 	ordered := make([]string, 0, 4)
 	seen := map[string]struct{}{}
-	appendParts := func(raw string) {
-		for _, part := range strings.Split(raw, ",") {
-			normalized := strings.TrimSpace(part)
-			if normalized == "" {
-				continue
-			}
-			if _, ok := seen[normalized]; ok {
-				continue
-			}
-			seen[normalized] = struct{}{}
-			ordered = append(ordered, normalized)
-		}
-	}
-
-	appendParts(existing.String)
-	appendParts(incoming)
+	appendExternalCompanyIDParts(existing.String, seen, &ordered)
+	appendExternalCompanyIDParts(incoming, seen, &ordered)
 
 	if len(ordered) == 0 {
 		return nil
@@ -2363,7 +2375,15 @@ func (s *Service) upsertCompanyFromPayload(ctx context.Context, payload map[stri
 	var companyID sql.NullInt64
 
 	if externalCompanyID != "" {
-		err := s.DB.SQL.QueryRowContext(ctx, `SELECT id FROM parsed_companies WHERE external_company_id ILIKE ? LIMIT 1`, "%"+externalCompanyID+"%").Scan(&companyID)
+		wrappedExternalCompanyID := externalCompanyIDToken(externalCompanyID)
+		err := s.DB.SQL.QueryRowContext(
+			ctx,
+			`SELECT id
+			   FROM parsed_companies
+			  WHERE external_company_id ILIKE ?
+			  LIMIT 1`,
+			"%"+wrappedExternalCompanyID+"%",
+		).Scan(&companyID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
