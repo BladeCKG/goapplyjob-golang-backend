@@ -556,6 +556,55 @@ func TestUpsertCompanyFromPayloadMatchesMergedExternalCompanyIDList(t *testing.T
 	}
 }
 
+func TestUpsertCompanyFromPayloadAppendsIncomingExternalCompanyIDWhenMatchedByKeys(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_company_external_id_append_on_match"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(context.Background(),
+		`INSERT INTO parsed_companies (external_company_id, name, slug, home_page_url, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		"rr_company_1",
+		"Acme",
+		"acme",
+		"https://acme.example",
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(Config{}, db)
+	plugin, ok := plugins.Get("remoterocketship")
+	if !ok {
+		t.Fatal("missing remoterocketship plugin")
+	}
+	payload := map[string]any{
+		"company": map[string]any{
+			"id":          "rr_company_2",
+			"name":        "Acme",
+			"slug":        "acme",
+			"homePageURL": "https://acme.example",
+		},
+	}
+	companyID, err := svc.upsertCompanyFromPayload(context.Background(), payload, plugin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if companyID == nil {
+		t.Fatal("expected company id")
+	}
+
+	var externalIDs string
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT external_company_id FROM parsed_companies WHERE name = ?`, "Acme").Scan(&externalIDs); err != nil {
+		t.Fatal(err)
+	}
+	if externalIDs != "rr_company_1,rr_company_2" {
+		t.Fatalf("expected appended external company ids, got %q", externalIDs)
+	}
+}
+
 func TestFindDuplicateCrossSourceParsedJobByURL(t *testing.T) {
 	db, err := database.Open(testDatabaseURL(t, "test_parsed_duplicate_by_url"))
 	if err != nil {

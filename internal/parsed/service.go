@@ -2236,6 +2236,32 @@ func linkedinIdentityFromURL(rawURL string) string {
 	return host + "/" + path
 }
 
+func appendExternalCompanyIDs(existing sql.NullString, incoming string) any {
+	ordered := make([]string, 0, 4)
+	seen := map[string]struct{}{}
+	appendParts := func(raw string) {
+		for _, part := range strings.Split(raw, ",") {
+			normalized := strings.TrimSpace(part)
+			if normalized == "" {
+				continue
+			}
+			if _, ok := seen[normalized]; ok {
+				continue
+			}
+			seen[normalized] = struct{}{}
+			ordered = append(ordered, normalized)
+		}
+	}
+
+	appendParts(existing.String)
+	appendParts(incoming)
+
+	if len(ordered) == 0 {
+		return nil
+	}
+	return strings.Join(ordered, ",")
+}
+
 func (s *Service) findExistingCompanyByMatchKeys(ctx context.Context, companyPayload map[string]any) (sql.NullInt64, error) {
 	incomingSlug := stringValue(companyPayload["slug"])
 	incomingName := stringValue(companyPayload["name"])
@@ -2446,6 +2472,7 @@ func (s *Service) upsertCompanyFromPayload(ctx context.Context, payload map[stri
 			}
 			return current.Bool
 		}
+		externalCompanyIDUpdate := appendExternalCompanyIDs(curExternalID, externalCompanyIDVal)
 		_, err := s.DB.SQL.ExecContext(
 			ctx,
 			`UPDATE parsed_companies
@@ -2479,7 +2506,7 @@ func (s *Service) upsertCompanyFromPayload(ctx context.Context, payload map[stri
 			        industry_specialities_germany = ?,
 			        updated_at = ?
 			  WHERE id = ?`,
-			chooseStr(curExternalID, externalCompanyIDVal),
+			externalCompanyIDUpdate,
 			chooseStr(curName, nameVal),
 			chooseStr(curSlug, slugVal),
 			chooseStr(curTagline, taglineVal),
