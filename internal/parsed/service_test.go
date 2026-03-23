@@ -501,6 +501,61 @@ func TestUpsertCompanyFromPayloadUsesExternalCompanyIDForRemoteRocketship(t *tes
 	}
 }
 
+func TestUpsertCompanyFromPayloadMatchesMergedExternalCompanyIDList(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_company_external_id_merged"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(context.Background(),
+		`INSERT INTO parsed_companies (external_company_id, name, home_page_url, updated_at) VALUES (?, ?, ?, ?)`,
+		"rr_company_1,rr_company_2",
+		"Existing Name",
+		"https://existing.example",
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(Config{}, db)
+	plugin, ok := plugins.Get("remoterocketship")
+	if !ok {
+		t.Fatal("missing remoterocketship plugin")
+	}
+	payload := map[string]any{
+		"company": map[string]any{
+			"id":          "rr_company_2",
+			"name":        "Merged Match Name",
+			"homePageURL": "https://merged.example",
+		},
+	}
+	companyID, err := svc.upsertCompanyFromPayload(context.Background(), payload, plugin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if companyID == nil {
+		t.Fatal("expected company id")
+	}
+
+	var count int
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM parsed_companies`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected merged external id list to update existing row, got %d company rows", count)
+	}
+
+	var name, homePage string
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT name, home_page_url FROM parsed_companies WHERE external_company_id ILIKE ?`, "%rr_company_2%").Scan(&name, &homePage); err != nil {
+		t.Fatal(err)
+	}
+	if name != "Merged Match Name" || homePage != "https://merged.example" {
+		t.Fatalf("expected updated company fields, got name=%q home_page_url=%q", name, homePage)
+	}
+}
+
 func TestFindDuplicateCrossSourceParsedJobByURL(t *testing.T) {
 	db, err := database.Open(testDatabaseURL(t, "test_parsed_duplicate_by_url"))
 	if err != nil {

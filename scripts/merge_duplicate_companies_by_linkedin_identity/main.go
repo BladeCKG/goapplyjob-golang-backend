@@ -527,6 +527,11 @@ func completenessScore(row companyRow) int {
 
 func mergeCompanyFields(winner *companyRow, losers []companyRow) []string {
 	merged := []string{}
+	mergedExternalIDs := mergeExternalCompanyIDs(winner.ExternalCompanyID, losers)
+	if mergedExternalIDs.Valid && mergedExternalIDs.String != winner.ExternalCompanyID.String {
+		winner.ExternalCompanyID = mergedExternalIDs
+		merged = append(merged, "external_company_id")
+	}
 	fillString := func(name string, dest *sql.NullString, getter func(companyRow) sql.NullString) {
 		if populatedString(*dest) {
 			return
@@ -596,6 +601,34 @@ func mergeCompanyFields(winner *companyRow, losers []companyRow) []string {
 	fillJSON("industry_specialities_germany", &winner.IndustrySpecialitiesGermany, func(c companyRow) sql.NullString { return c.IndustrySpecialitiesGermany })
 
 	return merged
+}
+
+func mergeExternalCompanyIDs(current sql.NullString, losers []companyRow) sql.NullString {
+	ordered := make([]string, 0, len(losers)+1)
+	seen := map[string]struct{}{}
+	appendParts := func(raw string) {
+		for _, part := range strings.Split(raw, ",") {
+			normalized := normalizeString(part)
+			if normalized == "" {
+				continue
+			}
+			if _, ok := seen[normalized]; ok {
+				continue
+			}
+			seen[normalized] = struct{}{}
+			ordered = append(ordered, normalized)
+		}
+	}
+
+	appendParts(current.String)
+	for _, loser := range losers {
+		appendParts(loser.ExternalCompanyID.String)
+	}
+
+	if len(ordered) == 0 {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: strings.Join(ordered, ","), Valid: true}
 }
 
 func populatedString(value sql.NullString) bool {

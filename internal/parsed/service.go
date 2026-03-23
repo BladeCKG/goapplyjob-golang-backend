@@ -2337,7 +2337,7 @@ func (s *Service) upsertCompanyFromPayload(ctx context.Context, payload map[stri
 	var companyID sql.NullInt64
 
 	if externalCompanyID != "" {
-		err := s.DB.SQL.QueryRowContext(ctx, `SELECT id FROM parsed_companies WHERE external_company_id = ? LIMIT 1`, externalCompanyID).Scan(&companyID)
+		err := s.DB.SQL.QueryRowContext(ctx, `SELECT id FROM parsed_companies WHERE external_company_id ILIKE ? LIMIT 1`, "%"+externalCompanyID+"%").Scan(&companyID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
