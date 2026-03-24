@@ -124,7 +124,7 @@ func ParseRawHTML(htmlText, _ string) map[string]any {
 		companyDescription := stringOrNil(rawCompany["description"])
 		tagline := normalizeHTMLToPlainText(companyDescription)
 		company = map[string]any{
-			"id":                          stringOrNil(rawCompany["companyId"]),
+			"id":                          namespacedCompanyID(rawCompany["companyId"]),
 			"name":                        stringOrNil(rawCompany["name"]),
 			"slug":                        stringOrNil(rawCompany["slug"]),
 			"tagline":                     stringOrNil(tagline),
@@ -386,6 +386,17 @@ func stringOrNil(value any) any {
 		return nil
 	}
 	return text
+}
+
+func namespacedCompanyID(value any) any {
+	raw := stringValue(value)
+	if raw == "" {
+		return nil
+	}
+	if strings.HasPrefix(raw, Source+"_") {
+		return raw
+	}
+	return Source + "_" + raw
 }
 
 func filterUSStates(values []string) []string {

@@ -33,3 +33,19 @@ func TestParseRawHTMLSetsEmptyLocationCountriesWhenMissing(t *testing.T) {
 		t.Fatalf("expected empty locationCountries slice, got %#v", payload["locationCountries"])
 	}
 }
+
+func TestParseRawHTMLNormalizesNumericCompanyIDToString(t *testing.T) {
+	htmlText := `
+<html>
+<body>
+<script type="application/json">
+{"props":{"pageProps":{"jobOpening":{"title":"Engineer","company":{"id":227383,"name":"CUSG"}}}}}
+</script>
+</body>
+</html>`
+	payload := ParseRawHTML(htmlText, "")
+	company, _ := payload["company"].(map[string]any)
+	if company["id"] != "remoterocketship_227383" {
+		t.Fatalf("expected company.id string, got %#v", company["id"])
+	}
+}

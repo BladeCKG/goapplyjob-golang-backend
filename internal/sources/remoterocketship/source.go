@@ -9,6 +9,7 @@ import (
 	"html"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -75,6 +76,9 @@ func ParseRawHTML(htmlText, sourceUrl string) map[string]any {
 	if jobData == nil {
 		return map[string]any{}
 	}
+	if company, ok := jobData["company"].(map[string]any); ok {
+		company["id"] = namespacedCompanyID(company["id"])
+	}
 	jobData["locationCountries"] = []string{}
 	if country := normalizeCountryToken(stringValue(jobData["location"])); country != "" {
 		jobData["locationCountries"] = []string{country}
@@ -86,6 +90,31 @@ func ParseRawHTML(htmlText, sourceUrl string) map[string]any {
 func stringValue(value any) string {
 	text, _ := value.(string)
 	return strings.TrimSpace(text)
+}
+
+func scalarStringOrNil(value any) any {
+	switch item := value.(type) {
+	case float64:
+		return strconv.FormatInt(int64(item), 10)
+	case int:
+		return strconv.Itoa(item)
+	case int64:
+		return strconv.FormatInt(item, 10)
+	default:
+		return value
+	}
+}
+
+func namespacedCompanyID(value any) any {
+	raw, _ := scalarStringOrNil(value).(string)
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	if strings.HasPrefix(raw, Source+"_") {
+		return raw
+	}
+	return Source + "_" + raw
 }
 
 func normalizeCountryToken(value string) string {

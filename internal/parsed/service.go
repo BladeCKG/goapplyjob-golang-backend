@@ -2574,7 +2574,7 @@ func (s *Service) upsertCompanyFromPayload(ctx context.Context, payload map[stri
 		  )
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 RETURNING id`,
-		nilIfEmpty(externalCompanyIDVal),
+		nilIfEmpty(externalCompanyIDToken(externalCompanyIDVal)),
 		nilIfEmpty(nameVal),
 		nilIfEmpty(slugVal),
 		nilIfEmpty(taglineVal),

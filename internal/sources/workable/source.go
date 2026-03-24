@@ -3,14 +3,13 @@ package workable
 import (
 	"encoding/json"
 	"errors"
+	"goapplyjob-golang-backend/internal/employmentnorm"
 	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
-
-	"goapplyjob-golang-backend/internal/employmentnorm"
 )
 
 const (
@@ -243,7 +242,7 @@ func buildRawPayload(item map[string]any, urlValue string, postDate time.Time) m
 		"techStack":         []string{},
 		"salaryRange":       map[string]any{},
 		"company": map[string]any{
-			"id":                   intOrStringOrNil(company["id"]),
+			"id":                   namespacedCompanyID(company["id"]),
 			"name":                 stringOrNil(companyTitle),
 			"slug":                 stringOrNil(companySlug),
 			"tagline":              nil,
@@ -324,6 +323,31 @@ func intOrStringOrNil(value any) any {
 	default:
 		return nil
 	}
+}
+
+func stringIDOrNil(value any) any {
+	switch item := value.(type) {
+	case float64:
+		return strconv.FormatInt(int64(item), 10)
+	case int:
+		return strconv.Itoa(item)
+	case int64:
+		return strconv.FormatInt(item, 10)
+	default:
+		return item
+	}
+}
+
+func namespacedCompanyID(value any) any {
+	raw, _ := stringIDOrNil(value).(string)
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	if strings.HasPrefix(raw, Source+"_") {
+		return raw
+	}
+	return Source + "_" + raw
 }
 
 func inferSeniority(title string) (bool, bool, bool, bool, bool) {

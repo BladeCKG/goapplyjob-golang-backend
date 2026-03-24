@@ -103,3 +103,32 @@ func TestParseRawHTMLStrictFields(t *testing.T) {
 	assertEqual("company.homePageURL", companyPayload["homePageURL"], companyFixture["website"])
 	assertEqual("company.profilePicURL", companyPayload["profilePicURL"], companyFixture["logo"])
 }
+
+func TestParseRawHTMLPrefixesCompanyIDWithSource(t *testing.T) {
+	htmlText := `
+<html>
+<body>
+<script type="application/json">
+{"props":{"pageProps":{"jobDetails":{
+  "id":"job-1",
+  "title":"Engineer",
+  "description":"Build things",
+  "jobSummary":"Summary",
+  "applyURL":"https://remote.co/remote-jobs/job-1",
+  "postedDate":"2026-03-01T10:00:00Z",
+  "remoteOptions":["100% remote work"],
+  "jobSchedules":["Full-time"],
+  "cities":["Austin"],
+  "states":["Texas"],
+  "countries":["United States"],
+  "company":{"companyId":"abc123","name":"Acme","slug":"acme","website":"https://acme.com"}
+}}}}
+</script>
+</body>
+</html>`
+	payload := ParseRawHTML(htmlText, "")
+	company, _ := payload["company"].(map[string]any)
+	if company["id"] != "remotedotco_abc123" {
+		t.Fatalf("expected namespaced company.id, got %#v", company["id"])
+	}
+}

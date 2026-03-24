@@ -1045,7 +1045,7 @@ func extractCompanyInfo(companyHTML, companySameAs string) map[string]any {
 	websiteURL := valueOrNil(matchAnchorHref(companyHTML, `(?i)View Website`))
 	companyMatchKey := buildCompanyMatchKey(firstNonEmpty(stringValue(initPayload["companyName"]), extractTitle(companyHTML)), "", stringValue(websiteURL))
 	return map[string]any{
-		"external_company_id":         valueOrNil(initPayload["companyId"]),
+		"external_company_id":         namespacedCompanyID(initPayload["companyId"]),
 		"name":                        firstNonEmpty(stringValue(initPayload["companyName"]), extractTitle(companyHTML)),
 		"slug":                        firstNonEmpty(stringValue(initPayload["companyAlias"]), companySlugFromURL(canonicalURL)),
 		"tagline":                     valueOrNil(tagline),
@@ -1055,7 +1055,7 @@ func extractCompanyInfo(companyHTML, companySameAs string) map[string]any {
 		"employee_range":              valueOrNil(matchOne(companyHTML, `(?is)([0-9][0-9,]*)\s+Total Employees`)),
 		"profile_pic_url":             valueOrNil(matchOne(companyHTML, `(?is)<img[^>]*src=['"]([^'"]+)['"]`)),
 		"industry_specialities":       nil,
-		"source_name":                 "builtin",
+		"source_name":                 Source,
 		"source_company_slug":         valueOrNil(firstNonEmpty(stringValue(initPayload["companyAlias"]), companySlugFromURL(canonicalURL))),
 		"company_match_key":           companyMatchKey,
 		"source_company_profile_url":  valueOrNil(canonicalURL),
@@ -1113,7 +1113,7 @@ func fallbackCompanyFromJobPosting(jobPosting map[string]any, jobPageHTML string
 	}
 	var externalCompanyID any
 	if companySlug != "" {
-		externalCompanyID = "builtin_company_" + companySlug
+		externalCompanyID = namespacedCompanyID("company_" + companySlug)
 	}
 	tagline := extractWhatWeDoTagline(jobPageHTML)
 	employeeRange := normalizeEmployeeRange(matchOne(jobPageHTML, `(?is)([0-9][0-9,]*)\s+employees`))
@@ -1128,7 +1128,7 @@ func fallbackCompanyFromJobPosting(jobPosting map[string]any, jobPageHTML string
 		"employee_range":              employeeRange,
 		"profile_pic_url":             valueOrNil(stringValue(hiringOrg["logo"])),
 		"industry_specialities":       extractIndustrySpecialitiesFromJobPosting(jobPosting),
-		"source_name":                 "builtin",
+		"source_name":                 Source,
 		"source_company_slug":         valueOrNil(companySlug),
 		"company_match_key":           buildCompanyMatchKey(companyName, "", ""),
 		"source_company_profile_url":  valueOrNil(companySameAs),
@@ -1211,7 +1211,7 @@ func toRawCompanyShape(parsedCompany map[string]any) any {
 		return nil
 	}
 	return map[string]any{
-		"id":                          parsedCompany["external_company_id"],
+		"id":                          scalarStringOrNil(parsedCompany["external_company_id"]),
 		"name":                        parsedCompany["name"],
 		"slug":                        parsedCompany["slug"],
 		"tagline":                     parsedCompany["tagline"],
@@ -1241,6 +1241,31 @@ func toRawCompanyShape(parsedCompany map[string]any) any {
 		"sponsorsUKSkilledWorkerVisa": nil,
 		"sourceCompanySlug":           parsedCompany["source_company_slug"],
 	}
+}
+
+func scalarStringOrNil(value any) any {
+	switch item := value.(type) {
+	case float64:
+		return strconv.FormatInt(int64(item), 10)
+	case int:
+		return strconv.Itoa(item)
+	case int64:
+		return strconv.FormatInt(item, 10)
+	default:
+		return value
+	}
+}
+
+func namespacedCompanyID(value any) any {
+	raw, _ := scalarStringOrNil(value).(string)
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	if strings.HasPrefix(raw, Source+"_") {
+		return raw
+	}
+	return Source + "_" + raw
 }
 
 func normalizeEmploymentType(value string) string {

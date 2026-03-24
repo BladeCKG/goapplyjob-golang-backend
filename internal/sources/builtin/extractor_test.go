@@ -101,8 +101,8 @@ func TestExtractJobBuildsBuiltInRawJobShape(t *testing.T) {
 		t.Fatalf("unexpected tech stack %#v", payload["techStack"])
 	}
 	company, _ := payload["company"].(map[string]any)
-	if company["id"] != float64(987) && company["id"] != 987 {
-		t.Fatalf("expected raw company id, got %#v", company["id"])
+	if company["id"] != Source+"_987" {
+		t.Fatalf("expected normalized company id string, got %#v", company["id"])
 	}
 	if company["slug"] != "acme" {
 		t.Fatalf("expected raw company slug, got %#v", company["slug"])
@@ -240,7 +240,7 @@ func TestFallbackCompanyFromJobPosting(t *testing.T) {
 	if company["founded_year"] != "1902" || company["employee_range"] != "14000" {
 		t.Fatalf("unexpected fallback company values %#v", company)
 	}
-	if company["external_company_id"] != "builtin_company_aaa" {
+	if company["external_company_id"] != Source+"_company_aaa" {
 		t.Fatalf("unexpected fallback company external id %#v", company["external_company_id"])
 	}
 	if company["tagline"] != "Paragraph A\nParagraph B" {
@@ -270,7 +270,7 @@ func TestExtractJobFromHTMLUsesFallbackCompanyWhenCompanyMissing(t *testing.T) {
 	if company["slug"] != "acme" {
 		t.Fatalf("expected fallback company slug, got %#v", company["slug"])
 	}
-	if company["id"] != "builtin_company_acme" {
+	if company["id"] != Source+"_company_acme" {
 		t.Fatalf("expected fallback company id, got %#v", company["id"])
 	}
 }
