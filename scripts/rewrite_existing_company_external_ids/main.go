@@ -121,9 +121,10 @@ func buildUpdates(ctx context.Context, db *database.DB, companies []companyRow, 
 	unchanged := 0
 
 	for _, company := range companies {
-		current := normalizeExternalCompanyIDs(company.ExternalCompanyID.String)
-		next := rewriteExternalCompanyIDsForCompany(ctx, db, company.ID, current)
-		if next == "" || next == current {
+		currentRaw := company.ExternalCompanyID.String
+		currentNormalized := normalizeExternalCompanyIDs(currentRaw)
+		next := rewriteExternalCompanyIDsForCompany(ctx, db, company.ID, currentNormalized)
+		if next == "" || next == currentRaw {
 			unchanged++
 			continue
 		}
@@ -131,7 +132,7 @@ func buildUpdates(ctx context.Context, db *database.DB, companies []companyRow, 
 		updates = append(updates, updateRow{
 			CompanyID:         company.ID,
 			CompanyName:       company.Name,
-			CurrentExternalID: current,
+			CurrentExternalID: currentRaw,
 			NextExternalID:    next,
 		})
 		if limit > 0 && len(updates) >= limit {
