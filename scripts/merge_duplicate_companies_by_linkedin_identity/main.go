@@ -280,7 +280,7 @@ func updateCanonicalCompany(ctx context.Context, tx *database.Tx, canonical comp
 	_, err := tx.ExecContext(
 		ctx,
 		`UPDATE parsed_companies
-		    SET name = ?, slug = ?, tagline = ?, founded_year = ?, home_page_url = ?, linkedin_url = ?,
+		    SET external_company_id = ?, name = ?, slug = ?, tagline = ?, founded_year = ?, home_page_url = ?, linkedin_url = ?,
 		        sponsors_h1b = ?, sponsors_uk_skilled_worker_visa = ?, employee_range = ?, profile_pic_url = ?,
 		        tagline_brazil = ?, tagline_france = ?, tagline_germany = ?,
 		        chatgpt_description = ?, linkedin_description = ?,
@@ -290,6 +290,7 @@ func updateCanonicalCompany(ctx context.Context, tx *database.Tx, canonical comp
 		        industry_specialities_brazil = ?, industry_specialities_france = ?, industry_specialities_germany = ?,
 		        updated_at = NOW()
 		  WHERE id = ?`,
+		nullStringValue(canonical.ExternalCompanyID),
 		nullStringValue(canonical.Name),
 		nullStringValue(canonical.Slug),
 		nullStringValue(canonical.Tagline),
