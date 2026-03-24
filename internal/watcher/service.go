@@ -49,36 +49,36 @@ var (
 )
 
 type Config struct {
-	Enabled                         bool
-	RemoteRocketshipUSJobSitemapURL string
-	IntervalMinutes                 float64
-	SampleKB                        int
-	TimeoutSeconds                  float64
-	BuiltinBaseURL                  string
-	BuiltinMaxPage                  int
-	BuiltinPagesPerCycle            int
-	BuiltinCheckpointPages          int
-	BuiltinFetchIntervalSeconds     float64
-	Builtin429RetryCount            int
-	Builtin429BackoffSeconds        float64
-	WorkableAPIURL                  string
-	WorkablePageLimit               int
-	RemotiveSitemapURLTemplate      string
-	RemotiveSitemapMaxIndex         int
-	RemotiveSitemapMinIndex         int
-	DailyRemoteBaseURL              string
-	DailyRemoteMaxPage              int
-	DailyRemotePagesPerCycle        int
-	RemoteDotCoSitemapURL           string
-	HiringCafeSearchAPIURL          string
-	HiringCafeTotalCountURL         string
-	HiringCafePageSize              int
-	EnabledSources                  map[string]struct{}
+	Enabled                          bool
+	RemoteRocketshipUSJobSitemapURLs []string
+	IntervalMinutes                  float64
+	SampleKB                         int
+	TimeoutSeconds                   float64
+	BuiltinBaseURL                   string
+	BuiltinMaxPage                   int
+	BuiltinPagesPerCycle             int
+	BuiltinCheckpointPages           int
+	BuiltinFetchIntervalSeconds      float64
+	Builtin429RetryCount             int
+	Builtin429BackoffSeconds         float64
+	WorkableAPIURL                   string
+	WorkablePageLimit                int
+	RemotiveSitemapURLTemplate       string
+	RemotiveSitemapMaxIndex          int
+	RemotiveSitemapMinIndex          int
+	DailyRemoteBaseURL               string
+	DailyRemoteMaxPage               int
+	DailyRemotePagesPerCycle         int
+	RemoteDotCoSitemapURL            string
+	HiringCafeSearchAPIURL           string
+	HiringCafeTotalCountURL          string
+	HiringCafePageSize               int
+	EnabledSources                   map[string]struct{}
 }
 
 type (
-	FetchSampleFunc func(context.Context) ([]byte, error)
-	FetchFullFunc   func(context.Context) ([]byte, error)
+	FetchSampleFunc func(context.Context, string) ([]byte, error)
+	FetchFullFunc   func(context.Context, string) ([]byte, error)
 )
 
 type HTMLFetcher interface {
@@ -106,38 +106,38 @@ func New(config Config, db *database.DB) *Service {
 		svc.Fetcher = cloudFetcher
 	}
 	svc.status = map[string]any{
-		"enabled":                       config.Enabled,
-		"url":                           config.RemoteRocketshipUSJobSitemapURL,
-		"interval_minutes":              config.IntervalMinutes,
-		"sample_kb":                     config.SampleKB,
-		"enabled_sources":               sortedSourceNames(config.EnabledSources),
-		"workable_api_url":              config.WorkableAPIURL,
-		"remotive_sitemap_url_template": config.RemotiveSitemapURLTemplate,
-		"remotive_sitemap_max_index":    config.RemotiveSitemapMaxIndex,
-		"remotive_sitemap_min_index":    config.RemotiveSitemapMinIndex,
-		"dailyremote_base_url":          config.DailyRemoteBaseURL,
-		"dailyremote_max_page":          config.DailyRemoteMaxPage,
-		"dailyremote_pages_per_cycle":   config.DailyRemotePagesPerCycle,
-		"remotedotco_sitemap_url":       config.RemoteDotCoSitemapURL,
-		"hiringcafe_search_api_url":     config.HiringCafeSearchAPIURL,
-		"hiringcafe_total_count_url":    config.HiringCafeTotalCountURL,
-		"hiringcafe_page_size":          config.HiringCafePageSize,
-		"running":                       false,
-		"last_check_at":                 nil,
-		"last_change_at":                nil,
-		"last_sample_hash":              nil,
-		"last_error":                    nil,
-		"last_overlap_bytes":            0,
-		"last_delta_source":             nil,
-		"last_delta_size":               0,
-		"last_new_sample_lastmod":       nil,
-		"last_previous_first_lastmod":   nil,
-		"last_delta_payload_id":         nil,
+		"enabled":                                      config.Enabled,
+		"remoterocketship_urls":                        config.RemoteRocketshipUSJobSitemapURLs,
+		"interval_minutes":                             config.IntervalMinutes,
+		"sample_kb":                                    config.SampleKB,
+		"enabled_sources":                              sortedSourceNames(config.EnabledSources),
+		"workable_api_url":                             config.WorkableAPIURL,
+		"remotive_sitemap_url_template":                config.RemotiveSitemapURLTemplate,
+		"remotive_sitemap_max_index":                   config.RemotiveSitemapMaxIndex,
+		"remotive_sitemap_min_index":                   config.RemotiveSitemapMinIndex,
+		"dailyremote_base_url":                         config.DailyRemoteBaseURL,
+		"dailyremote_max_page":                         config.DailyRemoteMaxPage,
+		"dailyremote_pages_per_cycle":                  config.DailyRemotePagesPerCycle,
+		"remotedotco_sitemap_url":                      config.RemoteDotCoSitemapURL,
+		"hiringcafe_search_api_url":                    config.HiringCafeSearchAPIURL,
+		"hiringcafe_total_count_url":                   config.HiringCafeTotalCountURL,
+		"hiringcafe_page_size":                         config.HiringCafePageSize,
+		"running":                                      false,
+		"last_check_at":                                nil,
+		"last_change_at":                               nil,
+		"last_error":                                   nil,
+		"remoterocketship_last_sample_hash":            nil,
+		"remoterocketship_last_overlap_bytes":          0,
+		"remoterocketship_last_delta_source":           nil,
+		"remoterocketship_last_delta_size":             0,
+		"remoterocketship_last_new_sample_lastmod":     nil,
+		"remoterocketship_last_previous_first_lastmod": nil,
+		"remoterocketship_last_delta_payload_id":       nil,
 	}
 
-	svc.RemoteRocketShipUSJobsSitemapFetchSample = func(ctx context.Context) ([]byte, error) {
+	svc.RemoteRocketShipUSJobsSitemapFetchSample = func(ctx context.Context, sitemapURL string) ([]byte, error) {
 		sampleBytes := int64(max(config.SampleKB, 1) * 1024)
-		if data, err := svc.fetchBytesWithScraper(ctx, config.RemoteRocketshipUSJobSitemapURL, sampleBytes); err == nil {
+		if data, err := svc.fetchBytesWithScraper(ctx, sitemapURL, sampleBytes); err == nil {
 			if int64(len(data)) <= sampleBytes {
 				return data, nil
 			}
@@ -146,8 +146,8 @@ func New(config Config, db *database.DB) *Service {
 
 		return nil, errors.New("scraper fetch failed")
 	}
-	svc.RemoteRocketShipUSJobsSitemapFetchFull = func(ctx context.Context) ([]byte, error) {
-		if data, err := svc.fetchBytesWithScraper(ctx, config.RemoteRocketshipUSJobSitemapURL, 0); err == nil {
+	svc.RemoteRocketShipUSJobsSitemapFetchFull = func(ctx context.Context, sitemapURL string) ([]byte, error) {
+		if data, err := svc.fetchBytesWithScraper(ctx, sitemapURL, 0); err == nil {
 			return data, nil
 		}
 		return nil, errors.New("scraper fetch failed")
@@ -267,7 +267,7 @@ func (s *Service) RunOnceWithContext(ctx context.Context) error {
 		fn     func(context.Context) error
 	}
 	tasks := []task{}
-	if strings.TrimSpace(s.Config.RemoteRocketshipUSJobSitemapURL) != "" && s.isSourceEnabled(sourceRemoterocketship) {
+	if len(s.Config.RemoteRocketshipUSJobSitemapURLs) > 0 && s.isSourceEnabled(sourceRemoterocketship) {
 		tasks = append(tasks, task{
 			source: sourceRemoterocketship,
 			name:   "runOnceRemoteRocketship",
@@ -437,37 +437,68 @@ func (s *Service) runOnceDailyremote(ctx context.Context) error {
 }
 
 func (s *Service) runOnceRemoteRocketship(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
+	statePayload, err := s.loadStatePayload(ctx, sourceRemoterocketship)
+	if err != nil {
 		return err
 	}
+	sitemaps, _ := statePayload["sitemaps"].(map[string]any)
+	if sitemaps == nil {
+		sitemaps = map[string]any{}
+	}
+	stateDirty := false
+	for _, sitemapURL := range s.Config.RemoteRocketshipUSJobSitemapURLs {
+		if strings.TrimSpace(sitemapURL) == "" {
+			continue
+		}
+		changed, err := s.runOnceRemoteRocketshipSitemap(ctx, sitemapURL, sitemaps)
+		if changed {
+			stateDirty = true
+		}
+		if err != nil {
+			if stateDirty {
+				statePayload["sitemaps"] = sitemaps
+				_ = s.saveStatePayload(ctx, sourceRemoterocketship, statePayload)
+			}
+			return err
+		}
+	}
+	statePayload["last_scan_at"] = utcNowISO()
+	statePayload["sitemaps"] = sitemaps
+	return s.saveStatePayload(ctx, sourceRemoterocketship, statePayload)
+}
+
+func (s *Service) runOnceRemoteRocketshipSitemap(ctx context.Context, sitemapURL string, sitemaps map[string]any) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	logf := func(format string, args ...any) {
-		log.Printf("watcher RemoteRocketship "+format, args...)
+		log.Printf("watcher RemoteRocketship sitemap=%s "+format, append([]any{sitemapURL}, args...)...)
 	}
 	logf("sample_fetch_start")
-	sample, err := s.RemoteRocketShipUSJobsSitemapFetchSample(ctx)
+	sample, err := s.RemoteRocketShipUSJobsSitemapFetchSample(ctx, sitemapURL)
 	if err != nil {
 		logf("sample_fetch_failed error=%v", err)
 		s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
-		return err
+		return false, err
 	}
 	logf("sample_fetch_done bytes=%d", len(sample))
 
 	currentHash := sha256Hex(sample)
-	previousHash, previousFirstLastmod, _ := s.loadRemoteRocketshipState(ctx)
+	previousHash, previousFirstLastmod := loadRemoteRocketshipStateFromPayload(sitemaps, sitemapURL)
 	currentFirstLastmod := s.ExtractFirstLastmod(sample)
 	logf("sample_hash current=%s previous=%s", currentHash, previousHash)
 
 	s.setStatus(map[string]any{
-		"last_check_at":    utcNowISO(),
-		"last_sample_hash": currentHash,
-		"last_error":       nil,
+		"last_check_at":                     utcNowISO(),
+		"remoterocketship_last_sample_hash": currentHash,
+		"last_error":                        nil,
 	})
 
 	if currentHash == previousHash {
 		logf("sample_unchanged skip_delta")
-		_ = s.saveRemoteRocketshipState(ctx, currentHash, firstNonEmpty(currentFirstLastmod, previousFirstLastmod))
-		s.setStatus(map[string]any{"last_overlap_bytes": len(sample)})
-		return nil
+		saveRemoteRocketshipStateInPayload(sitemaps, sitemapURL, currentHash, firstNonEmpty(currentFirstLastmod, previousFirstLastmod))
+		s.setStatus(map[string]any{"remoterocketship_last_overlap_bytes": len(sample)})
+		return true, nil
 	}
 
 	newSampleLastmod := s.ExtractLastLastmod(sample)
@@ -491,23 +522,23 @@ func (s *Service) runOnceRemoteRocketship(ctx context.Context) error {
 		logf("delta_from_sample bytes=%d overlap=%d", len(deltaData), overlapBytes)
 		if len(deltaData) == 0 {
 			logf("delta_empty skip_payload")
-			_ = s.saveRemoteRocketshipState(ctx, currentHash, firstNonEmpty(currentFirstLastmod, previousFirstLastmod))
+			saveRemoteRocketshipStateInPayload(sitemaps, sitemapURL, currentHash, firstNonEmpty(currentFirstLastmod, previousFirstLastmod))
 			s.setStatus(map[string]any{
-				"last_change_at":              utcNowISO(),
-				"last_overlap_bytes":          overlapBytes,
-				"last_delta_size":             0,
-				"last_new_sample_lastmod":     emptyToNil(newSampleLastmod),
-				"last_previous_first_lastmod": emptyToNil(previousFirstLastmod),
-				"last_delta_payload_id":       nil,
+				"last_change_at":                               utcNowISO(),
+				"remoterocketship_last_overlap_bytes":          overlapBytes,
+				"remoterocketship_last_delta_size":             0,
+				"remoterocketship_last_new_sample_lastmod":     emptyToNil(newSampleLastmod),
+				"remoterocketship_last_previous_first_lastmod": emptyToNil(previousFirstLastmod),
+				"remoterocketship_last_delta_payload_id":       nil,
 			})
-			return nil
+			return true, nil
 		}
 	} else {
-		fullData, err = s.RemoteRocketShipUSJobsSitemapFetchFull(ctx)
+		fullData, err = s.RemoteRocketShipUSJobsSitemapFetchFull(ctx, sitemapURL)
 		if err != nil {
 			logf("full_fetch_failed error=%v", err)
 			s.setStatus(map[string]any{"last_check_at": utcNowISO(), "last_error": err.Error()})
-			return err
+			return false, err
 		}
 		deltaData = fullData
 		if previousFirstLastmod != "" {
@@ -521,30 +552,30 @@ func (s *Service) runOnceRemoteRocketship(ctx context.Context) error {
 	if len(fullData) > 0 && currentFirstLastmod == "" {
 		currentFirstLastmod = s.ExtractFirstLastmod(fullData)
 	}
-	_ = s.saveRemoteRocketshipState(ctx, currentHash, firstNonEmpty(currentFirstLastmod, previousFirstLastmod))
+	saveRemoteRocketshipStateInPayload(sitemaps, sitemapURL, currentHash, firstNonEmpty(currentFirstLastmod, previousFirstLastmod))
 
 	var payloadID any
 	if len(deltaData) > 0 {
 		logf("payload_save_start bytes=%d", len(deltaData))
-		saved, err := s.saveRemoteRocketshipDeltaPayload(ctx, string(deltaData))
+		saved, err := s.saveRemoteRocketshipDeltaPayload(ctx, sitemapURL, string(deltaData))
 		if err != nil {
 			logf("payload_save_failed error=%v", err)
-			return err
+			return false, err
 		}
 		payloadID = saved
 		logf("payload_saved payload_id=%v", payloadID)
 	}
 
 	s.setStatus(map[string]any{
-		"last_change_at":              utcNowISO(),
-		"last_overlap_bytes":          overlapBytes,
-		"last_delta_source":           deltaSource,
-		"last_delta_size":             len(deltaData),
-		"last_new_sample_lastmod":     emptyToNil(newSampleLastmod),
-		"last_previous_first_lastmod": emptyToNil(previousFirstLastmod),
-		"last_delta_payload_id":       payloadID,
+		"last_change_at":                               utcNowISO(),
+		"remoterocketship_last_overlap_bytes":          overlapBytes,
+		"remoterocketship_last_delta_source":           deltaSource,
+		"remoterocketship_last_delta_size":             len(deltaData),
+		"remoterocketship_last_new_sample_lastmod":     emptyToNil(newSampleLastmod),
+		"remoterocketship_last_previous_first_lastmod": emptyToNil(previousFirstLastmod),
+		"remoterocketship_last_delta_payload_id":       payloadID,
 	})
-	return nil
+	return true, nil
 }
 
 func (s *Service) runOnceRemoteDotCo(ctx context.Context) error {
@@ -1268,79 +1299,27 @@ func (s *Service) runOnceHiringCafe(ctx context.Context) error {
 	})
 }
 
-func (s *Service) loadRemoteRocketshipState(ctx context.Context) (string, string, error) {
-	if s.DB == nil {
-		return "", "", nil
-	}
+func loadRemoteRocketshipStateFromPayload(sitemaps map[string]any, sitemapURL string) (string, string) {
 	var sampleHash, firstLastmod string
-	var stateJSON sql.NullString
-	err := s.DB.SQL.QueryRowContext(
-		ctx,
-		`SELECT COALESCE(state_json::text, '')
-		 FROM watcher_states
-		 WHERE source = ?
-		 ORDER BY updated_at DESC, id DESC
-		 LIMIT 1`,
-		sourceRemoterocketship,
-	).Scan(&stateJSON)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", "", nil
-		}
-		return "", "", err
+	sitemapState, _ := sitemaps[sitemapURL].(map[string]any)
+	if sitemapState == nil {
+		return "", ""
 	}
-	if stateJSON.Valid && strings.TrimSpace(stateJSON.String) != "" {
-		payload := map[string]any{}
-		if err := json.Unmarshal([]byte(stateJSON.String), &payload); err == nil {
-			sampleHash, _ = payload["sample_hash"].(string)
-			firstLastmod, _ = payload["first_lastmod"].(string)
-		}
-	}
-	return sampleHash, firstLastmod, nil
+	sampleHash, _ = sitemapState["sample_hash"].(string)
+	firstLastmod, _ = sitemapState["first_lastmod"].(string)
+	return sampleHash, firstLastmod
 }
 
-func (s *Service) saveRemoteRocketshipState(ctx context.Context, sampleHash, firstLastmod string) error {
-	if s.DB == nil {
-		return nil
-	}
-	stateJSON := mustMarshalJSON(map[string]any{
-		"source_url":    s.Config.RemoteRocketshipUSJobSitemapURL,
+func saveRemoteRocketshipStateInPayload(sitemaps map[string]any, sitemapURL, sampleHash, firstLastmod string) {
+	sitemaps[sitemapURL] = map[string]any{
+		"source_url":    sitemapURL,
 		"sample_hash":   sampleHash,
 		"first_lastmod": emptyToNil(firstLastmod),
-	})
-	updatedAt := utcNowISO()
-	updateResult, err := s.DB.SQL.ExecContext(
-		ctx,
-		`UPDATE watcher_states
-		 SET state_json = ?, updated_at = ?
-		 WHERE source = ?`,
-		stateJSON,
-		updatedAt,
-		sourceRemoterocketship,
-	)
-	if err != nil {
-		return err
 	}
-	affected, err := updateResult.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected > 0 {
-		return nil
-	}
-	_, err = s.DB.SQL.ExecContext(
-		ctx,
-		`INSERT INTO watcher_states (source, state_json, updated_at)
-		 VALUES (?, ?, ?)`,
-		sourceRemoterocketship,
-		stateJSON,
-		updatedAt,
-	)
-	return err
 }
 
-func (s *Service) inferFileExtension() string {
-	parsed, err := url.Parse(s.Config.RemoteRocketshipUSJobSitemapURL)
+func (s *Service) inferFileExtension(sitemapURL string) string {
+	parsed, err := url.Parse(sitemapURL)
 	if err != nil {
 		return ".xml"
 	}
@@ -1351,7 +1330,7 @@ func (s *Service) inferFileExtension() string {
 	return ext
 }
 
-func (s *Service) saveRemoteRocketshipDeltaPayload(ctx context.Context, bodyText string) (int64, error) {
+func (s *Service) saveRemoteRocketshipDeltaPayload(ctx context.Context, sitemapURL, bodyText string) (int64, error) {
 	if s.DB == nil {
 		return 0, nil
 	}
@@ -1362,7 +1341,7 @@ func (s *Service) saveRemoteRocketshipDeltaPayload(ctx context.Context, bodyText
 		 VALUES (?, ?, ?, ?, ?)
 		 RETURNING id`,
 		sourceRemoterocketship,
-		s.Config.RemoteRocketshipUSJobSitemapURL,
+		sitemapURL,
 		payloadTypeXML,
 		bodyText,
 		utcNowISO(),

@@ -62,17 +62,17 @@ func buildService(t *testing.T) *Service {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	return New(Config{
-		Enabled:                         true,
-		RemoteRocketshipUSJobSitemapURL: "https://example.com/jobs.xml",
-		IntervalMinutes:                 1,
-		SampleKB:                        8,
-		TimeoutSeconds:                  30,
-		BuiltinBaseURL:                  "",
-		BuiltinMaxPage:                  1000,
-		BuiltinPagesPerCycle:            25,
-		HiringCafeSearchAPIURL:          "",
-		HiringCafeTotalCountURL:         "",
-		HiringCafePageSize:              200,
+		Enabled:                          true,
+		RemoteRocketshipUSJobSitemapURLs: []string{"https://example.com/jobs.xml"},
+		IntervalMinutes:                  1,
+		SampleKB:                         8,
+		TimeoutSeconds:                   30,
+		BuiltinBaseURL:                   "",
+		BuiltinMaxPage:                   1000,
+		BuiltinPagesPerCycle:             25,
+		HiringCafeSearchAPIURL:           "",
+		HiringCafeTotalCountURL:          "",
+		HiringCafePageSize:               200,
 		EnabledSources: map[string]struct{}{
 			sourceRemoterocketship: {},
 		},
@@ -148,9 +148,9 @@ func TestRunOnceSkipsDeltaFileWhenDeltaIsEmpty(t *testing.T) {
 <url><loc>https://example.com/a</loc><lastmod>2026-02-12T10:00:00+00:00</lastmod></url>
 </urlset>`)
 
-	service.RemoteRocketShipUSJobsSitemapFetchSample = func(context.Context) ([]byte, error) { return sample, nil }
-	service.RemoteRocketShipUSJobsSitemapFetchFull = func(context.Context) ([]byte, error) { return fullData, nil }
-	if _, err := service.DB.SQL.ExecContext(context.Background(), `INSERT INTO watcher_states (source, state_json, updated_at) VALUES (?, ?, ?)`, "remoterocketship", `{"source_url":"https://example.com/jobs.xml","sample_hash":"old-hash","first_lastmod":"2026-02-12T10:00:00+00:00"}`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+	service.RemoteRocketShipUSJobsSitemapFetchSample = func(context.Context, string) ([]byte, error) { return sample, nil }
+	service.RemoteRocketShipUSJobsSitemapFetchFull = func(context.Context, string) ([]byte, error) { return fullData, nil }
+	if _, err := service.DB.SQL.ExecContext(context.Background(), `INSERT INTO watcher_states (source, state_json, updated_at) VALUES (?, ?, ?)`, "remoterocketship", `{"sitemaps":{"https://example.com/jobs.xml":{"source_url":"https://example.com/jobs.xml","sample_hash":"old-hash","first_lastmod":"2026-02-12T10:00:00+00:00"}}}`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -158,11 +158,11 @@ func TestRunOnceSkipsDeltaFileWhenDeltaIsEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	status := service.Status()
-	if status["last_delta_payload_id"] != nil {
-		t.Fatalf("expected nil delta payload id, got %#v", status["last_delta_payload_id"])
+	if status["remoterocketship_last_delta_payload_id"] != nil {
+		t.Fatalf("expected nil delta payload id, got %#v", status["remoterocketship_last_delta_payload_id"])
 	}
-	if status["last_delta_size"].(int) != 0 {
-		t.Fatalf("expected zero delta size, got %#v", status["last_delta_size"])
+	if status["remoterocketship_last_delta_size"].(int) != 0 {
+		t.Fatalf("expected zero delta size, got %#v", status["remoterocketship_last_delta_size"])
 	}
 }
 
@@ -174,9 +174,9 @@ func TestRunOnceUsesSampleDeltaWithoutFullFetch(t *testing.T) {
 <url><loc>https://example.com/old</loc><lastmod>2026-02-12T10:00:00+00:00</lastmod></url>
 </urlset>`)
 
-	service.RemoteRocketShipUSJobsSitemapFetchSample = func(context.Context) ([]byte, error) { return sample, nil }
-	service.RemoteRocketShipUSJobsSitemapFetchFull = func(context.Context) ([]byte, error) { return nil, errors.New("full fetch should not be called") }
-	if _, err := service.DB.SQL.ExecContext(context.Background(), `INSERT INTO watcher_states (source, state_json, updated_at) VALUES (?, ?, ?)`, "remoterocketship", `{"source_url":"https://example.com/jobs.xml","sample_hash":"old-hash","first_lastmod":"2026-02-12T10:00:00+00:00"}`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+	service.RemoteRocketShipUSJobsSitemapFetchSample = func(context.Context, string) ([]byte, error) { return sample, nil }
+	service.RemoteRocketShipUSJobsSitemapFetchFull = func(context.Context, string) ([]byte, error) { return nil, errors.New("full fetch should not be called") }
+	if _, err := service.DB.SQL.ExecContext(context.Background(), `INSERT INTO watcher_states (source, state_json, updated_at) VALUES (?, ?, ?)`, "remoterocketship", `{"sitemaps":{"https://example.com/jobs.xml":{"source_url":"https://example.com/jobs.xml","sample_hash":"old-hash","first_lastmod":"2026-02-12T10:00:00+00:00"}}}`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -185,14 +185,55 @@ func TestRunOnceUsesSampleDeltaWithoutFullFetch(t *testing.T) {
 	}
 
 	status := service.Status()
-	if status["last_delta_source"] != "sample_lastmod_window" {
-		t.Fatalf("expected sample_lastmod_window source, got %#v", status["last_delta_source"])
+	if status["remoterocketship_last_delta_source"] != "sample_lastmod_window" {
+		t.Fatalf("expected sample_lastmod_window source, got %#v", status["remoterocketship_last_delta_source"])
 	}
-	if status["last_delta_payload_id"] == nil {
-		t.Fatalf("expected delta payload id, got %#v", status["last_delta_payload_id"])
+	if status["remoterocketship_last_delta_payload_id"] == nil {
+		t.Fatalf("expected delta payload id, got %#v", status["remoterocketship_last_delta_payload_id"])
 	}
-	if status["last_delta_size"].(int) == 0 {
+	if status["remoterocketship_last_delta_size"].(int) == 0 {
 		t.Fatalf("expected non-zero delta size")
+	}
+}
+
+func TestRunOnceRemoteRocketshipPersistsStateInDB(t *testing.T) {
+	service := buildService(t)
+	sample := []byte(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<url><loc>https://example.com/new</loc><lastmod>2026-02-12T11:00:00+00:00</lastmod></url>
+</urlset>`)
+
+	service.RemoteRocketShipUSJobsSitemapFetchSample = func(context.Context, string) ([]byte, error) { return sample, nil }
+	service.RemoteRocketShipUSJobsSitemapFetchFull = func(context.Context, string) ([]byte, error) { return sample, nil }
+
+	if err := service.RunOnce(); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := service.loadStatePayload(context.Background(), sourceRemoterocketship)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lastScanAt, _ := state["last_scan_at"].(string)
+	if lastScanAt == "" {
+		t.Fatalf("expected last_scan_at to be stored, got %#v", state["last_scan_at"])
+	}
+	sitemaps, _ := state["sitemaps"].(map[string]any)
+	if sitemaps == nil {
+		t.Fatalf("expected sitemaps state, got %#v", state["sitemaps"])
+	}
+	sitemapState, _ := sitemaps["https://example.com/jobs.xml"].(map[string]any)
+	if sitemapState == nil {
+		t.Fatalf("expected stored sitemap state, got %#v", sitemaps)
+	}
+	if sitemapState["source_url"] != "https://example.com/jobs.xml" {
+		t.Fatalf("unexpected source_url %#v", sitemapState["source_url"])
+	}
+	if sitemapState["sample_hash"] == "" {
+		t.Fatalf("expected sample_hash to be stored, got %#v", sitemapState["sample_hash"])
+	}
+	if sitemapState["first_lastmod"] != "2026-02-12T11:00:00+00:00" {
+		t.Fatalf("unexpected first_lastmod %#v", sitemapState["first_lastmod"])
 	}
 }
 
@@ -201,11 +242,11 @@ func TestRunForeverRunOnceExecutesSingleCycle(t *testing.T) {
 	sample := []byte(`<urlset><url><loc>https://example.com/a</loc><lastmod>2026-02-12T10:00:00+00:00</lastmod></url></urlset>`)
 	sampleCalls := 0
 	fullCalls := 0
-	service.RemoteRocketShipUSJobsSitemapFetchSample = func(context.Context) ([]byte, error) {
+	service.RemoteRocketShipUSJobsSitemapFetchSample = func(context.Context, string) ([]byte, error) {
 		sampleCalls++
 		return sample, nil
 	}
-	service.RemoteRocketShipUSJobsSitemapFetchFull = func(context.Context) ([]byte, error) {
+	service.RemoteRocketShipUSJobsSitemapFetchFull = func(context.Context, string) ([]byte, error) {
 		fullCalls++
 		return sample, nil
 	}
