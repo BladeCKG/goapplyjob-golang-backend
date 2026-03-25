@@ -40,18 +40,24 @@ func (h *Handler) Register(router gin.IRouter) {
 	router.GET("/admin/status", h.status)
 	router.GET("/admin/users", h.listUsers)
 	router.PATCH("/admin/users/:userID/subscription", h.upsertUserSubscription)
+	router.DELETE("/admin/users/:userID", h.deleteUser)
 	router.POST("/admin/users/marketing-email", h.sendMarketingEmail)
 	router.GET("/admin/watcher-payloads", h.listWatcherPayloads)
 	router.PATCH("/admin/watcher-payloads/:payloadID", h.updateWatcherPayload)
+	router.DELETE("/admin/watcher-payloads/:payloadID", h.deleteWatcherPayload)
 	router.GET("/admin/raw-us-jobs", h.listRawUSJobs)
 	router.PATCH("/admin/raw-us-jobs/:jobID", h.updateRawUSJob)
+	router.DELETE("/admin/raw-us-jobs/:jobID", h.deleteRawUSJob)
 	router.GET("/admin/watcher-states", h.listWatcherStates)
 	router.PATCH("/admin/watcher-states/:stateID", h.updateWatcherState)
+	router.DELETE("/admin/watcher-states/:stateID", h.deleteWatcherState)
 	router.GET("/admin/parsed-jobs", h.listParsedJobs)
 	router.POST("/admin/parsed-jobs/:jobID/auto-categorize", h.autoCategorizeParsedJob)
 	router.PATCH("/admin/parsed-jobs/:jobID", h.updateParsedJob)
+	router.DELETE("/admin/parsed-jobs/:jobID", h.deleteParsedJob)
 	router.GET("/admin/parsed-companies", h.listParsedCompanies)
 	router.PATCH("/admin/parsed-companies/:companyID", h.updateParsedCompany)
+	router.DELETE("/admin/parsed-companies/:companyID", h.deleteParsedCompany)
 }
 
 func (h *Handler) status(c *gin.Context) {
@@ -256,6 +262,86 @@ func (h *Handler) upsertUserSubscription(c *gin.Context) {
 		"ends_at":   payload.EndsAt,
 		"is_active": isActive && isFutureTimestamp(payload.EndsAt),
 	})
+}
+
+func (h *Handler) deleteUser(c *gin.Context) {
+	if _, ok := h.requireAdmin(c); !ok {
+		return
+	}
+	userID, err := strconv.ParseInt(c.Param("userID"), 10, 64)
+	if err != nil || userID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid user id"})
+		return
+	}
+	tx, err := h.db.SQL.BeginTx(c.Request.Context(), nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to delete user"})
+		return
+	}
+	defer tx.Rollback()
+
+	var exists int64
+	if err := tx.QueryRowContext(c.Request.Context(), `SELECT id FROM auth_users WHERE id = ? LIMIT 1`, userID).Scan(&exists); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "User not found"})
+		return
+	}
+
+	ownedOrgQuery := `SELECT id FROM employer_organizations WHERE created_by_user_id = ?`
+	if _, err := tx.ExecContext(c.Request.Context(),
+		`DELETE FROM employer_job_audit_events
+		  WHERE actor_user_id = ?
+		     OR employer_job_id IN (
+		          SELECT id
+		            FROM employer_jobs
+		           WHERE created_by_user_id = ?
+		              OR organization_id IN (`+ownedOrgQuery+`)
+		     )`,
+		userID, userID, userID,
+	); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to delete user"})
+		return
+	}
+	if _, err := tx.ExecContext(c.Request.Context(),
+		`DELETE FROM employer_jobs
+		  WHERE created_by_user_id = ?
+		     OR organization_id IN (`+ownedOrgQuery+`)`,
+		userID, userID,
+	); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to delete user"})
+		return
+	}
+	if _, err := tx.ExecContext(c.Request.Context(),
+		`DELETE FROM employer_organization_members
+		  WHERE user_id = ?
+		     OR organization_id IN (`+ownedOrgQuery+`)`,
+		userID, userID,
+	); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to delete user"})
+		return
+	}
+	if _, err := tx.ExecContext(c.Request.Context(), `DELETE FROM employer_organizations WHERE created_by_user_id = ?`, userID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to delete user"})
+		return
+	}
+	for _, query := range []string{
+		`DELETE FROM user_job_actions WHERE user_id = ?`,
+		`DELETE FROM pricing_payments WHERE user_id = ?`,
+		`DELETE FROM user_subscriptions WHERE user_id = ?`,
+		`DELETE FROM auth_sessions WHERE user_id = ?`,
+		`DELETE FROM auth_verification_codes WHERE user_id = ?`,
+		`DELETE FROM auth_password_credentials WHERE user_id = ?`,
+		`DELETE FROM auth_users WHERE id = ?`,
+	} {
+		if _, err := tx.ExecContext(c.Request.Context(), query, userID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to delete user"})
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to delete user"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"deleted": true, "id": userID})
 }
 
 func (h *Handler) sendMarketingEmail(c *gin.Context) {
@@ -495,6 +581,28 @@ func (h *Handler) updateWatcherPayload(c *gin.Context) {
 		return
 	}
 	h.respondWatcherPayload(c, payloadID)
+}
+
+func (h *Handler) deleteWatcherPayload(c *gin.Context) {
+	if _, ok := h.requireAdmin(c); !ok {
+		return
+	}
+	payloadID, err := strconv.ParseInt(c.Param("payloadID"), 10, 64)
+	if err != nil || payloadID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid payload id"})
+		return
+	}
+	result, err := h.db.SQL.ExecContext(c.Request.Context(), `DELETE FROM watcher_payloads WHERE id = ?`, payloadID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to delete watcher payload"})
+		return
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "Watcher payload not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"deleted": true, "id": payloadID})
 }
 
 func (h *Handler) listRawUSJobs(c *gin.Context) {
@@ -760,6 +868,28 @@ func (h *Handler) updateWatcherState(c *gin.Context) {
 	h.respondWatcherState(c, stateID)
 }
 
+func (h *Handler) deleteWatcherState(c *gin.Context) {
+	if _, ok := h.requireAdmin(c); !ok {
+		return
+	}
+	stateID, err := strconv.ParseInt(c.Param("stateID"), 10, 64)
+	if err != nil || stateID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid watcher state id"})
+		return
+	}
+	result, err := h.db.SQL.ExecContext(c.Request.Context(), `DELETE FROM watcher_states WHERE id = ?`, stateID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to delete watcher state"})
+		return
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "Watcher state not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"deleted": true, "id": stateID})
+}
+
 func (h *Handler) listParsedJobs(c *gin.Context) {
 	if _, ok := h.requireAdmin(c); !ok {
 		return
@@ -1022,6 +1152,28 @@ func (h *Handler) updateParsedJob(c *gin.Context) {
 	h.listParsedJobs(c)
 }
 
+func (h *Handler) deleteParsedJob(c *gin.Context) {
+	if _, ok := h.requireAdmin(c); !ok {
+		return
+	}
+	jobID, err := strconv.ParseInt(c.Param("jobID"), 10, 64)
+	if err != nil || jobID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid parsed job id"})
+		return
+	}
+	result, err := h.db.SQL.ExecContext(c.Request.Context(), `DELETE FROM parsed_jobs WHERE id = ?`, jobID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to delete parsed job"})
+		return
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "Parsed job not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"deleted": true, "id": jobID})
+}
+
 func (h *Handler) autoCategorizeParsedJob(c *gin.Context) {
 	if _, ok := h.requireAdmin(c); !ok {
 		return
@@ -1234,6 +1386,54 @@ func (h *Handler) updateParsedCompany(c *gin.Context) {
 	req.URL.RawQuery = q.Encode()
 	c.Request = req
 	h.listParsedCompanies(c)
+}
+
+func (h *Handler) deleteParsedCompany(c *gin.Context) {
+	if _, ok := h.requireAdmin(c); !ok {
+		return
+	}
+	companyID, err := strconv.ParseInt(c.Param("companyID"), 10, 64)
+	if err != nil || companyID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid parsed company id"})
+		return
+	}
+	result, err := h.db.SQL.ExecContext(c.Request.Context(), `DELETE FROM parsed_companies WHERE id = ?`, companyID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to delete parsed company"})
+		return
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "Parsed company not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"deleted": true, "id": companyID})
+}
+
+func (h *Handler) deleteRawUSJob(c *gin.Context) {
+	if _, ok := h.requireAdmin(c); !ok {
+		return
+	}
+	jobID, err := strconv.ParseInt(c.Param("jobID"), 10, 64)
+	if err != nil || jobID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid raw job id"})
+		return
+	}
+	result, err := h.db.SQL.ExecContext(c.Request.Context(), `DELETE FROM raw_us_jobs WHERE id = ?`, jobID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to delete raw job"})
+		return
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to delete raw job"})
+		return
+	}
+	if affected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "Raw job not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"deleted": true, "id": jobID})
 }
 
 func (h *Handler) respondWatcherPayload(c *gin.Context, id int64) {

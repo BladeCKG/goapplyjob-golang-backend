@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS auth_verification_codes (
 
 CREATE TABLE IF NOT EXISTS parsed_jobs (
     id SERIAL PRIMARY KEY,
-    raw_us_job_id INTEGER NOT NULL UNIQUE REFERENCES raw_us_jobs(id),
+    raw_us_job_id INTEGER NOT NULL UNIQUE REFERENCES raw_us_jobs(id) ON DELETE CASCADE,
     company_id INTEGER REFERENCES parsed_companies(id) ON DELETE CASCADE,
     external_job_id TEXT,
     created_at_source TIMESTAMPTZ,
