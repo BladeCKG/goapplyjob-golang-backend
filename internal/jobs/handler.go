@@ -543,6 +543,46 @@ func buildLocationTypes(rows []string) []string {
 	return rows
 }
 
+func parseJSONTextArray(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return nil
+	}
+	return values
+}
+
+func (h *Handler) listDistinctLocationCountryRows(ctx context.Context) ([][2][]string, error) {
+	rows, err := h.db.SQL.QueryContext(ctx, `
+		SELECT DISTINCT
+			COALESCE(location_countries::text, '')
+		FROM parsed_jobs
+		WHERE location_countries IS NOT NULL
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	locationRows := [][2][]string{}
+	for rows.Next() {
+		var rawCountries string
+		if err := rows.Scan(&rawCountries); err != nil {
+			return nil, err
+		}
+		locationRows = append(locationRows, [2][]string{
+			nil,
+			parseJSONTextArray(rawCountries),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return locationRows, nil
+}
+
 func (h *Handler) getMaxParsedJobID(ctx context.Context) (sql.NullInt64, error) {
 	maxID, err := h.q.GetMaxParsedJobID(ctx)
 	if err != nil {
@@ -599,6 +639,10 @@ func (h *Handler) refreshFilterCache(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	locationCountryRows, err := h.listDistinctLocationCountryRows(ctx)
+	if err != nil {
+		return err
+	}
 	locationTypeRowsRaw, err := h.q.ListDistinctLocationTypes(ctx)
 	if err != nil {
 		return err
@@ -614,11 +658,13 @@ func (h *Handler) refreshFilterCache(ctx context.Context) error {
 
 	h.filterCache.jobCategoryParents = buildJobCategoryParentsMap(categoryRows)
 	parsed.SetCachedGroqCategorizedJobTitles(categoryTitles, categoryFunctions)
-	locationParents := map[string][]string{}
+	locationParents := buildLocationParentsMap(locationCountryRows)
 	for _, state := range locationnorm.USStateNames() {
 		locationParents[state] = []string{unitedStatesCountry}
 	}
-	locationParents[unitedStatesCountry] = []string{}
+	if _, ok := locationParents[unitedStatesCountry]; !ok {
+		locationParents[unitedStatesCountry] = []string{}
+	}
 	h.filterCache.locationParents = locationParents
 	h.filterCache.techStacks = buildTechStacks(techRows)
 	h.filterCache.locationTypes = buildLocationTypes(locationRows)
