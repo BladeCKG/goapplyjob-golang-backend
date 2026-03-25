@@ -41,6 +41,15 @@ func TestParseRawHTMLNonUSSkip(t *testing.T) {
 	}
 }
 
+func TestParseRawHTMLDoesNotInventUnitedStatesWhenCountriesMissing(t *testing.T) {
+	html := `<script type="application/ld+json">{"@type":"JobPosting","url":"https://dailyremote.com/remote-job/test-12346","datePosted":"2026-03-01T12:00:00Z","title":"Role","description":"Desc","employmentType":"full_time","jobLocationType":"TELECOMMUTE","applicantLocationRequirements":[{"@type":"Country"}],"hiringOrganization":{"@type":"Organization","name":"Acme","sameAs":"https://acme.example"}}</script>`
+	payload := ParseRawHTML(html, "https://dailyremote.com/remote-job/test-12346")
+	values, _ := payload["locationCountries"].([]string)
+	if len(values) != 0 {
+		t.Fatalf("expected empty locationCountries, got %#v", payload["locationCountries"])
+	}
+}
+
 func TestToTargetJobURL(t *testing.T) {
 	target := ToTargetJobURL("https://dailyremote.com/remote-job/backend-engineer-12345?ref=a#section")
 	if !strings.Contains(target, "/apply/12345") {

@@ -258,9 +258,6 @@ func extractLocationCountries(value any) []string {
 		seen[key] = struct{}{}
 		out = append(out, normalized)
 	}
-	if len(out) == 0 {
-		out = append(out, "United States")
-	}
 	return out
 }
 

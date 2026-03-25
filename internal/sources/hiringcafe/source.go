@@ -2,7 +2,6 @@ package hiringcafe
 
 import (
 	"goapplyjob-golang-backend/internal/employmentnorm"
-	"goapplyjob-golang-backend/internal/locationnorm"
 	"goapplyjob-golang-backend/internal/sources/remoterocketship"
 	"net/url"
 	"regexp"
@@ -134,10 +133,6 @@ func NormalizeJobs(results []map[string]any) []NormalizedJob {
 		if !isEntry && !isJunior && !isMid && !isSenior && !isLead {
 			isMid = true
 		}
-		locationCountry := locationnorm.NormalizeCountryName("United States", true)
-		if locationCountry == "" {
-			locationCountry = "United States"
-		}
 		normalized = append(normalized, NormalizedJob{
 			URL:      rawURL,
 			PostDate: *postDate,
@@ -147,12 +142,10 @@ func NormalizeJobs(results []map[string]any) []NormalizedJob {
 				"url":              valueString(item["apply_url"]),
 				"roleTitle":        roleTitle,
 				"employmentType":   normalizeEmploymentType(valueStringSlice(v5Data["commitment"])),
-				"location":         locationCountry,
+				"location":         nil,
 				"locationCity":     nil,
 				"locationUSStates": []string{},
-				"locationCountries": []string{
-					locationCountry,
-				},
+				"locationCountries": []string{},
 				"isEntryLevel": isEntry,
 				"isJunior":     isJunior,
 				"isMidLevel":   isMid,

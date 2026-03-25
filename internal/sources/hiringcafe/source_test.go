@@ -25,4 +25,11 @@ func TestNormalizeJobsDetectsSeniorFromSrWithPeriodInTitle(t *testing.T) {
 	if payload["isSenior"] != true || payload["isMidLevel"] != false {
 		t.Fatalf("unexpected seniority flags %#v", payload)
 	}
+	if payload["location"] != nil {
+		t.Fatalf("expected nil location when country is not provided, got %#v", payload["location"])
+	}
+	locationCountries, _ := payload["locationCountries"].([]string)
+	if len(locationCountries) != 0 {
+		t.Fatalf("expected empty locationCountries, got %#v", payload["locationCountries"])
+	}
 }
