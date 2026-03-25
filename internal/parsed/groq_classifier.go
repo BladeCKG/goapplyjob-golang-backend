@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/json"
+	"goapplyjob-golang-backend/internal/config"
 	"html"
 	"io"
 	"log"
@@ -17,8 +18,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"goapplyjob-golang-backend/internal/config"
 )
 
 const (
@@ -27,15 +26,15 @@ const (
 	envGroqModel                  = "GROQ_MODEL"
 	envGroqClassifierPromptSource = "GROQ_CLASSIFIER_PROMPT_SOURCE"
 
-	defaultGroqModel                = "moonshotai/kimi-k2-instruct-0905"
+	defaultGroqModel                = "openai/gpt-oss-120b"
 	defaultGroqClassifierPromptPath = "internal/parsed/prompts/job_title_classification.txt"
 )
 
 var groq503FallbackModels = []string{
-	"moonshotai/kimi-k2-instruct-0905",
+	"openai/gpt-oss-120b",
 	"openai/gpt-oss-20b",
 	"openai/gpt-oss-safeguard-20b",
-	"openai/gpt-oss-120b",
+	"moonshotai/kimi-k2-instruct-0905",
 	// "meta-llama/llama-4-scout-17b-16e-instruct", //--- IGNORE --- does not support strict mode
 }
 

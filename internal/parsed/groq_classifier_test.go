@@ -2,6 +2,7 @@ package parsed
 
 import (
 	"context"
+	"encoding/json"
 	"goapplyjob-golang-backend/internal/database"
 	"io"
 	"net/http"
@@ -128,6 +129,11 @@ func TestClassifySyncRotatesModelOn503(t *testing.T) {
 	t.Setenv(envGroqModel, "openai/gpt-oss-20b")
 
 	requestModels := make([]string, 0, 2)
+	models := collectGroqModels()
+	if len(models) < 2 {
+		t.Fatalf("expected at least two configured Groq models, got %d", len(models))
+	}
+
 	classifier := &GroqJobClassifier{
 		HTTPClient: &http.Client{
 			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -135,8 +141,13 @@ func TestClassifySyncRotatesModelOn503(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				requestModels = append(requestModels, string(body))
-				if strings.Contains(string(body), `"model":"openai/gpt-oss-20b"`) {
+				var payload map[string]any
+				if err := json.Unmarshal(body, &payload); err != nil {
+					t.Fatal(err)
+				}
+				model, _ := payload["model"].(string)
+				requestModels = append(requestModels, model)
+				if model == models[0] {
 					return &http.Response{
 						StatusCode: http.StatusServiceUnavailable,
 						Body:       io.NopCloser(strings.NewReader(`{"error":"temporarily unavailable"}`)),
@@ -164,7 +175,10 @@ func TestClassifySyncRotatesModelOn503(t *testing.T) {
 	if len(requestModels) < 2 {
 		t.Fatalf("expected at least two model attempts, got %d", len(requestModels))
 	}
-	if !strings.Contains(requestModels[1], `"model":"moonshotai/kimi-k2-instruct-0905"`) {
-		t.Fatalf("expected second attempt to rotate to current first fallback model, got %s", requestModels[1])
+	if requestModels[0] != models[0] {
+		t.Fatalf("expected first attempt to use primary model %q, got %q", models[0], requestModels[0])
+	}
+	if requestModels[1] != models[1] {
+		t.Fatalf("expected second attempt to rotate to %q, got %q", models[1], requestModels[1])
 	}
 }
