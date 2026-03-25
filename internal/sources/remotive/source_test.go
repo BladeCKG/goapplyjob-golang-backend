@@ -15,20 +15,21 @@ func TestParseImportRowsFromRemotivePayload(t *testing.T) {
 	}
 }
 
-func TestParseRawHTMLSkipsNonUS(t *testing.T) {
+func TestParseRawHTMLKeepsNonUSLocationCountries(t *testing.T) {
 	htmlText := `
 <html><head>
 <script type="application/ld+json">
 {"@type":"JobPosting","title":"Backend Engineer","description":"<p>Build.</p>","applicantLocationRequirements":{"@type":"Country","name":"Canada"}}
 </script>
-</head></html>`
+</head><body><h1>Backend Engineer</h1><p class="tw-mt-4 tw-text-sm">Example Co is hiring a remote Backend Engineer. Location: Canada.</p></body></html>`
 	payload := ParseRawHTML(htmlText, "https://remotive.com/job-123")
-	if payload["_skip_for_non_us"] != true {
-		t.Fatalf("expected non-us skip marker, got %#v", payload)
+	countries, _ := payload["locationCountries"].([]string)
+	if len(countries) != 1 || countries[0] != "Canada" {
+		t.Fatalf("expected Canada locationCountries, got %#v", payload["locationCountries"])
 	}
 }
 
-func TestParseRawHTMLSkipsWhenLocationCountriesMissing(t *testing.T) {
+func TestParseRawHTMLKeepsPayloadWhenLocationCountriesMissing(t *testing.T) {
 	htmlText := `
 <html><head>
 <script type="application/ld+json">
@@ -36,8 +37,8 @@ func TestParseRawHTMLSkipsWhenLocationCountriesMissing(t *testing.T) {
 </script>
 </head></html>`
 	payload := ParseRawHTML(htmlText, "https://remotive.com/job-123")
-	if payload["_skip_for_non_us"] != true {
-		t.Fatalf("expected skip marker when location is missing, got %#v", payload)
+	if len(payload) == 0 {
+		t.Fatalf("expected payload when locationCountries are missing, got %#v", payload)
 	}
 }
 
@@ -119,7 +120,7 @@ func TestParseRawHTMLExtractsCountriesFromLocationComponentFixtures(t *testing.T
 		{name: "russia", fileName: "raw-job-1.html", want: []string{"Russian Federation"}},
 		{name: "regional plus israel", fileName: "raw-job-2.html", want: []string{"Americas", "Europe", "Israel"}},
 		{name: "worldwide", fileName: "raw-job-3.html", want: []string{"Worldwide"}},
-		{name: "usa and canada", fileName: "raw-job-4.html", want: []string{"United States", "Canada", "USA timezones"}},
+		{name: "usa and canada", fileName: "raw-job-4.html", want: []string{"United States", "Canada", "USA Timezones"}},
 	}
 
 	for _, tc := range tests {

@@ -52,9 +52,6 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 		return map[string]any{}
 	}
 	locationCountries := extractLocationCountriesFromLocationComponent(htmlText)
-	if !containsIgnoreCase(locationCountries, "United States") {
-		return map[string]any{"_skip_for_non_us": true, "locationCountries": locationCountries}
-	}
 	postedAt := extractPublicationDate(htmlText)
 	if postedAt == "" {
 		postedAt = parseISO(stringValue(jobPosting["datePosted"]))
@@ -198,7 +195,7 @@ func extractLocationCountries(value any) []string {
 	out := []string{}
 	seen := map[string]struct{}{}
 	appendCountry := func(raw string) {
-		country := locationnorm.NormalizeCountryName(raw, true)
+		country := locationnorm.NormalizeCountryName(raw)
 		if country == "" {
 			return
 		}
@@ -301,7 +298,7 @@ func normalizeLocationCountries(locationText string) []string {
 		if candidate == "" {
 			return
 		}
-		country := locationnorm.NormalizeCountryName(candidate, false)
+		country := locationnorm.NormalizeCountryName(candidate)
 		value := candidate
 		if country != "" {
 			value = country

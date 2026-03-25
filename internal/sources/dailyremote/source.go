@@ -142,9 +142,6 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 		return map[string]any{}
 	}
 	locationCountries := extractLocationCountries(jobPosting["applicantLocationRequirements"])
-	if len(locationCountries) > 0 && !containsIgnoreCase(locationCountries, "United States") {
-		return map[string]any{"_skip_for_non_us": true, "locationCountries": locationCountries}
-	}
 	externalID := extractExternalID(jobPosting, sourceURL)
 	roleTitle := normalizeText(jobPosting["title"])
 	roleDescription := decodeHTMLText(stringValue(jobPosting["description"]))
@@ -247,7 +244,7 @@ func extractLocationCountries(value any) []string {
 		if countryName == "" {
 			continue
 		}
-		normalized := locationnorm.NormalizeCountryName(countryName, true)
+		normalized := locationnorm.NormalizeCountryName(countryName)
 		if normalized == "" {
 			continue
 		}

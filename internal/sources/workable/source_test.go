@@ -111,3 +111,32 @@ func TestNormalizeJobsNormalizesNumericCompanyIDToString(t *testing.T) {
 		t.Fatalf("expected company.id string, got %#v", company["id"])
 	}
 }
+
+func TestNormalizeJobsNormalizesLocationStateAndCountry(t *testing.T) {
+	rows, skipped := NormalizeJobs(`{
+		"jobs": [{
+			"url": "https://jobs.workable.com/view/a",
+			"title": "Backend Engineer",
+			"created": "2026-02-18T03:21:08.178Z",
+			"updated": "2026-02-18T03:21:08.178Z",
+			"company": {"title": "Acme", "website": "https://acme.com"},
+			"location": {"city": "San Francisco", "subregion": "CA", "countryName": "USA"},
+			"locations": ["San Francisco, CA, USA"]
+		}]
+	}`)
+	if skipped != 0 || len(rows) != 1 {
+		t.Fatalf("unexpected rows skipped=%d len=%d", skipped, len(rows))
+	}
+	rawPayload, _ := rows[0]["raw_payload"].(map[string]any)
+	states, _ := rawPayload["locationUSStates"].([]string)
+	if len(states) != 1 || states[0] != "California" {
+		t.Fatalf("expected normalized locationUSStates, got %#v", rawPayload["locationUSStates"])
+	}
+	countries, _ := rawPayload["locationCountries"].([]string)
+	if len(countries) != 1 || countries[0] != "United States" {
+		t.Fatalf("expected normalized locationCountries, got %#v", rawPayload["locationCountries"])
+	}
+	if rawPayload["location"] != "San Francisco, California, United States" {
+		t.Fatalf("expected normalized location, got %#v", rawPayload["location"])
+	}
+}

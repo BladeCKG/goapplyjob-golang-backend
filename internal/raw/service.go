@@ -432,16 +432,6 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 						atomic.AddInt64(&processed, 1)
 						continue
 					}
-					if skipNonUS, _ := payload["_skip_for_non_us"].(bool); skipNonUS {
-						log.Printf("raw-us-job-worker parse_skipped_non_us job_id=%d source=%s", job.id, job.source)
-						if err := setSkippable(job.id); err != nil {
-							reportErr(err)
-							return
-						}
-						atomic.AddInt64(&processed, 1)
-						continue
-					}
-
 					extraPayload := parseExtraJSON(job.extraJSON)
 					if len(extraPayload) > 0 {
 						for key, value := range extraPayload {

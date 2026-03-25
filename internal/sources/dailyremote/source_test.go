@@ -33,11 +33,12 @@ func TestExtractJobListings(t *testing.T) {
 	}
 }
 
-func TestParseRawHTMLNonUSSkip(t *testing.T) {
+func TestParseRawHTMLKeepsNonUSLocationCountries(t *testing.T) {
 	html := `<script type="application/ld+json">{"@type":"JobPosting","url":"https://dailyremote.com/remote-job/test-12345","datePosted":"2026-03-01T12:00:00Z","title":"Role","description":"Desc","employmentType":"full_time","jobLocationType":"TELECOMMUTE","applicantLocationRequirements":[{"@type":"Country","name":"Germany"}],"hiringOrganization":{"@type":"Organization","name":"Acme","sameAs":"https://acme.example"}}</script>`
 	payload := ParseRawHTML(html, "https://dailyremote.com/remote-job/test-12345")
-	if skip, _ := payload["_skip_for_non_us"].(bool); !skip {
-		t.Fatalf("expected non-us skip payload, got %#v", payload)
+	values, _ := payload["locationCountries"].([]string)
+	if len(values) != 1 || values[0] != "Germany" {
+		t.Fatalf("expected Germany locationCountries, got %#v", payload["locationCountries"])
 	}
 }
 

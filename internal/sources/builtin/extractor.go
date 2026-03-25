@@ -1466,7 +1466,7 @@ func extractLocationParts(jobPosting map[string]any) ([]string, any, string) {
 		address, _ := entry["address"].(map[string]any)
 		locality := stringValue(address["addressLocality"])
 		region := stringValue(address["addressRegion"])
-		country := locationnorm.NormalizeCountryName(stringValue(address["addressCountry"]), true)
+		country := locationnorm.NormalizeCountryName(stringValue(address["addressCountry"]))
 		if idx == 0 {
 			firstLocality = locality
 		}
@@ -1645,9 +1645,9 @@ func extractLocationFields(jobPosting map[string]any) (any, any, any, any) {
 	case hasUSLocation || hasUSApplicant:
 		primaryCountry = "United States"
 	case len(countriesFromLocations) > 0:
-		primaryCountry = locationnorm.NormalizeCountryName(countriesFromLocations[0], true)
+		primaryCountry = locationnorm.NormalizeCountryName(countriesFromLocations[0])
 	case applicantCountryLabel != "":
-		primaryCountry = locationnorm.NormalizeCountryName(applicantCountryLabel, true)
+		primaryCountry = locationnorm.NormalizeCountryName(applicantCountryLabel)
 	}
 	locationLabel := any(nil)
 	if strings.TrimSpace(primaryCountry) != "" {
@@ -1656,7 +1656,7 @@ func extractLocationFields(jobPosting map[string]any) (any, any, any, any) {
 
 	locationCountries := []string{}
 	appendCountry := func(value string) {
-		normalized := locationnorm.NormalizeCountryName(value, true)
+		normalized := locationnorm.NormalizeCountryName(value)
 		if normalized == "" || containsString(locationCountries, normalized) {
 			return
 		}
@@ -1765,10 +1765,10 @@ func extractLocationCountries(jobPosting map[string]any) []string {
 	for _, location := range locations {
 		entry, _ := location.(map[string]any)
 		address, _ := entry["address"].(map[string]any)
-		add(locationnorm.NormalizeCountryName(stringValue(address["addressCountry"]), true))
+		add(locationnorm.NormalizeCountryName(stringValue(address["addressCountry"])))
 	}
 	if applicantCountry := stringValueFromMap(jobPosting, "applicantLocationRequirements", "name"); applicantCountry != "" {
-		add(locationnorm.NormalizeCountryName(applicantCountry, true))
+		add(locationnorm.NormalizeCountryName(applicantCountry))
 	}
 	return countries
 }

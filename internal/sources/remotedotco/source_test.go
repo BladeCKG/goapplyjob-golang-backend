@@ -42,10 +42,10 @@ func TestParseRawHTMLStrictFields(t *testing.T) {
 	if len(payload) == 0 {
 		t.Fatalf("expected payload from html")
 	}
-	if skipFlag, ok := payload["_skip_for_non_us"].(bool); !ok || !skipFlag {
-		t.Fatalf("expected non-us job to be skipped, got %#v", payload["_skip_for_non_us"])
+	gotCountries, _ := payload["locationCountries"].([]string)
+	if len(gotCountries) == 0 {
+		t.Fatalf("expected non-us locationCountries to be preserved, got %#v", payload["locationCountries"])
 	}
-	return
 
 	assertEqual := func(label string, got any, want any) {
 		if got != want {
@@ -53,7 +53,7 @@ func TestParseRawHTMLStrictFields(t *testing.T) {
 		}
 	}
 
-	assertEqual("url", payload["url"], pageProps["fullUrl"])
+	assertEqual("url", payload["url"], jobDetails["applyURL"])
 	assertEqual("roleTitle", payload["roleTitle"], jobDetails["title"])
 	assertEqual("roleDescription", payload["roleDescription"], jobDetails["description"])
 	assertEqual("jobSummary", payload["jobDescriptionSummary"], jobDetails["jobSummary"])
@@ -65,13 +65,8 @@ func TestParseRawHTMLStrictFields(t *testing.T) {
 	employmentType := normalizeToken(firstString(jobDetails["jobSchedules"]))
 	assertEqual("employmentType", payload["employmentType"], employmentType)
 
-	locationType := normalizeToken(firstString(jobDetails["remoteOptions"]))
+	locationType := normalizeRemoteOption(jobDetails["remoteOptions"])
 	assertEqual("locationType", payload["locationType"], locationType)
-
-	jobLocations := stringSlice(jobDetails["jobLocations"])
-	if len(jobLocations) > 0 {
-		assertEqual("location", payload["location"], jobLocations[0])
-	}
 
 	cities := stringSlice(jobDetails["cities"])
 	if len(cities) > 0 {
@@ -80,8 +75,9 @@ func TestParseRawHTMLStrictFields(t *testing.T) {
 
 	states := stringSlice(jobDetails["states"])
 	if got, ok := payload["locationUSStates"].([]string); ok {
-		if len(states) != len(got) {
-			t.Fatalf("locationUSStates len mismatch got=%d want=%d", len(got), len(states))
+		wantStates := filterUSStates(states)
+		if len(wantStates) != len(got) {
+			t.Fatalf("locationUSStates len mismatch got=%d want=%d", len(got), len(wantStates))
 		}
 	}
 
@@ -97,11 +93,11 @@ func TestParseRawHTMLStrictFields(t *testing.T) {
 	if companyPayload == nil || companyFixture == nil {
 		t.Fatalf("missing company payload")
 	}
-	assertEqual("company.id", companyPayload["id"], companyFixture["companyId"])
+	assertEqual("company.id", companyPayload["id"], Source+"_"+stringValue(companyFixture["companyId"]))
 	assertEqual("company.name", companyPayload["name"], companyFixture["name"])
 	assertEqual("company.slug", companyPayload["slug"], companyFixture["slug"])
 	assertEqual("company.homePageURL", companyPayload["homePageURL"], companyFixture["website"])
-	assertEqual("company.profilePicURL", companyPayload["profilePicURL"], companyFixture["logo"])
+	assertEqual("company.profilePicURL", companyPayload["profilePicURL"], normalizeRemoteCoURL(companyFixture["logo"]))
 }
 
 func TestParseRawHTMLPrefixesCompanyIDWithSource(t *testing.T) {

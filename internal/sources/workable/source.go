@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"goapplyjob-golang-backend/internal/employmentnorm"
+	"goapplyjob-golang-backend/internal/locationnorm"
 	"net/url"
 	"regexp"
 	"sort"
@@ -168,18 +169,20 @@ func buildRawPayload(item map[string]any, urlValue string, postDate time.Time) m
 		locationState = ""
 	}
 	locationCountry := stringValue(location["countryName"])
+	normalizedLocationState := normalizeKnownUSState(locationState)
+	normalizedLocationCountry := locationnorm.NormalizeCountryName(locationCountry)
 
 	locationParts := []string{}
 	for _, entry := range locationItems {
-		value := strings.TrimSpace(stringValue(entry))
+		value := normalizeLocationLabel(stringValue(entry))
 		if value == "" || strings.EqualFold(value, "TELECOMMUTE") || isRemoteToken(value) {
 			continue
 		}
 		locationParts = append(locationParts, value)
 	}
 	if len(locationParts) == 0 {
-		for _, value := range []string{locationCity, locationState, locationCountry} {
-			if strings.TrimSpace(value) != "" {
+		for _, value := range []string{locationCity, normalizedLocationState, normalizedLocationCountry} {
+			if value != "" {
 				locationParts = append(locationParts, value)
 			}
 		}
@@ -195,16 +198,16 @@ func buildRawPayload(item map[string]any, urlValue string, postDate time.Time) m
 		jobSlug = "workable-job"
 	}
 	requiredLanguages := []string{}
-	if strings.TrimSpace(language) != "" && !isNullLikeToken(language) {
-		requiredLanguages = []string{strings.TrimSpace(language)}
+	if language != "" && !isNullLikeToken(language) {
+		requiredLanguages = []string{language}
 	}
 	locationUSStates := []string{}
-	if strings.TrimSpace(locationState) != "" && !isNullLikeToken(locationState) {
-		locationUSStates = []string{strings.TrimSpace(locationState)}
+	if normalizedLocationState != "" && !isNullLikeToken(locationState) {
+		locationUSStates = []string{normalizedLocationState}
 	}
 	locationCountries := []string{}
-	if strings.TrimSpace(locationCountry) != "" {
-		locationCountries = []string{strings.TrimSpace(locationCountry)}
+	if normalizedLocationCountry != "" {
+		locationCountries = []string{normalizedLocationCountry}
 	}
 	return map[string]any{
 		"id":                           intOrStringOrNil(item["id"]),
@@ -302,6 +305,43 @@ func isCountryLike(value string) bool {
 	default:
 		return false
 	}
+}
+
+func normalizeLocationLabel(value string) string {
+	if value == "" {
+		return ""
+	}
+	parts := strings.Split(value, ",")
+	normalizedParts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if normalizedState := normalizeKnownUSState(part); normalizedState != "" {
+			normalizedParts = append(normalizedParts, normalizedState)
+			continue
+		}
+		if normalizedCountry := locationnorm.NormalizeCountryName(part); normalizedCountry != "" {
+			normalizedParts = append(normalizedParts, normalizedCountry)
+			continue
+		}
+		normalizedParts = append(normalizedParts, part)
+	}
+	return strings.Join(normalizedParts, ", ")
+}
+
+func normalizeKnownUSState(value string) string {
+	normalized := locationnorm.NormalizeUSStateName(value)
+	if normalized == "" {
+		return ""
+	}
+	for _, state := range locationnorm.USStateNames() {
+		if state == normalized {
+			return normalized
+		}
+	}
+	return ""
 }
 
 func intOrStringOrNil(value any) any {

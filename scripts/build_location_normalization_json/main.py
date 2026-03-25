@@ -3,11 +3,12 @@ import json
 import re
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-EXTRA = ROOT / 'app' / 'extra'
+ROOT = Path(__file__).resolve().parents[2]
+EXTRA = ROOT / 'extra'
+INTERNAL = ROOT / 'internal' / 'locationnorm'
 COUNTRIES_CSV = EXTRA / 'wikipedia-iso-country-codes.csv'
 STATES_CSV = EXTRA / 'states.csv'
-OUTPUT_JSON = EXTRA / 'location-normalization.json'
+OUTPUT_JSON = INTERNAL / 'location-normalization.json'
 
 
 def _key(value: str) -> str:

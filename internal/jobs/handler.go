@@ -312,6 +312,40 @@ func expandLocationQueryTerms(values []string) []string {
 	return expanded
 }
 
+func expandCountryFilterTerms(values []string) []string {
+	expanded := []string{}
+	seen := map[string]struct{}{}
+	addValue := func(value string) {
+		cleaned := strings.TrimSpace(value)
+		if cleaned == "" {
+			return
+		}
+		key := strings.ToLower(cleaned)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		expanded = append(expanded, cleaned)
+	}
+	for _, raw := range values {
+		term := strings.TrimSpace(raw)
+		if term == "" {
+			continue
+		}
+		addValue(term)
+		if region := locationnorm.NormalizeRegionName(term); region != "" {
+			for _, parentRegion := range locationnorm.RegionParentNames(region) {
+				addValue(parentRegion)
+			}
+			continue
+		}
+		for _, region := range locationnorm.RegionNamesForCountry(term) {
+			addValue(region)
+		}
+	}
+	return expanded
+}
+
 func resolvePostDateTimezone(name string, offsetRaw string) *time.Location {
 	trimmedName := strings.TrimSpace(name)
 	if trimmedName != "" {
@@ -471,7 +505,7 @@ func buildLocationParentsMap(rows [][2][]string) map[string][]string {
 				stateToCountries[state] = map[string]struct{}{}
 			}
 			for _, country := range countries {
-				country = locationnorm.NormalizeCountryName(country, true)
+				country = locationnorm.NormalizeCountryName(country)
 				country = cleanFilterLabel(country)
 				if isValidLocationOption(country) {
 					stateToCountries[state][country] = struct{}{}
@@ -484,7 +518,7 @@ func buildLocationParentsMap(rows [][2][]string) map[string][]string {
 			addLocationOption(state, parents)
 		}
 		for _, country := range countries {
-			country = locationnorm.NormalizeCountryName(country, true)
+			country = locationnorm.NormalizeCountryName(country)
 			country = cleanFilterLabel(country)
 			if isValidLocationOption(country) {
 				addLocationOption(country, nil)
@@ -1484,6 +1518,7 @@ func (h *Handler) buildListingFilterInput(c *gin.Context, currentUser *auth.User
 			input.Countries = append(input.Countries, trimmed)
 		}
 	}
+	input.Countries = expandCountryFilterTerms(input.Countries)
 	input.HasStructuredLocation = len(input.USStates) > 0 || len(input.Countries) > 0
 
 	if !input.HasStructuredLocation {

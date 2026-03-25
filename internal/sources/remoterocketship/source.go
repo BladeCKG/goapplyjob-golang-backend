@@ -118,7 +118,7 @@ func namespacedCompanyID(value any) any {
 }
 
 func normalizeCountryToken(value string) string {
-	return locationnorm.NormalizeCountryName(value, true)
+	return locationnorm.NormalizeCountryName(value)
 }
 
 func ParseImportRows(bodyText string) ([]map[string]any, int) {

@@ -112,9 +112,6 @@ func ParseRawHTML(htmlText, _ string) map[string]any {
 	locationCities := stringSlice(jobDetails["cities"])
 	locationStates := stringSlice(jobDetails["states"])
 	locationCountries := stringSlice(jobDetails["countries"])
-	if len(locationCountries) > 0 && !containsIgnoreCase(locationCountries, "United States") {
-		return map[string]any{"_skip_for_non_us": true, "locationCountries": locationCountries}
-	}
 	locationStates = filterUSStates(locationStates)
 	isEntry, isJunior, isMid, isSenior, isLead := inferSeniorityFromCareerLevel(jobDetails["careerLevel"])
 
