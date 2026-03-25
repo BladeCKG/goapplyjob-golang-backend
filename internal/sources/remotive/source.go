@@ -51,7 +51,7 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 	if len(jobPosting) == 0 {
 		return map[string]any{}
 	}
-	locationCountries := extractLocationCountries(jobPosting["applicantLocationRequirements"])
+	locationCountries := extractLocationCountriesFromLocationComponent(htmlText)
 	if !containsIgnoreCase(locationCountries, "United States") {
 		return map[string]any{"_skip_for_non_us": true, "locationCountries": locationCountries}
 	}
@@ -227,6 +227,98 @@ func extractLocationCountries(value any) []string {
 	return out
 }
 
+func extractLocationCountriesFromLocationComponent(htmlText string) []string {
+	text := extractSummaryTextFromHTML(htmlText)
+	if text == "" {
+		return nil
+	}
+	locationIndex := strings.Index(strings.ToLower(text), "location:")
+	if locationIndex < 0 {
+		return nil
+	}
+	locationText := strings.TrimSpace(text[locationIndex+len("location:"):])
+	if locationText == "" {
+		return nil
+	}
+	return normalizeLocationCountries(locationText)
+}
+
+func extractSummaryTextFromHTML(htmlText string) string {
+	if strings.TrimSpace(htmlText) == "" {
+		return ""
+	}
+	doc, err := nethtml.Parse(strings.NewReader(htmlText))
+	if err != nil {
+		return ""
+	}
+	return extractSummaryTextAfterH1(doc)
+}
+
+func normalizeSummaryText(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return ""
+	}
+	return normalizeText(strings.Join(strings.Fields(value), " "))
+}
+
+func extractSummaryTextAfterH1(root *nethtml.Node) string {
+	foundH1 := false
+	summaryText := ""
+	var walk func(*nethtml.Node)
+	walk = func(node *nethtml.Node) {
+		if summaryText != "" {
+			return
+		}
+		if node.Type == nethtml.ElementNode && strings.EqualFold(node.Data, "h1") {
+			foundH1 = true
+		} else if foundH1 && node.Type == nethtml.ElementNode && strings.EqualFold(node.Data, "p") {
+			text := normalizeSummaryText(textContent(node))
+			if text != "" {
+				summaryText = text
+				return
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(root)
+	return summaryText
+}
+
+func normalizeLocationCountries(locationText string) []string {
+	segments := strings.FieldsFunc(locationText, func(r rune) bool {
+		return r == ',' || r == ';' || r == '/' || r == '|'
+	})
+	out := []string{}
+	seen := map[string]struct{}{}
+	appendValue := func(raw string) {
+		candidate := strings.TrimSpace(raw)
+		if candidate == "" {
+			return
+		}
+		candidate = strings.Trim(candidate, " .:-")
+		if candidate == "" {
+			return
+		}
+		country := locationnorm.NormalizeCountryName(candidate, false)
+		value := candidate
+		if country != "" {
+			value = country
+		}
+		key := strings.ToLower(value)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, value)
+	}
+	for _, segment := range segments {
+		appendValue(segment)
+	}
+	return out
+}
+
 func parseCompany(value any, remotiveJobID string, tagline any) map[string]any {
 	item, _ := value.(map[string]any)
 	name := stringValue(item["name"])
@@ -301,31 +393,7 @@ func normalizeText(value string) string {
 }
 
 func extractSalaryRangeFromSummaryHTML(htmlText string) any {
-	if strings.TrimSpace(htmlText) == "" {
-		return nil
-	}
-	doc, err := nethtml.Parse(strings.NewReader(htmlText))
-	if err != nil {
-		return nil
-	}
-	foundH1 := false
-	summaryText := ""
-	var walk func(*nethtml.Node)
-	walk = func(node *nethtml.Node) {
-		if summaryText != "" {
-			return
-		}
-		if node.Type == nethtml.ElementNode && strings.EqualFold(node.Data, "h1") {
-			foundH1 = true
-		} else if foundH1 && node.Type == nethtml.ElementNode && strings.EqualFold(node.Data, "p") {
-			summaryText = normalizeText(textContent(node))
-			return
-		}
-		for child := node.FirstChild; child != nil; child = child.NextSibling {
-			walk(child)
-		}
-	}
-	walk(doc)
+	summaryText := extractSummaryTextFromHTML(htmlText)
 	if summaryText == "" {
 		return nil
 	}
@@ -338,6 +406,8 @@ func extractSalaryRangeFromSummaryHTML(htmlText string) any {
 	if locIdx := strings.Index(strings.ToLower(salaryText), "location:"); locIdx >= 0 {
 		salaryText = strings.TrimSpace(salaryText[:locIdx])
 	}
+	salaryText = strings.TrimSpace(strings.TrimRight(salaryText, ".!?,;:- "))
+	salaryText = strings.TrimSpace(strings.TrimRight(salaryText, "📍"))
 	return parseSalaryRangeFromText(salaryText)
 }
 

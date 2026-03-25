@@ -1,6 +1,8 @@
 package remotive
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -55,7 +57,7 @@ func TestParseRawHTMLExtractsSectionsAndSalaryHandling(t *testing.T) {
   "hiringOrganization": {"@type":"Organization","name":"Example Co"}
 }
 </script>
-</head><body data-publication-date="2026-02-27 08:00:00"></body></html>`
+</head><body data-publication-date="2026-02-27 08:00:00"><h1>Senior Backend Engineer</h1><p class="tw-mt-4 tw-text-sm">Feb 27, 2026 - Example Co is hiring a remote Senior Backend Engineer. 📍Location: United States.</p></body></html>`
 	payload := ParseRawHTML(htmlText, "https://remotive.com/remote/jobs/software/senior-backend-engineer-9990001")
 	if payload["slug"] != "senior-backend-engineer" {
 		t.Fatalf("expected remotive slug from role title, got %#v", payload["slug"])
@@ -93,7 +95,7 @@ func TestParseRawHTMLNormalizesTitleAndCountryTokens(t *testing.T) {
   "hiringOrganization":{"@type":"Organization","name":"Example Co"}
 }
 </script>
-</head></html>`
+</head><body><h1>Senior Backend Engineer</h1><p class="tw-mt-4 tw-text-sm">Example Co is hiring a remote Senior Backend Engineer. 📍Location: United States.</p></body></html>`
 
 	payload := ParseRawHTML(htmlText, "https://remotive.com/remote-jobs/software/senior-backend-engineer-9990001")
 	if payload["roleTitle"] != "Senior Backend Engineer" {
@@ -105,6 +107,103 @@ func TestParseRawHTMLNormalizesTitleAndCountryTokens(t *testing.T) {
 	countries, _ := payload["locationCountries"].([]string)
 	if len(countries) != 1 || countries[0] != "United States" {
 		t.Fatalf("expected normalized country token, got %#v", payload["locationCountries"])
+	}
+}
+
+func TestParseRawHTMLExtractsCountriesFromLocationComponentFixtures(t *testing.T) {
+	tests := []struct {
+		name     string
+		fileName string
+		want     []string
+	}{
+		{name: "russia", fileName: "raw-job-1.html", want: []string{"Russian Federation"}},
+		{name: "regional plus israel", fileName: "raw-job-2.html", want: []string{"Americas", "Europe", "Israel"}},
+		{name: "worldwide", fileName: "raw-job-3.html", want: []string{"Worldwide"}},
+		{name: "usa and canada", fileName: "raw-job-4.html", want: []string{"United States", "Canada", "USA timezones"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join("..", "..", "..", "test-extract", "remotive", tc.fileName)
+			htmlBytes, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read fixture: %v", err)
+			}
+			got := extractLocationCountriesFromLocationComponent(string(htmlBytes))
+			if len(got) != len(tc.want) {
+				t.Fatalf("len mismatch got=%v want=%v", got, tc.want)
+			}
+			for index := range tc.want {
+				if got[index] != tc.want[index] {
+					t.Fatalf("mismatch got=%v want=%v", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+func TestParseRawHTMLExtractsSalaryFromSummaryFixtures(t *testing.T) {
+	tests := []struct {
+		name     string
+		fileName string
+		want     map[string]any
+	}{
+		{name: "unpaid internship", fileName: "raw-job-1.html", want: nil},
+		{name: "hourly range", fileName: "raw-job-2.html", want: map[string]any{
+			"min":                     int64(90),
+			"max":                     int64(150),
+			"salaryType":              "per hour",
+			"currencyCode":            "USD",
+			"currencySymbol":          "$",
+			"salaryHumanReadableText": "$90 - $150 /hour.",
+			"minSalaryAsUSD":          int64(90),
+			"maxSalaryAsUSD":          int64(150),
+		}},
+		{name: "hourly compact range", fileName: "raw-job-3.html", want: map[string]any{
+			"min":                     int64(50),
+			"max":                     int64(75),
+			"salaryType":              "per hour",
+			"currencyCode":            "USD",
+			"currencySymbol":          "$",
+			"salaryHumanReadableText": "$50-$75 /hour.",
+			"minSalaryAsUSD":          int64(50),
+			"maxSalaryAsUSD":          int64(75),
+		}},
+		{name: "yearly k range", fileName: "raw-job-4.html", want: map[string]any{
+			"min":                     int64(160000),
+			"max":                     int64(180000),
+			"salaryType":              "per year",
+			"currencyCode":            "USD",
+			"currencySymbol":          "$",
+			"salaryHumanReadableText": "$160k - $180k.",
+			"minSalaryAsUSD":          int64(160000),
+			"maxSalaryAsUSD":          int64(180000),
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join("..", "..", "..", "test-extract", "remotive", tc.fileName)
+			htmlBytes, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read fixture: %v", err)
+			}
+			got, _ := extractSalaryRangeFromSummaryHTML(string(htmlBytes)).(map[string]any)
+			if tc.want == nil {
+				if got != nil {
+					t.Fatalf("expected nil salary, got %#v", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatalf("expected salary payload, got nil")
+			}
+			for key, wantValue := range tc.want {
+				if got[key] != wantValue {
+					t.Fatalf("key %q mismatch got=%#v want=%#v payload=%#v", key, got[key], wantValue, got)
+				}
+			}
+		})
 	}
 }
 
