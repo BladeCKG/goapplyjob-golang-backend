@@ -17,6 +17,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/net/publicsuffix"
 )
 
 const (
@@ -2621,6 +2623,9 @@ func normalizeJobURLForMatch(rawURL string) string {
 	}
 	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
 	host = strings.TrimPrefix(host, "www.")
+	if registrable, err := publicsuffix.EffectiveTLDPlusOne(host); err == nil && registrable != "" {
+		host = registrable
+	}
 	path := regexp.MustCompile(`/+`).ReplaceAllString(parsed.EscapedPath(), "/")
 	path = strings.TrimRight(path, "/")
 	if path == "" {

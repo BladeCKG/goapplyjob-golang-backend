@@ -685,6 +685,45 @@ func TestFindDuplicateCrossSourceParsedJobByNormalizedURLWithinDateWindow(t *tes
 	}
 }
 
+func TestFindDuplicateCrossSourceParsedJobByNormalizedURLIgnoringSubdomain(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_duplicate_by_subdomain"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(context.Background(),
+		`INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
+		 VALUES (1, 'dailyremote', 'https://job-boards.greenhouse.io/techholding/jobs/4676811005?ref=dailyremote', ?, true, false, true, 0, '{}'),
+		        (2, 'remoterocketship', 'https://boards.greenhouse.io/techholding/jobs/4676811005', ?, true, false, false, 0, '{}')`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(),
+		`INSERT INTO parsed_jobs (raw_us_job_id, url, role_title, updated_at)
+		 VALUES (1, 'https://job-boards.greenhouse.io/techholding/jobs/4676811005?ref=dailyremote&utm_source=dailyremote.com', 'Backend Engineer', ?)`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(Config{}, db)
+	payload := map[string]any{
+		"url": "https://boards.greenhouse.io/techholding/jobs/4676811005",
+	}
+	duplicateID, isDuplicate, err := svc.findDuplicateCrossSourceParsedJob(context.Background(), 2, "remoterocketship", payload, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isDuplicate || duplicateID <= 0 {
+		t.Fatalf("expected duplicate by normalized subdomain-insensitive url, got duplicate=%v id=%d", isDuplicate, duplicateID)
+	}
+}
+
 func TestProcessPendingRemoterocketshipDuplicateReplacementKeepsCreatedAtSource(t *testing.T) {
 	db, err := database.Open(testDatabaseURL(t, "test_parsed_remoterocketship_duplicate_keep_created_at_source"))
 	if err != nil {
