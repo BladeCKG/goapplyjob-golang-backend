@@ -1882,7 +1882,15 @@ func jsonPatchStringOrNull(raw *json.RawMessage) (any, bool) {
 	if trimmed == "null" {
 		return nil, true
 	}
-	return jsonPatchString(raw)
+	value, ok := jsonPatchString(raw)
+	if !ok {
+		return nil, false
+	}
+	text, _ := value.(string)
+	if text == "" {
+		return nil, true
+	}
+	return text, true
 }
 
 func jsonPatchBool(raw *json.RawMessage) (any, bool) {
