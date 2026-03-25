@@ -14,6 +14,6 @@ When multiple concrete hard skills appear in a single phrase, extract each one s
 
 Exclude soft skills, responsibilities, job titles, seniority, years of experience, broad fields, vague capability phrases, and version numbers.
 
-Normalize skills to canonical names, merging obvious formatting variants and abbreviations only when unambiguous.
+Normalize skills to canonical names, remove version, merging obvious formatting variants and abbreviations only when unambiguous.
 
 Return only schema-compliant JSON.
