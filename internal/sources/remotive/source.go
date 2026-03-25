@@ -4,9 +4,6 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
-	"goapplyjob-golang-backend/internal/employmentnorm"
-	"goapplyjob-golang-backend/internal/locationnorm"
-	"goapplyjob-golang-backend/internal/sources/currency"
 	"html"
 	"math"
 	"net/url"
@@ -14,6 +11,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"goapplyjob-golang-backend/internal/employmentnorm"
+	"goapplyjob-golang-backend/internal/locationnorm"
+	"goapplyjob-golang-backend/internal/sources/currency"
 
 	nethtml "golang.org/x/net/html"
 )
@@ -70,10 +71,7 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 	jobSlug := buildJobSlug(stringValue(jobPosting["url"]))
 	roleTitle := stringValue(normalizeTitle(stringValue(jobPosting["title"])))
 	isEntry, isJunior, isMid, isSenior, isLead := inferSeniority(roleTitle)
-	salaryRange := parseSalaryRange(jobPosting["baseSalary"])
-	if salaryRange == nil {
-		salaryRange = extractSalaryRangeFromSummaryHTML(htmlText)
-	}
+	salaryRange := extractSalaryRangeFromSummaryHTML(htmlText)
 	return map[string]any{
 		"id":                           nilIfEmpty(externalID),
 		"url":                          firstNonEmpty(applyURL, stringValue(jobPosting["url"]), sourceURL),

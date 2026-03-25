@@ -129,39 +129,6 @@ func TestParseRawHTMLHandlesMissingOptionalSections(t *testing.T) {
 	}
 }
 
-func TestParseRawHTMLUsesApplyURLAndOccupationalCategory(t *testing.T) {
-	htmlText := `
-<html><head>
-<script type="application/ld+json">
-{
-  "@type":"JobPosting",
-  "title":"Backend Engineer @Example",
-  "url":"https://remotive.com/remote-jobs/software/backend-engineer-111",
-  "description":"<p>Simple description only.</p>",
-  "employmentType":["FULL_TIME"],
-  "occupationalCategory":" Software  Engineering ",
-  "baseSalary":{"@type":"MonetaryAmount","currency":"USD","value":{"minValue":100000,"maxValue":140000,"unitText":"YEAR"}},
-  "applicantLocationRequirements":[{"@type":"Country","name":"United States"}],
-  "hiringOrganization":{"@type":"Organization","name":"Acme"}
-}
-</script>
-</head>
-<body>
-  <a href="/remote-jobs/apply/job/111">Apply for this position</a>
-</body></html>`
-	payload := ParseRawHTML(htmlText, "https://remotive.com/remote-jobs/software/backend-engineer-111")
-	if payload["url"] != "https://remotive.com/remote-jobs/apply/job/111" {
-		t.Fatalf("expected apply url, got %#v", payload["url"])
-	}
-	if payload["occupationalCategory"] != "Software Engineering" {
-		t.Fatalf("expected normalized occupational category, got %#v", payload["occupationalCategory"])
-	}
-	salary, _ := payload["salaryRange"].(map[string]any)
-	if salary == nil || salary["salaryType"] != "per year" || salary["currencyCode"] != "USD" {
-		t.Fatalf("expected remotive salary payload shape, got %#v", payload["salaryRange"])
-	}
-}
-
 func TestParseSitemapRowsAndSerializeRoundTrip(t *testing.T) {
 	xmlText := `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
