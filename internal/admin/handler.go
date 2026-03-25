@@ -1472,9 +1472,9 @@ func (h *Handler) respondRawUSJob(c *gin.Context, id int64) {
 		sourceVal   string
 		url         string
 		postDate    string
-		isReady     int
-		isSkippable int
-		isParsed    int
+		isReady     bool
+		isSkippable bool
+		isParsed    bool
 		retryCount  int
 		rawJSON     sql.NullString
 	)
@@ -1490,9 +1490,9 @@ func (h *Handler) respondRawUSJob(c *gin.Context, id int64) {
 		"source":       sourceVal,
 		"url":          url,
 		"post_date":    postDate,
-		"is_ready":     isReady == 1,
-		"is_skippable": isSkippable == 1,
-		"is_parsed":    isParsed == 1,
+		"is_ready":     isReady,
+		"is_skippable": isSkippable,
+		"is_parsed":    isParsed,
 		"retry_count":  retryCount,
 		"raw_json":     nil,
 	}
