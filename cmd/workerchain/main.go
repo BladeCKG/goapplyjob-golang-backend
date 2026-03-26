@@ -46,6 +46,19 @@ func main() {
 		)
 		defaultRemoteRocketshipURLs := []string{
 			"https://www.remoterocketship.com/us/sitemap_job_openings_us_1.xml",
+			"https://www.remoterocketship.com/sitemap_job_openings_worldwide.xml",
+			"https://www.remoterocketship.com/sitemap_job_openings_rest_of_world.xml",
+			"https://www.remoterocketship.com/sitemap_job_openings_mx.xml",
+			"https://www.remoterocketship.com/sitemap_job_openings_es.xml",
+			"https://www.remoterocketship.com/sitemap_job_openings_pl.xml",
+			"https://www.remoterocketship.com/sitemap_job_openings_nl.xml",
+			"https://www.remoterocketship.com/sitemap_job_openings_it.xml",
+			"https://www.remoterocketship.com/sitemap_job_openings_pt.xml",
+			"https://www.remoterocketship.com/sitemap_job_openings_in.xml",
+			"https://www.remoterocketship.com/sitemap_job_openings_au.xml",
+			"https://www.remoterocketship.com/sitemap_job_openings_ie.xml",
+			"https://www.remoterocketship.com/sitemap_job_openings_ch.xml",
+			"https://www.remoterocketship.com/sitemap_job_openings_at.xml",
 		}
 
 		enabledSources := config.GetenvCSVSet("ENABLED_SOURCES", "remoterocketship")
