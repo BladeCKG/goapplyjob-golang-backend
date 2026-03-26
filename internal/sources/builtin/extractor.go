@@ -43,7 +43,7 @@ func ExtractJob(htmlText, companyHTML string) map[string]any {
 		identifierValue = stringValue(identifier["value"])
 	}
 
-	_, locationCity, locationStates, locationCountries := extractLocationFields(jobPosting)
+	locationCity, locationStates, locationCountries := extractLocationFields(jobPosting)
 	descriptionHTML := stringValue(jobPosting["description"])
 	var roleDescription any
 	if strings.TrimSpace(descriptionHTML) != "" {
@@ -1485,7 +1485,7 @@ func extractLocationParts(jobPosting map[string]any) ([]string, any, string) {
 	return labels, valueOrNil(firstLocality), applicantCountry
 }
 
-func extractLocationFields(jobPosting map[string]any) (any, any, any, any) {
+func extractLocationFields(jobPosting map[string]any) (any, any, any) {
 	locations, _ := jobPosting["jobLocation"].([]any)
 	if locations == nil {
 		if one, ok := jobPosting["jobLocation"].(map[string]any); ok {
@@ -1500,145 +1500,57 @@ func extractLocationFields(jobPosting map[string]any) (any, any, any, any) {
 	}
 
 	locationEntries := make([]locEntry, 0, len(locations))
-	usStates := []string{}
-	usCountryTokens := map[string]struct{}{"USA": {}, "US": {}, "UNITED STATES": {}}
-
-	isRemoteToken := func(value string) bool {
-		normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(strings.TrimSpace(value)), " ")
-		normalized = strings.TrimSpace(normalized)
-		return normalized == "remote" || strings.HasPrefix(normalized, "remote ")
-	}
-	isNullLike := func(value string) bool {
-		normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(strings.TrimSpace(value)), " ")
-		normalized = strings.TrimSpace(normalized)
-		switch normalized {
-		case "null", "none", "na", "n a", "unknown":
-			return true
-		default:
-			return false
-		}
-	}
-	isCountryLike := func(value string) bool {
-		normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(strings.TrimSpace(value)), " ")
-		normalized = strings.TrimSpace(normalized)
-		switch normalized {
-		case "us", "usa", "united states", "united states of america":
-			return true
-		default:
-			return false
-		}
-	}
-	stripRemotePrefix := func(value string) string {
-		if strings.TrimSpace(value) == "" {
-			return ""
-		}
-		parts := strings.Split(value, ",")
-		filtered := make([]string, 0, len(parts))
-		for _, part := range parts {
-			part = strings.TrimSpace(part)
-			if part == "" || isRemoteToken(part) || isNullLike(part) {
-				continue
-			}
-			filtered = append(filtered, part)
-		}
-		if len(filtered) == 0 {
-			return ""
-		}
-		return filtered[0]
-	}
-	isUSCountry := func(value string) bool {
-		if strings.TrimSpace(value) == "" {
-			return false
-		}
-		_, ok := usCountryTokens[strings.ToUpper(strings.TrimSpace(value))]
-		return ok
+	allowedUSStates := map[string]struct{}{}
+	for _, state := range locationnorm.USStateNames() {
+		allowedUSStates[state] = struct{}{}
 	}
 
 	for _, location := range locations {
 		entry, _ := location.(map[string]any)
 		address, _ := entry["address"].(map[string]any)
-		locality := stripRemotePrefix(stringValue(address["addressLocality"]))
-		region := stripRemotePrefix(stringValue(address["addressRegion"]))
-		if isCountryLike(locality) {
-			locality = ""
-		}
-		if isCountryLike(region) || isNullLike(region) {
+		locality := strings.TrimSpace(stringValue(address["addressLocality"]))
+		region := strings.TrimSpace(stringValue(address["addressRegion"]))
+		country := locationnorm.NormalizeCountryName(stringValue(address["addressCountry"]))
+		if country == "United States" {
+			region = locationnorm.NormalizeUSStateName(region)
+			if _, ok := allowedUSStates[region]; !ok {
+				region = ""
+			}
+		} else {
 			region = ""
 		}
-		country := stringValue(address["addressCountry"])
 		locationEntries = append(locationEntries, locEntry{locality: locality, region: region, country: country})
-		if region != "" && !isRemoteToken(region) && isUSCountry(country) {
-			seen := false
-			for _, value := range usStates {
-				if value == region {
-					seen = true
-					break
-				}
-			}
-			if !seen {
-				usStates = append(usStates, region)
-			}
-		}
 	}
 
 	localities := []string{}
-	usLocalities := []string{}
+	usStates := []string{}
 	countriesFromLocations := []string{}
 	for _, entry := range locationEntries {
-		if entry.locality != "" && !isRemoteToken(entry.locality) {
-			if !containsString(localities, entry.locality) {
-				localities = append(localities, entry.locality)
-			}
-			if isUSCountry(entry.country) && !containsString(usLocalities, entry.locality) {
-				usLocalities = append(usLocalities, entry.locality)
-			}
+		if entry.locality != "" && !containsString(localities, entry.locality) {
+			localities = append(localities, entry.locality)
+		}
+		if entry.region != "" && !containsString(usStates, entry.region) {
+			usStates = append(usStates, entry.region)
 		}
 		if entry.country != "" && !containsString(countriesFromLocations, entry.country) {
 			countriesFromLocations = append(countriesFromLocations, entry.country)
 		}
 	}
-	cityValues := localities
-	if len(usLocalities) > 0 {
-		cityValues = usLocalities
-	}
+
 	locationCity := any(nil)
-	if len(cityValues) > 0 {
-		locationCity = strings.Join(cityValues, ", ")
-	}
-
-	hasUSLocation := false
-	for _, country := range countriesFromLocations {
-		if isUSCountry(country) {
-			hasUSLocation = true
-			break
-		}
-	}
-
-	primaryCountry := ""
-	switch {
-	case hasUSLocation:
-		primaryCountry = "United States"
-	case len(countriesFromLocations) > 0:
-		primaryCountry = locationnorm.NormalizeCountryName(countriesFromLocations[0])
-	}
-	locationLabel := any(nil)
-	if strings.TrimSpace(primaryCountry) != "" {
-		locationLabel = primaryCountry
+	if len(localities) > 0 {
+		locationCity = strings.Join(localities, ", ")
 	}
 
 	locationCountries := []string{}
-	appendCountry := func(value string) {
-		normalized := locationnorm.NormalizeCountryName(value)
-		if normalized == "" || containsString(locationCountries, normalized) {
-			return
-		}
-		locationCountries = append(locationCountries, normalized)
-	}
 	for _, country := range countriesFromLocations {
-		appendCountry(country)
+		if containsString(locationCountries, country) {
+			continue
+		}
+		locationCountries = append(locationCountries, country)
 	}
 
-	return locationLabel, locationCity, usStates, locationCountries
+	return locationCity, usStates, locationCountries
 }
 
 func containsString(values []string, target string) bool {

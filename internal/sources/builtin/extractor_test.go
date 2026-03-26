@@ -121,7 +121,7 @@ func TestExtractJobBuildsBuiltInRawJobShape(t *testing.T) {
 		t.Fatalf("unexpected seniority flags senior=%#v lead=%#v", payload["isSenior"], payload["isLead"])
 	}
 	states, _ := payload["locationUSStates"].([]string)
-	if len(states) != 2 || states[0] != "NY" || states[1] != "TX" {
+	if len(states) != 2 || states[0] != "New York" || states[1] != "Texas" {
 		t.Fatalf("unexpected state list %#v", payload["locationUSStates"])
 	}
 }
@@ -163,7 +163,7 @@ func TestExtractJobSkipsNullLikeUSState(t *testing.T) {
 </html>`
 	payload := ExtractJob(htmlText, "")
 	states, _ := payload["locationUSStates"].([]string)
-	if len(states) != 1 || states[0] != "NY" {
+	if len(states) != 1 || states[0] != "New York" {
 		t.Fatalf("unexpected state list %#v", payload["locationUSStates"])
 	}
 }
