@@ -68,7 +68,7 @@ func TestAuthAndJobsFlow(t *testing.T) {
 		t.Fatalf("unexpected me payload %#v", meBody)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/jobs?sort_criteria=salary&job_title=Engineer&location=Texas&min_salary=100&seniority=senior&page=1&per_page=10", nil)
+	req := httptest.NewRequest(http.MethodGet, "/jobs?sort_criteria=salary&job_title=Engineer&us_states=Texas&min_salary=100&seniority=senior&page=1&per_page=10", nil)
 	req.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -260,7 +260,7 @@ func TestJobsTopCategoriesRespectsLocationAndWindow(t *testing.T) {
 	insertJobWithCreatedAt(t, db, 9203, "Data Engineer", "Canada", now.Add(-2*time.Hour))
 	insertJobWithCreatedAt(t, db, 9204, "Legacy Role", "United States", now.Add(-40*24*time.Hour))
 
-	req := httptest.NewRequest(http.MethodGet, "/jobs/top-categories?location=United+States&days=30&limit=5", nil)
+	req := httptest.NewRequest(http.MethodGet, "/jobs/top-categories?countries=United+States&days=30&limit=5", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	assertStatus(t, rec.Code, http.StatusOK)
@@ -422,7 +422,7 @@ func TestJobsListLocationFilterSupportsStateWithCountryLabel(t *testing.T) {
 	insertJob(t, db, 401, "https://example.com/state-1", "Austin", "Texas", 120, 160, true, time.Now().UTC())
 	insertJob(t, db, 402, "https://example.com/state-2", "Seattle", "Washington", 120, 160, true, time.Now().UTC())
 
-	req := httptest.NewRequest(http.MethodGet, "/jobs?location=Texas,+United+States", nil)
+	req := httptest.NewRequest(http.MethodGet, "/jobs?us_states=Texas", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	assertStatus(t, rec.Code, http.StatusOK)
@@ -459,7 +459,7 @@ func TestJobsListSupportsCSVFilters(t *testing.T) {
 	insertCSVJob(t, db, 1, "Data Engineer", "United States", true, 100000, "yearly")
 	insertCSVJob(t, db, 2, "Backend Engineer", "Canada", false, 60, "hourly")
 
-	req := httptest.NewRequest(http.MethodGet, "/jobs?job_title=Data+Engineer,Backend+Engineer&location=United+States,Canada&seniority=mid,senior&min_salary=90000", nil)
+	req := httptest.NewRequest(http.MethodGet, "/jobs?job_title=Data+Engineer,Backend+Engineer&countries=United+States,Canada&seniority=mid,senior&min_salary=90000", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	assertStatus(t, rec.Code, http.StatusOK)
@@ -875,7 +875,7 @@ func TestJobsFiltersCombineTechLocationAndSeniority(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/jobs?tech_stack=Go&location=Texas&seniority=senior&per_page=50", nil)
+	req := httptest.NewRequest(http.MethodGet, "/jobs?tech_stack=Go&us_states=Texas&seniority=senior&per_page=50", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	assertStatus(t, rec.Code, http.StatusOK)
@@ -1020,7 +1020,7 @@ func TestJobsMetricsCountsWithFilters(t *testing.T) {
 	insertJob(t, db, 8102, "https://example.com/metrics-b", "Austin", "Texas", 100, 130, true, now.Add(-3*time.Hour))
 	insertJob(t, db, 8103, "https://example.com/metrics-c", "Austin", "Texas", 100, 130, true, now.Add(-25*time.Hour))
 
-	req := httptest.NewRequest(http.MethodGet, "/jobs/metrics?job_title=Software+Engineer&location=Austin", nil)
+	req := httptest.NewRequest(http.MethodGet, "/jobs/metrics?job_title=Software+Engineer&countries=United+States", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	assertStatus(t, rec.Code, http.StatusOK)

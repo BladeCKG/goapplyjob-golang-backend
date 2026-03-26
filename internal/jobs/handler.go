@@ -1411,27 +1411,96 @@ func (h *Handler) topCategories(c *gin.Context) {
 	if days > 365 {
 		days = 365
 	}
-	location := strings.TrimSpace(c.Query("location"))
 	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
 
-	locationPattern := "%" + location + "%"
-	rows, err := h.q.ListTopCategories(c.Request.Context(), gensqlc.ListTopCategoriesParams{
-		CreatedAtSource:   pgtype.Timestamptz{Time: cutoff, Valid: true},
-		Column2:           location != "",
-		LocationUsStates:  []byte(locationPattern),
-		LocationCountries: []byte(locationPattern),
-		Limit:             int32(limit),
-	})
+	input := listingFilterInput{
+		USStates:  []string{},
+		Countries: []string{},
+	}
+	for _, state := range uniqueStrings(parseCSVQuery(c.Query("us_states"))) {
+		if normalized := locationnorm.NormalizeUSStateName(state); normalized != "" {
+			input.USStates = append(input.USStates, normalized)
+		}
+	}
+	for _, country := range uniqueStrings(parseCSVQuery(c.Query("countries"))) {
+		if trimmed := strings.TrimSpace(country); trimmed != "" {
+			input.Countries = append(input.Countries, trimmed)
+		}
+	}
+	input.Countries = expandCountryFilterTerms(input.Countries)
+	input.HasStructuredLocation = len(input.USStates) > 0 || len(input.Countries) > 0
+
+	args := []any{cutoff}
+	clauses := []string{
+		"p.categorized_job_title IS NOT NULL",
+		"p.categorized_job_title != ''",
+		"p.created_at_source IS NOT NULL",
+		fmt.Sprintf("p.created_at_source >= $%d", len(args)),
+	}
+	if input.HasStructuredLocation {
+		locOr := make([]string, 0, len(input.USStates)+len(input.Countries)+2)
+		for _, state := range input.USStates {
+			if strings.TrimSpace(state) == "" {
+				continue
+			}
+			args = append(args, state)
+			locOr = append(locOr, fmt.Sprintf("CAST(p.location_us_states AS jsonb) @> to_jsonb(ARRAY[$%d::text])", len(args)))
+		}
+		if len(input.USStates) > 0 {
+			args = append(args, unitedStatesCountry)
+			locOr = append(
+				locOr,
+				fmt.Sprintf(
+					"(CAST(p.location_countries AS jsonb) @> to_jsonb(ARRAY[$%d::text]) AND COALESCE(jsonb_array_length(CAST(p.location_us_states AS jsonb)), 0) = 0)",
+					len(args),
+				),
+			)
+			for _, region := range broadRegionTermsForUSStates(input.USStates) {
+				args = append(args, region)
+				locOr = append(locOr, fmt.Sprintf("CAST(p.location_countries AS jsonb) @> to_jsonb(ARRAY[$%d::text])", len(args)))
+			}
+		}
+		for _, country := range input.Countries {
+			if strings.TrimSpace(country) == "" {
+				continue
+			}
+			args = append(args, country)
+			locOr = append(locOr, fmt.Sprintf("CAST(p.location_countries AS jsonb) @> to_jsonb(ARRAY[$%d::text])", len(args)))
+		}
+		if len(locOr) > 0 {
+			clauses = append(clauses, "("+strings.Join(locOr, " OR ")+")")
+		}
+	}
+	args = append(args, limit)
+	query := `SELECT p.categorized_job_title, COUNT(p.id)::bigint AS score
+FROM parsed_jobs p
+WHERE ` + strings.Join(clauses, " AND ") + `
+GROUP BY p.categorized_job_title
+ORDER BY score DESC, p.categorized_job_title ASC
+LIMIT $` + strconv.Itoa(len(args))
+
+	rows, err := h.db.PGX.Query(c.Request.Context(), query, args...)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load top categories"})
 		return
 	}
+	defer rows.Close()
 	items := []gin.H{}
-	for _, row := range rows {
-		category := strings.TrimSpace(pgTextString(row.CategorizedJobTitle))
-		if category != "" {
-			items = append(items, gin.H{"category": category, "score": row.Score})
+	for rows.Next() {
+		var category string
+		var score int64
+		if err := rows.Scan(&category, &score); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load top categories"})
+			return
 		}
+		category = strings.TrimSpace(category)
+		if category != "" {
+			items = append(items, gin.H{"category": category, "score": score})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load top categories"})
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
@@ -1555,31 +1624,6 @@ func (h *Handler) buildListingFilterInput(c *gin.Context, currentUser *auth.User
 	}
 	input.Countries = expandCountryFilterTerms(input.Countries)
 	input.HasStructuredLocation = len(input.USStates) > 0 || len(input.Countries) > 0
-
-	if !input.HasStructuredLocation {
-		locations := []string{}
-		rawLocationValue := strings.TrimSpace(c.Query("location"))
-		if rawLocationValue != "" {
-			rawParts := []string{}
-			for _, part := range strings.Split(rawLocationValue, ",") {
-				trimmed := strings.TrimSpace(part)
-				if trimmed != "" {
-					rawParts = append(rawParts, trimmed)
-				}
-			}
-			if len(rawParts) == 2 && strings.EqualFold(rawParts[1], "United States") {
-				locations = []string{rawLocationValue}
-			} else {
-				locations = parseCSVQuery(c.Query("location"))
-			}
-		}
-		for _, location := range uniqueStrings(expandLocationQueryTerms(locations)) {
-			if strings.TrimSpace(location) == "" {
-				continue
-			}
-			input.LocationPatterns = append(input.LocationPatterns, "%"+location+"%")
-		}
-	}
 
 	input.CompanyFilter = strings.ToLower(strings.TrimSpace(c.Query("company")))
 
