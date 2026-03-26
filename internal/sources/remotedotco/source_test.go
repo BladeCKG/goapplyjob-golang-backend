@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -126,5 +127,49 @@ func TestParseRawHTMLPrefixesCompanyIDWithSource(t *testing.T) {
 	company, _ := payload["company"].(map[string]any)
 	if company["id"] != "remotedotco_abc123" {
 		t.Fatalf("expected namespaced company.id, got %#v", company["id"])
+	}
+}
+
+func TestParseRawHTMLRoleDescriptionFromFixtureRawJob3(t *testing.T) {
+	htmlPath := filepath.Join("..", "..", "..", "test-extract", "remotedotco", "raw-job-3.html")
+	htmlBytes, err := os.ReadFile(htmlPath)
+	if err != nil {
+		t.Fatalf("read html: %v", err)
+	}
+
+	payload := ParseRawHTML(string(htmlBytes), "")
+	if len(payload) == 0 {
+		t.Fatalf("expected payload from html")
+	}
+
+	roleDescription, _ := payload["roleDescription"].(string)
+	if roleDescription == "" {
+		t.Fatalf("expected non-empty roleDescription, got %#v", payload["roleDescription"])
+	}
+	if !strings.Contains(roleDescription, "Teamwork makes the stream work.") {
+		t.Fatalf("expected roleDescription to contain fixture body text, got %#v", payload["roleDescription"])
+	}
+	if !strings.Contains(roleDescription, "What You&#39;ll Be Doing") {
+		t.Fatalf("expected roleDescription to contain responsibilities section, got %#v", payload["roleDescription"])
+	}
+
+	salaryRange, _ := payload["salaryRange"].(map[string]any)
+	if salaryRange == nil {
+		t.Fatalf("expected salaryRange payload, got %#v", payload["salaryRange"])
+	}
+	if salaryRange["min"] != float64(195000) {
+		t.Fatalf("expected parsed salaryRange.min, got %#v", salaryRange["min"])
+	}
+	if salaryRange["max"] != float64(408000) {
+		t.Fatalf("expected parsed salaryRange.max, got %#v", salaryRange["max"])
+	}
+	if salaryRange["currencyCode"] != "USD" {
+		t.Fatalf("expected parsed salaryRange.currencyCode, got %#v", salaryRange["currencyCode"])
+	}
+	if salaryRange["salaryType"] != "per year" {
+		t.Fatalf("expected parsed salaryRange.salaryType, got %#v", salaryRange["salaryType"])
+	}
+	if salaryRange["salaryHumanReadableText"] != "195,000.00 - 408,000.00 USD Annually" {
+		t.Fatalf("expected salaryHumanReadableText from jobDetails.salaryRange, got %#v", salaryRange["salaryHumanReadableText"])
 	}
 }

@@ -6,8 +6,11 @@ import (
 	"errors"
 	"goapplyjob-golang-backend/internal/employmentnorm"
 	"goapplyjob-golang-backend/internal/locationnorm"
+	"goapplyjob-golang-backend/internal/sources/currency"
 	"html"
+	"math"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -24,6 +27,7 @@ var (
 	urlSetClosePattern = regexp.MustCompile(`(?is)</urlset\s*>`)
 	lastmodPattern     = regexp.MustCompile(`(?is)<lastmod>\s*([^<]+?)\s*</lastmod>`)
 	jsonAppPattern     = regexp.MustCompile(`(?is)<script[^>]*type=['"]application/json['"][^>]*>(.*?)</script>`)
+	jsonLDPattern      = regexp.MustCompile(`(?is)<script[^>]*type=['"]application/ld\+json['"][^>]*>(.*?)</script>`)
 )
 
 type xmlURL struct {
@@ -138,7 +142,11 @@ func ParseRawHTML(htmlText, _ string) map[string]any {
 		}
 	}
 
-	salaryRange := buildSalaryRange(jobDetails)
+	salaryRange := extractSalaryRangeFromJobPostingLDJSON(htmlText)
+	salaryRangeText := stringValue(jobDetails["salaryRange"])
+	if salaryRangeMap, ok := salaryRange.(map[string]any); ok && salaryRangeText != "" {
+		salaryRangeMap["salaryHumanReadableText"] = salaryRangeText
+	}
 	slug := stripExternalIDFromSlug(stringValue(jobDetails["slug"]))
 
 	payload := map[string]any{
@@ -491,13 +499,16 @@ func buildSalaryRange(jobDetails map[string]any) any {
 	if minVal == 0 && maxVal == 0 && currencyCode == "" && unitText == "" && text == "" {
 		return nil
 	}
+	if minVal == 0 && maxVal == 0 && currencyCode == "" && unitText == "" && text != "" {
+		return parseSalaryRangeFromText(text)
+	}
 
 	payload := map[string]any{}
 	if minVal > 0 {
-		payload["min"] = minVal
+		payload["min"] = normalizeSalaryValue(minVal)
 	}
 	if maxVal > 0 {
-		payload["max"] = maxVal
+		payload["max"] = normalizeSalaryValue(maxVal)
 	}
 	if unitText != "" {
 		payload["salaryType"] = unitText
@@ -508,5 +519,206 @@ func buildSalaryRange(jobDetails map[string]any) any {
 	if text != "" {
 		payload["salaryHumanReadableText"] = text
 	}
+	if currencyCode == "USD" {
+		if minVal > 0 {
+			payload["minSalaryAsUSD"] = normalizeSalaryValue(minVal)
+		}
+		if maxVal > 0 {
+			payload["maxSalaryAsUSD"] = normalizeSalaryValue(maxVal)
+		}
+	}
 	return payload
+}
+
+func parseSalaryRangeFromText(value string) any {
+	raw := strings.TrimSpace(value)
+	if raw == "" {
+		return nil
+	}
+	normalizedText := normalizeSalaryText(raw)
+	normalized := strings.ToLower(normalizedText)
+	matches := currency.SalaryNumberPattern.FindAllStringSubmatch(raw, -1)
+	if len(matches) == 0 {
+		matches = currency.SalaryNumberPattern.FindAllStringSubmatch(normalizedText, -1)
+	}
+	if len(matches) == 0 {
+		return map[string]any{
+			"salaryHumanReadableText": raw,
+		}
+	}
+	amounts := make([]float64, 0, len(matches))
+	for _, match := range matches {
+		if len(match) < 4 {
+			continue
+		}
+		amount := parseAmount(match[2], match[3])
+		if amount > 0 {
+			amounts = append(amounts, amount)
+		}
+	}
+	if len(amounts) == 0 {
+		return map[string]any{
+			"salaryHumanReadableText": raw,
+		}
+	}
+
+	salaryType := "per year"
+	if strings.Contains(normalized, "per hour") || strings.Contains(normalized, "/hour") || strings.Contains(normalized, "/hr") || strings.Contains(normalized, " hourly") {
+		salaryType = "per hour"
+	} else if strings.Contains(normalized, "per month") || strings.Contains(normalized, "/month") || strings.Contains(normalized, "/mo") || strings.Contains(normalized, " monthly") {
+		salaryType = "per month"
+	} else if strings.Contains(normalized, "per week") || strings.Contains(normalized, "/week") || strings.Contains(normalized, "/wk") || strings.Contains(normalized, " weekly") {
+		salaryType = "per week"
+	} else if strings.Contains(normalized, "per day") || strings.Contains(normalized, "/day") || strings.Contains(normalized, " daily") {
+		salaryType = "per day"
+	}
+
+	currencyCode, currencySymbol, _ := currency.DetectCurrency(normalized)
+	minValue := amounts[0]
+	maxValue := amounts[0]
+	if len(amounts) > 1 {
+		maxValue = amounts[1]
+	}
+
+	payload := map[string]any{
+		"min":                     normalizeSalaryValue(minValue),
+		"max":                     normalizeSalaryValue(maxValue),
+		"salaryType":              salaryType,
+		"currencyCode":            currencyCode,
+		"currencySymbol":          currencySymbol,
+		"salaryHumanReadableText": raw,
+	}
+	if currencyCode == "USD" {
+		payload["minSalaryAsUSD"] = normalizeSalaryValue(minValue)
+		payload["maxSalaryAsUSD"] = normalizeSalaryValue(maxValue)
+	}
+	return payload
+}
+
+func normalizeSalaryValue(value float64) any {
+	if value == 0 {
+		return 0
+	}
+	if value == float64(int64(value)) {
+		return int64(value)
+	}
+	return math.Round(value*100) / 100
+}
+
+func normalizeSalaryText(value string) string {
+	text := html.UnescapeString(value)
+	replacer := strings.NewReplacer(
+		"Ã¢â€šÂ¬", "â‚¬",
+		"Ð²â€šÂ¬", "â‚¬",
+		"Ã‚Â£", "Â£",
+		"Ãƒâ€šÃ‚Â£", "Â£",
+		"Ð“â€šÐ’Ðˆ", "Â£",
+		"Ð’Ðˆ", "Â£",
+		"Ðˆ", "Â£",
+		"Ã¢â€šÂ¹", "â‚¹",
+	)
+	return replacer.Replace(text)
+}
+
+func parseAmount(numberText, suffix string) float64 {
+	clean := strings.TrimSpace(strings.ReplaceAll(numberText, ",", ""))
+	if clean == "" {
+		return 0
+	}
+	value, err := strconv.ParseFloat(clean, 64)
+	if err != nil {
+		return 0
+	}
+	switch strings.ToLower(strings.TrimSpace(suffix)) {
+	case "k":
+		value *= 1000
+	case "m":
+		value *= 1000000
+	}
+	return value
+}
+
+func extractSalaryRangeFromJobPostingLDJSON(htmlText string) any {
+	matches := jsonLDPattern.FindAllStringSubmatch(htmlText, -1)
+	for _, match := range matches {
+		payloadRaw := strings.TrimSpace(match[1])
+		if payloadRaw == "" {
+			continue
+		}
+		var decoded any
+		if err := json.Unmarshal([]byte(payloadRaw), &decoded); err != nil {
+			continue
+		}
+		if salaryRange := extractSalaryRangeFromLDNode(decoded); salaryRange != nil {
+			return salaryRange
+		}
+	}
+	return nil
+}
+
+func extractSalaryRangeFromLDNode(node any) any {
+	switch value := node.(type) {
+	case []any:
+		for _, item := range value {
+			if salaryRange := extractSalaryRangeFromLDNode(item); salaryRange != nil {
+				return salaryRange
+			}
+		}
+	case map[string]any:
+		if strings.EqualFold(stringValue(value["@type"]), "JobPosting") {
+			return buildSalaryRangeFromBaseSalary(value["baseSalary"])
+		}
+		for _, child := range value {
+			if salaryRange := extractSalaryRangeFromLDNode(child); salaryRange != nil {
+				return salaryRange
+			}
+		}
+	}
+	return nil
+}
+
+func buildSalaryRangeFromBaseSalary(value any) any {
+	baseSalary, _ := value.(map[string]any)
+	if baseSalary == nil {
+		return nil
+	}
+	quantitativeValue, _ := baseSalary["value"].(map[string]any)
+	if quantitativeValue == nil {
+		return nil
+	}
+	minValue, _ := quantitativeValue["minValue"].(float64)
+	maxValue, _ := quantitativeValue["maxValue"].(float64)
+	currencyCode := stringValue(baseSalary["currency"])
+	salaryType := salaryTypeFromUnitText(stringValue(quantitativeValue["unitText"]))
+	if minValue == 0 && maxValue == 0 && currencyCode == "" && salaryType == "" {
+		return nil
+	}
+	payload := map[string]any{
+		"min":          minValue,
+		"max":          maxValue,
+		"salaryType":   salaryType,
+		"currencyCode": currencyCode,
+	}
+	if currencyCode == "USD" {
+		payload["minSalaryAsUSD"] = minValue
+		payload["maxSalaryAsUSD"] = maxValue
+	}
+	return payload
+}
+
+func salaryTypeFromUnitText(value string) string {
+	switch normalizeToken(value) {
+	case "annually", "annual", "yearly", "year":
+		return "per year"
+	case "monthly", "month":
+		return "per month"
+	case "weekly", "week":
+		return "per week"
+	case "daily", "day":
+		return "per day"
+	case "hourly", "hour":
+		return "per hour"
+	default:
+		return ""
+	}
 }

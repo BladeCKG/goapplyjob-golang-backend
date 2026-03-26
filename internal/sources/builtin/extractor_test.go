@@ -1,6 +1,9 @@
 package builtin
 
 import (
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -215,6 +218,29 @@ func TestExtractRoleRequirementsFromBoldSectionHeaders(t *testing.T) {
 	}
 	if cleanedDescription == nil || !strings.Contains(cleanedDescription.(string), "Build scalable backend services.") {
 		t.Fatalf("expected cleaned description to include overview %#v", cleanedDescription)
+	}
+}
+
+func TestExtractJobUsesTooltipCountriesForMultipleBuiltinLocations(t *testing.T) {
+	htmlPath := filepath.Join("..", "..", "..", "test-extract", "builtin", "raw-job-2.html")
+	htmlBytes, err := os.ReadFile(htmlPath)
+	if err != nil {
+		t.Fatalf("read html: %v", err)
+	}
+
+	payload := ExtractJobFromHTML(string(htmlBytes), "")
+	locationCountries, _ := payload["locationCountries"].([]string)
+	expectedCountries := []string{"Argentina", "United States"}
+	if !reflect.DeepEqual(locationCountries, expectedCountries) {
+		t.Fatalf("unexpected locationCountries got=%#v want=%#v", locationCountries, expectedCountries)
+	}
+	if payload["locationCity"] != "Mexico" {
+		t.Fatalf("expected locationCity from jobLocation only, got %#v", payload["locationCity"])
+	}
+	locationStates, _ := payload["locationUSStates"].([]string)
+	expectedStates := []string{"Indiana"}
+	if !reflect.DeepEqual(locationStates, expectedStates) {
+		t.Fatalf("expected locationUSStates from jobLocation only got=%#v want=%#v", locationStates, expectedStates)
 	}
 }
 

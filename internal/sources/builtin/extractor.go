@@ -70,6 +70,7 @@ func ExtractJob(htmlText, companyHTML string) map[string]any {
 	}
 	salaryRange := parseSalaryRange(jobPosting, htmlText)
 	benefits := valueOrNil(jobPosting["jobBenefits"])
+	locationType := normalizeLocationType(stringValue(jobPosting["jobLocationType"]))
 
 	payload := map[string]any{
 		"id":                           extractExternalJobID(jobURL, identifierValue),
@@ -120,7 +121,7 @@ func ExtractJob(htmlText, companyHTML string) map[string]any {
 		"slug":                                     slugFromURL(extractCanonicalURL(htmlText)),
 		"isPromoted":                               false,
 		"employmentType":                           normalizeEmploymentType(stringValue(jobPosting["employmentType"])),
-		"locationType":                             normalizeLocationType(stringValue(jobPosting["jobLocationType"])),
+		"locationType":                             locationType,
 		"locationCity":                             locationCity,
 		"locationUSStates":                         locationStates,
 		"locationCountries":                        locationCountries,
@@ -1605,26 +1606,6 @@ func extractLocationFields(jobPosting map[string]any) (any, any, any, any) {
 		locationCity = strings.Join(cityValues, ", ")
 	}
 
-	applicantLocation := jobPosting["applicantLocationRequirements"]
-	applicantLocations, _ := applicantLocation.([]any)
-	if applicantLocations == nil {
-		if one, ok := applicantLocation.(map[string]any); ok {
-			applicantLocations = []any{one}
-		}
-	}
-	applicantCountries := []string{}
-	for _, item := range applicantLocations {
-		entry, _ := item.(map[string]any)
-		name := stringValue(entry["name"])
-		if name != "" && !containsString(applicantCountries, name) {
-			applicantCountries = append(applicantCountries, name)
-		}
-	}
-	applicantCountryLabel := ""
-	if len(applicantCountries) > 0 {
-		applicantCountryLabel = applicantCountries[0]
-	}
-
 	hasUSLocation := false
 	for _, country := range countriesFromLocations {
 		if isUSCountry(country) {
@@ -1632,22 +1613,13 @@ func extractLocationFields(jobPosting map[string]any) (any, any, any, any) {
 			break
 		}
 	}
-	hasUSApplicant := false
-	for _, country := range applicantCountries {
-		if isUSCountry(country) {
-			hasUSApplicant = true
-			break
-		}
-	}
 
 	primaryCountry := ""
 	switch {
-	case hasUSLocation || hasUSApplicant:
+	case hasUSLocation:
 		primaryCountry = "United States"
 	case len(countriesFromLocations) > 0:
 		primaryCountry = locationnorm.NormalizeCountryName(countriesFromLocations[0])
-	case applicantCountryLabel != "":
-		primaryCountry = locationnorm.NormalizeCountryName(applicantCountryLabel)
 	}
 	locationLabel := any(nil)
 	if strings.TrimSpace(primaryCountry) != "" {
@@ -1663,9 +1635,6 @@ func extractLocationFields(jobPosting map[string]any) (any, any, any, any) {
 		locationCountries = append(locationCountries, normalized)
 	}
 	for _, country := range countriesFromLocations {
-		appendCountry(country)
-	}
-	for _, country := range applicantCountries {
 		appendCountry(country)
 	}
 
