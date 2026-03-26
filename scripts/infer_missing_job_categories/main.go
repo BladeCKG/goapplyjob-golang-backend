@@ -34,7 +34,7 @@ func main() {
 	ctx := context.Background()
 	rows, err := db.SQL.QueryContext(
 		ctx,
-		`SELECT id, role_title, role_description, tech_stack
+		`SELECT id, role_title, role_description, role_requirements, tech_stack
 		   FROM parsed_jobs
 		  WHERE categorized_job_title IS NULL
 		  ORDER BY id ASC`,
@@ -49,13 +49,14 @@ func main() {
 	skippedRows := 0
 	for rows.Next() {
 		var (
-			id             int64
-			roleTitle      sql.NullString
-			roleDesc       sql.NullString
-			techStackRaw   sql.NullString
-			techStackValue any
+			id               int64
+			roleTitle        sql.NullString
+			roleDesc         sql.NullString
+			roleRequirements sql.NullString
+			techStackRaw     sql.NullString
+			techStackValue   any
 		)
-		if err := rows.Scan(&id, &roleTitle, &roleDesc, &techStackRaw); err != nil {
+		if err := rows.Scan(&id, &roleTitle, &roleDesc, &roleRequirements, &techStackRaw); err != nil {
 			log.Fatalf("scan row: %v", err)
 		}
 
@@ -68,7 +69,7 @@ func main() {
 
 		category, function, techStack, err := svc.SuggestCategoryWithTechStack(
 			ctx,
-			"",
+			roleRequirements.String,
 			roleTitle.String,
 			roleDesc.String,
 			techStackValue,

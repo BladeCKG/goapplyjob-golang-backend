@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"goapplyjob-golang-backend/internal/employmentnorm"
+	"goapplyjob-golang-backend/internal/locationnorm"
+	"goapplyjob-golang-backend/internal/sources/currency"
 	"html"
 	"math"
 	"net/url"
@@ -11,10 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"goapplyjob-golang-backend/internal/employmentnorm"
-	"goapplyjob-golang-backend/internal/locationnorm"
-	"goapplyjob-golang-backend/internal/sources/currency"
 
 	nethtml "golang.org/x/net/html"
 )
@@ -59,10 +58,7 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 	applyURL := extractApplyURL(htmlText, sourceURL)
 	descriptionHTML := stringValue(jobPosting["description"])
 	descriptionSections := extractDescriptionSections(descriptionHTML)
-	roleDescription := descriptionHTML
-	roleDescriptionText := firstNonEmpty(descriptionSections["role_description"], stringValue(toPlainText(descriptionHTML)))
-	roleRequirements := nilIfEmpty(descriptionSections["requirements"])
-	benefitsText := nilIfEmpty(descriptionSections["benefits"])
+	roleDescriptionText := stringValue(toPlainText(descriptionHTML))
 	companyTagline := nilIfEmpty(descriptionSections["company_description"])
 	externalID := stringValue(extractExternalID(stringValue(jobPosting["url"]), sourceURL, jobPosting["identifier"]))
 	jobSlug := buildJobSlug(stringValue(jobPosting["url"]))
@@ -77,9 +73,9 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 		"validUntilDate":               nilIfEmpty(parseISO(stringValue(jobPosting["validThrough"]))),
 		"roleTitle":                    nilIfEmpty(roleTitle),
 		"occupationalCategory":         nilIfEmpty(normalizeOccupationalCategory(stringValue(jobPosting["occupationalCategory"]))),
-		"roleDescription":              nilIfEmpty(roleDescription),
-		"roleRequirements":             roleRequirements,
-		"benefits":                     benefitsText,
+		"roleDescription":              nilIfEmpty(descriptionHTML),
+		"roleRequirements":             nil,
+		"benefits":                     nil,
 		"jobDescriptionSummary":        nilIfEmpty(trimDescriptionSummary(roleDescriptionText)),
 		"twoLineJobDescriptionSummary": nilIfEmpty(trimDescriptionSummary(roleDescriptionText)),
 		"descriptionLanguage":          "en",

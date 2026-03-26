@@ -1185,17 +1185,18 @@ func (h *Handler) autoCategorizeParsedJob(c *gin.Context) {
 	}
 
 	var (
-		source          string
-		roleTitle       sql.NullString
-		roleDescription sql.NullString
-		techStack       sql.NullString
+		source           string
+		roleTitle        sql.NullString
+		roleDescription  sql.NullString
+		roleRequirements sql.NullString
+		techStack        sql.NullString
 	)
 	err = h.db.SQL.QueryRowContext(c.Request.Context(),
-		`SELECT COALESCE(r.source, ''), p.role_title, p.role_description, p.tech_stack
+		`SELECT COALESCE(r.source, ''), p.role_title, p.role_description, p.role_requirements, p.tech_stack
 		 FROM parsed_jobs p
 		 LEFT JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
 		 WHERE p.id = ? LIMIT 1`, jobID).
-		Scan(&source, &roleTitle, &roleDescription, &techStack)
+		Scan(&source, &roleTitle, &roleDescription, &roleRequirements, &techStack)
 	if err == sql.ErrNoRows {
 		c.JSON(http.StatusNotFound, gin.H{"detail": "Parsed job not found"})
 		return
@@ -1208,7 +1209,7 @@ func (h *Handler) autoCategorizeParsedJob(c *gin.Context) {
 	parsedSvc := parsed.New(parsed.Config{}, h.db)
 	nextTitle, nextFunction, nextTechStack, err := parsedSvc.SuggestCategoryWithTechStack(
 		c.Request.Context(),
-		source,
+		roleRequirements.String,
 		roleTitle.String,
 		roleDescription.String,
 		parseJSONStringArray(techStack),

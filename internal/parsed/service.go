@@ -318,7 +318,7 @@ func (s *Service) RunForever() error {
 	}
 }
 
-func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, roleTitle, roleDescription string, techStack any, overrideTechStack bool) (string, string, []string, error) {
+func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, roleRequirements, roleTitle, roleDescription string, techStack any, overrideTechStack bool) (string, string, []string, error) {
 	normalizedTechStack := normalizeTechStack(techStack)
 	categorizedTitle := ""
 	categorizedFunction := ""
@@ -328,7 +328,7 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, _ string, ro
 		if shouldUseGroqClassification(stringValue(roleTitle)) {
 			groqCategory, groqRequiredSkills := classifyJobTitleWithGroqSync(
 				stringValue(roleTitle),
-				stringValue(roleDescription),
+				groqClassifierDescription(roleDescription, roleRequirements),
 				allowedCategories,
 			)
 			if groqCategory != "" {
@@ -1764,7 +1764,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 					log.Printf("parsed-job-worker groq_title_classify_start raw_job_id=%d source=%s role_title=%s", row.id, row.source, stringValue(payload["roleTitle"]))
 					groqCategory, groqRequiredSkills := classifyJobTitleWithGroqSync(
 						stringValue(payload["roleTitle"]),
-						stringValue(payload["roleDescription"]),
+						groqClassifierDescription(payload["roleDescription"], payload["roleRequirements"]),
 						allowedCategories,
 					)
 					if groqCategory != "" {
@@ -2830,4 +2830,16 @@ func stringFromPayload(value any) any {
 func stringValue(value any) string {
 	text, _ := value.(string)
 	return strings.TrimSpace(text)
+}
+
+func groqClassifierDescription(roleDescription, roleRequirements any) string {
+	description := stringValue(roleDescription)
+	requirements := stringValue(roleRequirements)
+	if requirements == "" {
+		return description
+	}
+	if description == "" {
+		return requirements
+	}
+	return description + "\n\nRole requirements:\n" + requirements
 }

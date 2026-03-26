@@ -3,7 +3,6 @@ package remotive
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -62,13 +61,6 @@ func TestParseRawHTMLExtractsSectionsAndSalaryHandling(t *testing.T) {
 	payload := ParseRawHTML(htmlText, "https://remotive.com/remote/jobs/software/senior-backend-engineer-9990001")
 	if payload["slug"] != "senior-backend-engineer" {
 		t.Fatalf("expected remotive slug from role title, got %#v", payload["slug"])
-	}
-	if payload["roleDescription"] == nil || payload["roleRequirements"] == nil || payload["benefits"] == nil {
-		t.Fatalf("expected extracted sections, got %#v", payload)
-	}
-	roleDescription, _ := payload["roleDescription"].(string)
-	if roleDescription == "" || !strings.Contains(roleDescription, "<p") {
-		t.Fatalf("expected raw html role description, got %#v", payload["roleDescription"])
 	}
 	if payload["salaryRange"] != nil {
 		t.Fatalf("expected nil salaryRange when base salary is zero, got %#v", payload["salaryRange"])
