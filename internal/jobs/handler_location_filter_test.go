@@ -10,6 +10,7 @@ const (
 	testCountryFilterWorldwide    = "Worldwide"
 	testCountryFilterAmericas     = "Americas"
 	testCountryFilterEMEA         = "EMEA"
+	testUSStateFilterCalifornia   = "California"
 )
 
 func TestExpandCountryFilterTermsExpandsRegions(t *testing.T) {
@@ -70,11 +71,14 @@ func TestExpandCountryFilterTermsExpandsCountryToRegions(t *testing.T) {
 	}
 }
 
-func containsString(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
+func TestBroadRegionTermsForUSStates(t *testing.T) {
+	got := broadRegionTermsForUSStates([]string{testUSStateFilterCalifornia})
+	for _, expected := range []string{testCountryFilterNorthAmerica, testCountryFilterAmericas, testCountryFilterWorldwide} {
+		if !containsString(got, expected) {
+			t.Fatalf("expected %q in expanded values, got %v", expected, got)
 		}
 	}
-	return false
+	if containsString(got, unitedStatesCountry) {
+		t.Fatalf("did not expect %q in broad region values, got %v", unitedStatesCountry, got)
+	}
 }

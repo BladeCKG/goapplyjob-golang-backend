@@ -73,6 +73,7 @@ func BuildJobsWhereSQLForEmailFilters(payload LastJobFiltersPayload) (string, []
 			input.Countries = append(input.Countries, trimmed)
 		}
 	}
+	input.Countries = expandCountryFilterTerms(input.Countries)
 	input.HasStructuredLocation = len(input.USStates) > 0 || len(input.Countries) > 0
 
 	input.CompanyFilter = strings.ToLower(strings.TrimSpace(payload.Company))

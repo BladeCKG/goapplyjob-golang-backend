@@ -346,6 +346,29 @@ func expandCountryFilterTerms(values []string) []string {
 	return expanded
 }
 
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func broadRegionTermsForUSStates(states []string) []string {
+	if len(states) == 0 {
+		return nil
+	}
+	terms := []string{}
+	for _, region := range locationnorm.RegionNamesForCountry(unitedStatesCountry) {
+		if region == unitedStatesCountry || containsString(terms, region) {
+			continue
+		}
+		terms = append(terms, region)
+	}
+	return terms
+}
+
 func resolvePostDateTimezone(name string, offsetRaw string) *time.Location {
 	trimmedName := strings.TrimSpace(name)
 	if trimmedName != "" {
@@ -1033,6 +1056,18 @@ func buildJobsWhereSQL(input listingFilterInput) (string, []any) {
 				continue
 			}
 			locOr = append(locOr, fmt.Sprintf("CAST(p.location_us_states AS jsonb) @> to_jsonb(ARRAY[%s::text])", b.add(state)))
+		}
+		if len(input.USStates) > 0 {
+			locOr = append(
+				locOr,
+				fmt.Sprintf(
+					"(CAST(p.location_countries AS jsonb) @> to_jsonb(ARRAY[%s::text]) AND COALESCE(jsonb_array_length(CAST(p.location_us_states AS jsonb)), 0) = 0)",
+					b.add(unitedStatesCountry),
+				),
+			)
+			for _, region := range broadRegionTermsForUSStates(input.USStates) {
+				locOr = append(locOr, fmt.Sprintf("CAST(p.location_countries AS jsonb) @> to_jsonb(ARRAY[%s::text])", b.add(region)))
+			}
 		}
 		for _, country := range input.Countries {
 			if strings.TrimSpace(country) == "" {
