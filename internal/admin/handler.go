@@ -51,6 +51,9 @@ func (h *Handler) Register(router gin.IRouter) {
 	router.GET("/admin/watcher-states", h.listWatcherStates)
 	router.PATCH("/admin/watcher-states/:stateID", h.updateWatcherState)
 	router.DELETE("/admin/watcher-states/:stateID", h.deleteWatcherState)
+	router.GET("/admin/worker-states", h.listWorkerStates)
+	router.PATCH("/admin/worker-states/:stateID", h.updateWorkerState)
+	router.DELETE("/admin/worker-states/:stateID", h.deleteWorkerState)
 	router.GET("/admin/parsed-jobs", h.listParsedJobs)
 	router.POST("/admin/parsed-jobs/:jobID/auto-categorize", h.autoCategorizeParsedJob)
 	router.PATCH("/admin/parsed-jobs/:jobID", h.updateParsedJob)
@@ -890,6 +893,135 @@ func (h *Handler) deleteWatcherState(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"deleted": true, "id": stateID})
 }
 
+func (h *Handler) listWorkerStates(c *gin.Context) {
+	if _, ok := h.requireAdmin(c); !ok {
+		return
+	}
+	limit, offset := queryLimitOffset(c, 200, 1000)
+	workerName := strings.TrimSpace(c.Query("worker_name"))
+	orderClause, err := queryOrderClause(c, map[string]string{
+		"id":          "id",
+		"worker_name": "worker_name",
+		"state":       "state",
+		"updated_at":  "updated_at",
+	}, "updated_at")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+
+	query := `SELECT id, worker_name, state::text, updated_at
+		FROM worker_states`
+	totalQuery := `SELECT COUNT(id) FROM worker_states`
+	args := []any{}
+	if workerName != "" {
+		query += " WHERE worker_name = ?"
+		totalQuery += " WHERE worker_name = ?"
+		args = append(args, workerName)
+	}
+	query += orderClause + " LIMIT ? OFFSET ?"
+	total := 0
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), totalQuery, args...).Scan(&total); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list worker states"})
+		return
+	}
+	queryArgs := append(append([]any{}, args...), limit, offset)
+
+	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, queryArgs...)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list worker states"})
+		return
+	}
+	defer rows.Close()
+
+	items := []gin.H{}
+	for rows.Next() {
+		var (
+			id         int64
+			workerName string
+			stateText  sql.NullString
+			updatedAt  string
+		)
+		if err := rows.Scan(&id, &workerName, &stateText, &updatedAt); err != nil {
+			continue
+		}
+		item := gin.H{
+			"id":          id,
+			"worker_name": workerName,
+			"state":       nil,
+			"updated_at":  updatedAt,
+		}
+		if stateText.Valid && strings.TrimSpace(stateText.String) != "" {
+			var parsed any
+			if err := json.Unmarshal([]byte(stateText.String), &parsed); err == nil {
+				item["state"] = parsed
+			} else {
+				item["state"] = stateText.String
+			}
+		}
+		items = append(items, item)
+	}
+	c.JSON(http.StatusOK, gin.H{"total": total, "items": items})
+}
+
+func (h *Handler) updateWorkerState(c *gin.Context) {
+	if _, ok := h.requireAdmin(c); !ok {
+		return
+	}
+	stateID, err := strconv.ParseInt(c.Param("stateID"), 10, 64)
+	if err != nil || stateID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid worker state id"})
+		return
+	}
+	var exists int64
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(), `SELECT id FROM worker_states WHERE id = ? LIMIT 1`, stateID).Scan(&exists); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "Worker state not found"})
+		return
+	}
+	updates, args, ok := parsePatchUpdates(c, map[string]func(*json.RawMessage) (any, bool){
+		"worker_name": jsonPatchString,
+		"state":       jsonPatchJSONOrNull,
+	})
+	if !ok {
+		return
+	}
+	if len(updates) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "No fields to update"})
+		return
+	}
+	updates = append(updates, "updated_at = ?")
+	args = append(args, time.Now().UTC().Format(time.RFC3339Nano))
+	query := `UPDATE worker_states SET ` + strings.Join(updates, ", ") + ` WHERE id = ?`
+	args = append(args, stateID)
+	if _, err := h.db.SQL.ExecContext(c.Request.Context(), query, args...); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to update worker state"})
+		return
+	}
+	h.respondWorkerState(c, stateID)
+}
+
+func (h *Handler) deleteWorkerState(c *gin.Context) {
+	if _, ok := h.requireAdmin(c); !ok {
+		return
+	}
+	stateID, err := strconv.ParseInt(c.Param("stateID"), 10, 64)
+	if err != nil || stateID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid worker state id"})
+		return
+	}
+	result, err := h.db.SQL.ExecContext(c.Request.Context(), `DELETE FROM worker_states WHERE id = ?`, stateID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to delete worker state"})
+		return
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "Worker state not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"deleted": true, "id": stateID})
+}
+
 func (h *Handler) listParsedJobs(c *gin.Context) {
 	if _, ok := h.requireAdmin(c); !ok {
 		return
@@ -1528,6 +1660,36 @@ func (h *Handler) respondWatcherState(c *gin.Context, id int64) {
 			resp["state_json"] = parsed
 		} else {
 			resp["state_json"] = stateJSON.String
+		}
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handler) respondWorkerState(c *gin.Context, id int64) {
+	var (
+		workerName string
+		stateText  sql.NullString
+		updatedAt  string
+	)
+	if err := h.db.SQL.QueryRowContext(c.Request.Context(),
+		`SELECT worker_name, state::text, updated_at
+		 FROM worker_states
+		 WHERE id = ?`, id).Scan(&workerName, &stateText, &updatedAt); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load worker state"})
+		return
+	}
+	resp := gin.H{
+		"id":          id,
+		"worker_name": workerName,
+		"state":       nil,
+		"updated_at":  updatedAt,
+	}
+	if stateText.Valid && strings.TrimSpace(stateText.String) != "" {
+		var parsed any
+		if err := json.Unmarshal([]byte(stateText.String), &parsed); err == nil {
+			resp["state"] = parsed
+		} else {
+			resp["state"] = stateText.String
 		}
 	}
 	c.JSON(http.StatusOK, resp)
