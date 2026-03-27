@@ -17,5 +17,5 @@ var AllowedJobFunctions = map[string]struct{}{
 func IsAllowedInference(jobCategory, jobFunction string) bool {
 	_, categoryAllowed := AllowedJobCategories[jobCategory]
 	_, functionAllowed := AllowedJobFunctions[jobFunction]
-	return categoryAllowed && functionAllowed
+	return categoryAllowed || functionAllowed
 }
