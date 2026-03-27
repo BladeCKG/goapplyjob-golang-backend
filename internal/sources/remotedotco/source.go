@@ -143,6 +143,7 @@ func ParseRawHTML(htmlText, _ string) map[string]any {
 	}
 
 	salaryRange := extractSalaryRangeFromJobPostingLDJSON(htmlText)
+	educationRequirementsCredentialCategory := extractEducationCredentialCategory(htmlText)
 	salaryRangeText := stringValue(jobDetails["salaryRange"])
 	if salaryRangeMap, ok := salaryRange.(map[string]any); ok && salaryRangeText != "" {
 		salaryRangeMap["salaryHumanReadableText"] = salaryRangeText
@@ -171,6 +172,7 @@ func ParseRawHTML(htmlText, _ string) map[string]any {
 		"isLead":                       isLead,
 		"company":                      company,
 		"salaryRange":                  salaryRange,
+		"educationRequirementsCredentialCategory": educationRequirementsCredentialCategory,
 		"descriptionLanguage":          "en",
 	}
 	return payload
@@ -654,6 +656,65 @@ func extractSalaryRangeFromJobPostingLDJSON(htmlText string) any {
 		}
 	}
 	return nil
+}
+
+func extractEducationCredentialCategory(htmlText string) any {
+	matches := jsonLDPattern.FindAllStringSubmatch(htmlText, -1)
+	for _, match := range matches {
+		payloadRaw := strings.TrimSpace(match[1])
+		if payloadRaw == "" {
+			continue
+		}
+		var decoded any
+		if err := json.Unmarshal([]byte(payloadRaw), &decoded); err != nil {
+			continue
+		}
+		if category := extractEducationCredentialCategoryFromLDNode(decoded); category != "" {
+			return category
+		}
+	}
+	return nil
+}
+
+func extractEducationCredentialCategoryFromLDNode(node any) string {
+	switch value := node.(type) {
+	case []any:
+		for _, item := range value {
+			if category := extractEducationCredentialCategoryFromLDNode(item); category != "" {
+				return category
+			}
+		}
+	case map[string]any:
+		if strings.EqualFold(stringValue(value["@type"]), "JobPosting") {
+			if category := extractCredentialCategoryValue(value["educationRequirements"]); category != "" {
+				return category
+			}
+		}
+		for _, child := range value {
+			if category := extractEducationCredentialCategoryFromLDNode(child); category != "" {
+				return category
+			}
+		}
+	}
+	return ""
+}
+
+func extractCredentialCategoryValue(value any) string {
+	switch item := value.(type) {
+	case []any:
+		for _, entry := range item {
+			if category := extractCredentialCategoryValue(entry); category != "" {
+				return category
+			}
+		}
+	case map[string]any:
+		if category := strings.TrimSpace(stringValue(item["credentialCategory"])); category != "" {
+			return category
+		}
+	case string:
+		return strings.TrimSpace(item)
+	}
+	return ""
 }
 
 func extractSalaryRangeFromLDNode(node any) any {

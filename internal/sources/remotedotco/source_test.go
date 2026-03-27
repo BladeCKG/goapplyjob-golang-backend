@@ -172,4 +172,34 @@ func TestParseRawHTMLRoleDescriptionFromFixtureRawJob3(t *testing.T) {
 	if salaryRange["salaryHumanReadableText"] != "195,000.00 - 408,000.00 USD Annually" {
 		t.Fatalf("expected salaryHumanReadableText from jobDetails.salaryRange, got %#v", salaryRange["salaryHumanReadableText"])
 	}
+	if payload["educationRequirementsCredentialCategory"] != "bachelor degree" {
+		t.Fatalf("expected educationRequirementsCredentialCategory from LD JSON, got %#v", payload["educationRequirementsCredentialCategory"])
+	}
+}
+
+func TestParseRawHTMLEducationRequirementFromFixtures(t *testing.T) {
+	testCases := []struct {
+		name     string
+		fileName string
+		want     any
+	}{
+		{name: "raw-job-1", fileName: "raw-job-1.html", want: nil},
+		{name: "raw-job-2", fileName: "raw-job-2.html", want: "professional certificate"},
+		{name: "raw-job-3", fileName: "raw-job-3.html", want: "bachelor degree"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			htmlPath := filepath.Join("..", "..", "..", "test-extract", "remotedotco", tc.fileName)
+			htmlBytes, err := os.ReadFile(htmlPath)
+			if err != nil {
+				t.Fatalf("read html: %v", err)
+			}
+
+			payload := ParseRawHTML(string(htmlBytes), "")
+			if got := payload["educationRequirementsCredentialCategory"]; !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("educationRequirementsCredentialCategory mismatch got=%#v want=%#v", got, tc.want)
+			}
+		})
+	}
 }
