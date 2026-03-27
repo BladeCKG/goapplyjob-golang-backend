@@ -24,11 +24,11 @@ func main() {
 
 	const (
 		defaultBuiltinBaseURL             = "https://builtin.com/jobs/remote?allLocations=true&page={page}"
-		defaultWorkableAPIURL             = "https://jobs.workable.com/api/v1/jobs?location=United States&workplace=remote&day_range=1"
+		defaultWorkableAPIURL             = "https://jobs.workable.com/api/v1/jobs?workplace=remote&day_range=1"
 		defaultRemotiveSitemapURLTemplate = "https://remotive.com/sitemap-job-postings-{partition}.xml"
 		defaultRemotiveSitemapMaxIndex    = 10
 		defaultRemotiveSitemapMinIndex    = 1
-		defaultDailyRemoteBaseURL         = "https://dailyremote.com/?location_country=United+States&sort_by=time&page={page}"
+		defaultDailyRemoteBaseURL         = "https://dailyremote.com/?sort_by=time&page={page}"
 		defaultRemoteDotCoSitemapURL      = "https://remote.co/latest-jobs-sitemap.xml"
 		defaultHiringCafeSearchURL        = "https://hiring.cafe/api/search-jobs?s="
 		defaultHiringCafeCountURL         = "https://hiring.cafe/api/search-jobs/get-total-count?s="
