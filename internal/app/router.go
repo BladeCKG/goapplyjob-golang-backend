@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"goapplyjob-golang-backend/internal/admin"
@@ -20,7 +21,9 @@ import (
 )
 
 func NewRouter(cfg config.Config, db *database.DB) *gin.Engine {
+	configureGin(cfg)
 	router := gin.New()
+	applyTrustedProxies(router, cfg.GinTrustedProxies)
 	router.Use(gin.Recovery())
 	router.Use(accessLog())
 
@@ -48,11 +51,39 @@ func NewRouter(cfg config.Config, db *database.DB) *gin.Engine {
 }
 
 func NewHealthRouter(db *database.DB) *gin.Engine {
+	cfg := config.Load()
+	configureGin(cfg)
 	router := gin.New()
+	applyTrustedProxies(router, cfg.GinTrustedProxies)
 	router.Use(gin.Recovery())
 	router.Use(accessLog())
 	registerHealthRoutes(router, db)
 	return router
+}
+
+func configureGin(cfg config.Config) {
+	mode := strings.TrimSpace(cfg.GinMode)
+	if mode == "" {
+		mode = gin.ReleaseMode
+	}
+	gin.SetMode(mode)
+}
+
+func applyTrustedProxies(router *gin.Engine, raw string) {
+	proxies := []string{}
+	for _, part := range strings.Split(raw, ",") {
+		value := strings.TrimSpace(part)
+		if value == "" {
+			continue
+		}
+		proxies = append(proxies, value)
+	}
+	if len(proxies) == 0 {
+		proxies = nil
+	}
+	if err := router.SetTrustedProxies(proxies); err != nil {
+		log.Printf("failed to set trusted proxies: %v", err)
+	}
 }
 
 func registerHealthRoutes(router *gin.Engine, db *database.DB) {

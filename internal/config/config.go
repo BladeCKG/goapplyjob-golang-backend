@@ -10,6 +10,8 @@ import (
 type Config struct {
 	HTTPHost                      string
 	HTTPPort                      string
+	GinMode                       string
+	GinTrustedProxies             string
 	DatabaseURL                   string
 	AuthCodeTTLMinutes            int
 	AuthSessionTTLMin             int
@@ -83,6 +85,8 @@ func Load() Config {
 	return Config{
 		HTTPHost:                      getenv("HTTP_HOSTNAME", "0.0.0.0"),
 		HTTPPort:                      getenv("HTTP_PORT", "8000"),
+		GinMode:                       getenv("GIN_MODE", "release"),
+		GinTrustedProxies:             getenv("GIN_TRUSTED_PROXIES", ""),
 		DatabaseURL:                   normalizeDatabaseURL(getenv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable")),
 		AuthCodeTTLMinutes:            getenvInt("AUTH_CODE_TTL_MINUTES", 10),
 		AuthSessionTTLMin:             getenvInt("AUTH_SESSION_TTL_MINUTES", 60*24*7),
