@@ -689,6 +689,53 @@ func TestFindDuplicateCrossSourceParsedJobByNormalizedURLIgnoringSubdomain(t *te
 	}
 }
 
+func TestFindDuplicateCrossSourceParsedJobSkipsEmailApplyTargets(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_duplicate_skip_email_url"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(context.Background(),
+		`INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
+		 VALUES (1, 'dailyremote', 'https://example.com/source-a', ?, true, false, true, 0, '{}'),
+		        (2, 'builtin', 'https://example.com/source-b', ?, true, false, false, 0, '{}')`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(),
+		`INSERT INTO parsed_jobs (raw_us_job_id, url, role_title, updated_at)
+		 VALUES (1, 'jobs@example.com', 'Backend Engineer', ?)`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(Config{}, db)
+	payload := map[string]any{
+		"url":       "jobs@example.com",
+		"roleTitle": "Backend Engineer",
+	}
+	duplicateID, isDuplicate, err := svc.findDuplicateCrossSourceParsedJob(context.Background(), 2, "builtin", payload, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isDuplicate || duplicateID != 0 {
+		t.Fatalf("expected email apply target to skip duplicate match, got duplicate=%v id=%d", isDuplicate, duplicateID)
+	}
+}
+
+func TestNormalizeJobURLForMatchKeepsURLsContainingAtSymbol(t *testing.T) {
+	normalized := normalizeJobURLForMatch("https://example.com/jobs/@platform-engineer")
+	if normalized != "example.com/jobs/@platform-engineer" {
+		t.Fatalf("expected URL with @ in path to normalize normally, got %q", normalized)
+	}
+}
+
 func TestProcessPendingRemoterocketshipDuplicateReplacementKeepsCreatedAtSource(t *testing.T) {
 	db, err := database.Open(testDatabaseURL(t, "test_parsed_remoterocketship_duplicate_keep_created_at_source"))
 	if err != nil {

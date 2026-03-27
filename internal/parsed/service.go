@@ -9,6 +9,7 @@ import (
 	"goapplyjob-golang-backend/internal/normalize/techstacknorm"
 	"goapplyjob-golang-backend/internal/sources/plugins"
 	"log"
+	"net/mail"
 	"net/url"
 	"os"
 	"regexp"
@@ -1847,7 +1848,7 @@ func hostFromURL(rawURL string) string {
 	if err != nil {
 		return ""
 	}
-	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	host := strings.ToLower(parsed.Hostname())
 	host = strings.Trim(host, ".")
 	host = strings.TrimPrefix(host, "www.")
 	return host
@@ -2268,11 +2269,14 @@ func normalizeJobURLForMatch(rawURL string) string {
 	if trimmed == "" {
 		return ""
 	}
+	if isEmailApplyTarget(trimmed) {
+		return ""
+	}
 	parsed, err := url.Parse(trimmed)
 	if err != nil {
 		return ""
 	}
-	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	host := strings.ToLower(parsed.Hostname())
 	host = strings.TrimPrefix(host, "www.")
 	if registrable, err := publicsuffix.EffectiveTLDPlusOne(host); err == nil && registrable != "" {
 		host = registrable
@@ -2283,6 +2287,23 @@ func normalizeJobURLForMatch(rawURL string) string {
 		path = "/"
 	}
 	return strings.ToLower(host + path)
+}
+
+func isEmailApplyTarget(value string) bool {
+	if value == "" {
+		return false
+	}
+	lowered := strings.ToLower(value)
+	if strings.HasPrefix(lowered, "mailto:") {
+		address := strings.TrimSpace(value[len("mailto:"):])
+		if queryIndex := strings.Index(address, "?"); queryIndex >= 0 {
+			address = address[:queryIndex]
+		}
+		parsed, err := mail.ParseAddress(address)
+		return err == nil && parsed.Address != ""
+	}
+	parsed, err := mail.ParseAddress(value)
+	return err == nil && parsed.Address != ""
 }
 
 func (s *Service) findDuplicateCrossSourceParsedJob(ctx context.Context, rawJobID int64, source string, payload map[string]any, companyID any) (int64, bool, error) {
