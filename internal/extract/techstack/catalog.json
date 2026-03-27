@@ -1,0 +1,1050 @@
+[
+  {
+    "canonical": "React",
+    "aliases": [
+      "React",
+      "ReactJS",
+      "React.js",
+      "reactjs",
+      "react.js",
+      "react framework",
+      "Reactjs"
+    ],
+    "caseSensitive": true
+  },
+  {
+    "canonical": "React Native",
+    "aliases": ["React Native", "React-Native", "react native", "react-native"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Next.js",
+    "aliases": ["next.js", "nextjs", "next js", "next-js"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Vue.js",
+    "aliases": ["vue.js", "vuejs", "vue js", "vue-js"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Nuxt.js",
+    "aliases": ["nuxt.js", "nuxtjs", "nuxt js", "nuxt-js"],
+    "caseSensitive": false
+  },
+  { "canonical": "Angular", "aliases": ["angular"], "caseSensitive": false },
+  {
+    "canonical": "AngularJS",
+    "aliases": ["angularjs", "angular.js"],
+    "caseSensitive": false
+  },
+  { "canonical": "Svelte", "aliases": ["svelte"], "caseSensitive": false },
+  {
+    "canonical": "SvelteKit",
+    "aliases": ["sveltekit", "svelte kit"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "SolidJS",
+    "aliases": ["solidjs", "solid js"],
+    "caseSensitive": false
+  },
+  { "canonical": "Qwik", "aliases": ["qwik"], "caseSensitive": false },
+  {
+    "canonical": "Ember.js",
+    "aliases": ["ember.js", "emberjs", "ember js"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Backbone.js",
+    "aliases": ["backbone.js", "backbonejs", "backbone js"],
+    "caseSensitive": false
+  },
+  { "canonical": "jQuery", "aliases": ["jquery"], "caseSensitive": false },
+  {
+    "canonical": "Node.js",
+    "aliases": ["node.js", "nodejs", "node js", "node-js"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Express.js",
+    "aliases": ["express.js", "expressjs", "express js", "express-js"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "NestJS",
+    "aliases": ["nestjs", "nest js", "nest.js", "nest-js"],
+    "caseSensitive": false
+  },
+  { "canonical": "Koa", "aliases": ["Koa"], "caseSensitive": true },
+  { "canonical": "Hapi", "aliases": ["hapi"], "caseSensitive": false },
+  { "canonical": "Django", "aliases": ["django"], "caseSensitive": false },
+  { "canonical": "Flask", "aliases": ["flask"], "caseSensitive": false },
+  {
+    "canonical": "FastAPI",
+    "aliases": ["fastapi", "fast api", "fast-api"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Starlette",
+    "aliases": ["starlette"],
+    "caseSensitive": false
+  },
+  { "canonical": "Celery", "aliases": ["celery"], "caseSensitive": false },
+  { "canonical": "Laravel", "aliases": ["laravel"], "caseSensitive": false },
+  { "canonical": "Symfony", "aliases": ["symfony"], "caseSensitive": false },
+  {
+    "canonical": "CodeIgniter",
+    "aliases": ["codeigniter", "code igniter"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Ruby on Rails",
+    "aliases": ["ruby on rails", "rails", "ror"],
+    "caseSensitive": false
+  },
+  { "canonical": "Sinatra", "aliases": ["sinatra"], "caseSensitive": false },
+  { "canonical": "Phoenix", "aliases": ["Phoenix"], "caseSensitive": true },
+  {
+    "canonical": "Phoenix LiveView",
+    "aliases": ["phoenix liveview"],
+    "caseSensitive": false
+  },
+  { "canonical": "Spring", "aliases": ["Spring"], "caseSensitive": true },
+  {
+    "canonical": "Spring Boot",
+    "aliases": ["spring boot", "spring-boot"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Spring MVC",
+    "aliases": ["spring mvc"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Hibernate",
+    "aliases": ["hibernate"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Micronaut",
+    "aliases": ["micronaut"],
+    "caseSensitive": false
+  },
+  { "canonical": "Quarkus", "aliases": ["quarkus"], "caseSensitive": false },
+  {
+    "canonical": "Dropwizard",
+    "aliases": ["dropwizard"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "ASP.NET",
+    "aliases": ["asp.net", "asp net", "asp-net"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "ASP.NET Core",
+    "aliases": ["asp.net core", "asp net core", "asp.netcore", "asp-net-core"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "ASP.NET MVC",
+    "aliases": ["asp.net mvc", "asp net mvc", "asp-net-mvc"],
+    "caseSensitive": false
+  },
+  { "canonical": "Blazor", "aliases": ["blazor"], "caseSensitive": false },
+  {
+    "canonical": "Entity Framework",
+    "aliases": ["entity framework", "entity-framework"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Entity Framework Core",
+    "aliases": [
+      "entity framework core",
+      "entity-framework-core",
+      "ef core",
+      "efcore"
+    ],
+    "caseSensitive": false
+  },
+  {
+    "canonical": ".NET",
+    "aliases": [".net", "dotnet", "dot net", "dot-net"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": ".NET Core",
+    "aliases": [
+      ".net core",
+      "dotnet core",
+      "dot net core",
+      "dotnet-core",
+      "net core"
+    ],
+    "caseSensitive": false
+  },
+  {
+    "canonical": ".NET Framework",
+    "aliases": [
+      ".net framework",
+      "dotnet framework",
+      "dot net framework",
+      "dotnet-framework",
+      "net framework"
+    ],
+    "caseSensitive": false
+  },
+  {
+    "canonical": ".NET MAUI",
+    "aliases": [".net maui", "dotnet maui", "dot net maui", "dotnet-maui"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "JavaScript",
+    "aliases": ["javascript"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "TypeScript",
+    "aliases": ["typescript", "type script"],
+    "caseSensitive": false
+  },
+  { "canonical": "Python", "aliases": ["python"], "caseSensitive": false },
+  { "canonical": "Java", "aliases": ["java"], "caseSensitive": false },
+  {
+    "canonical": "Go",
+    "aliases": [
+      "Golang",
+      "GoLang",
+      "golang",
+      "go language",
+      "go programming language",
+      "go,",
+      "Go,"
+    ],
+    "caseSensitive": false
+  },
+  { "canonical": "Rust", "aliases": ["Rust"], "caseSensitive": true },
+  { "canonical": "Ruby", "aliases": ["Ruby"], "caseSensitive": true },
+  { "canonical": "PHP", "aliases": ["php"], "caseSensitive": false },
+  { "canonical": "Kotlin", "aliases": ["kotlin"], "caseSensitive": false },
+  { "canonical": "Swift", "aliases": ["Swift"], "caseSensitive": true },
+  { "canonical": "Dart", "aliases": ["Dart"], "caseSensitive": true },
+  { "canonical": "Scala", "aliases": ["scala"], "caseSensitive": false },
+  { "canonical": "Elixir", "aliases": ["Elixir"], "caseSensitive": true },
+  {
+    "canonical": "C#",
+    "aliases": ["c#", "c-sharp", "c sharp"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "C++",
+    "aliases": ["c++", "cplusplus", "c plus plus", "cpp"],
+    "caseSensitive": false
+  },
+  { "canonical": "C", "aliases": ["C"], "caseSensitive": true },
+  {
+    "canonical": "Objective-C",
+    "aliases": ["objective-c", "objective c"],
+    "caseSensitive": false
+  },
+  { "canonical": "R", "aliases": ["R"], "caseSensitive": true },
+  { "canonical": "MATLAB", "aliases": ["matlab"], "caseSensitive": false },
+  { "canonical": "Perl", "aliases": ["Perl"], "caseSensitive": true },
+  { "canonical": "Lua", "aliases": ["Lua"], "caseSensitive": true },
+  { "canonical": "Haskell", "aliases": ["haskell"], "caseSensitive": false },
+  { "canonical": "Clojure", "aliases": ["clojure"], "caseSensitive": false },
+  { "canonical": "F#", "aliases": ["f#", "f sharp"], "caseSensitive": false },
+  { "canonical": "Groovy", "aliases": ["Groovy"], "caseSensitive": true },
+  {
+    "canonical": "Shell",
+    "aliases": ["bash", "shell scripting", "shell script"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "PowerShell",
+    "aliases": ["powershell", "power shell"],
+    "caseSensitive": false
+  },
+  { "canonical": "SQL", "aliases": ["sql"], "caseSensitive": false },
+  { "canonical": "NoSQL", "aliases": ["nosql"], "caseSensitive": false },
+  {
+    "canonical": "PL/SQL",
+    "aliases": ["pl/sql", "pl sql"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "T-SQL",
+    "aliases": ["t-sql", "tsql"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "GraphQL",
+    "aliases": ["graphql", "graph ql"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "OpenAPI",
+    "aliases": ["openapi", "open api", "open-api", "swagger", "swagger api"],
+    "caseSensitive": false
+  },
+  { "canonical": "Swagger", "aliases": ["swagger"], "caseSensitive": false },
+  { "canonical": "gRPC", "aliases": ["grpc", "g-rpc"], "caseSensitive": false },
+  {
+    "canonical": "REST API",
+    "aliases": ["REST API", "REST APIs", "RESTful API", "RESTful APIs"],
+    "caseSensitive": true
+  },
+  {
+    "canonical": "WebSocket",
+    "aliases": ["websocket", "web socket", "web-socket"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Socket.IO",
+    "aliases": ["socket.io", "socketio", "socket io", "socket-io"],
+    "caseSensitive": false
+  },
+  { "canonical": "AMQP", "aliases": ["amqp"], "caseSensitive": false },
+  { "canonical": "MQTT", "aliases": ["mqtt"], "caseSensitive": false },
+  {
+    "canonical": "OAuth 2.0",
+    "aliases": ["oauth 2.0", "oauth2", "oauth 2", "oauth2.0"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "OpenID Connect",
+    "aliases": ["openid connect", "open id connect", "oidc"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "SAML",
+    "aliases": ["saml", "saml 2.0"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "JWT",
+    "aliases": ["jwt", "json web token"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "PostgreSQL",
+    "aliases": ["postgresql", "postgres"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "MySQL",
+    "aliases": ["mysql", "my sql"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "MariaDB",
+    "aliases": ["mariadb", "maria db"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "SQLite",
+    "aliases": ["sqlite", "sqlite3"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Microsoft SQL Server",
+    "aliases": ["sql server", "mssql", "ms sql", "microsoft sql server"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Oracle Database",
+    "aliases": ["oracle database", "oracle db", "oracle sql", "oracle"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "MongoDB",
+    "aliases": ["mongodb", "mongo db"],
+    "caseSensitive": false
+  },
+  { "canonical": "Redis", "aliases": ["redis"], "caseSensitive": false },
+  {
+    "canonical": "Memcached",
+    "aliases": ["memcached", "memcache"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Elasticsearch",
+    "aliases": ["elasticsearch", "elastic search"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "OpenSearch",
+    "aliases": ["opensearch", "open search"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Apache Kafka",
+    "aliases": ["apache kafka", "kafka"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "RabbitMQ",
+    "aliases": ["rabbitmq", "rabbit mq"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Apache Pulsar",
+    "aliases": ["apache pulsar", "pulsar"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Apache ActiveMQ",
+    "aliases": ["apache activemq", "activemq", "active mq", "active-mq"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Snowflake",
+    "aliases": ["snowflake"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Databricks",
+    "aliases": ["databricks"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Apache Spark",
+    "aliases": ["apache spark", "spark"],
+    "caseSensitive": false
+  },
+  { "canonical": "dbt", "aliases": ["dbt"], "caseSensitive": false },
+  {
+    "canonical": "Airflow",
+    "aliases": ["airflow", "apache airflow"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "BigQuery",
+    "aliases": ["bigquery", "big query"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Amazon Redshift",
+    "aliases": ["amazon redshift", "redshift"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Amazon Athena",
+    "aliases": ["amazon athena", "athena"],
+    "caseSensitive": false
+  },
+  { "canonical": "Trino", "aliases": ["trino"], "caseSensitive": false },
+  { "canonical": "Presto", "aliases": ["presto"], "caseSensitive": false },
+  {
+    "canonical": "DynamoDB",
+    "aliases": ["dynamodb", "dynamo db"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Cassandra",
+    "aliases": ["cassandra", "apache cassandra"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Couchbase",
+    "aliases": ["couchbase"],
+    "caseSensitive": false
+  },
+  { "canonical": "Neo4j", "aliases": ["neo4j"], "caseSensitive": false },
+  {
+    "canonical": "Firestore",
+    "aliases": ["firestore", "cloud firestore"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Supabase",
+    "aliases": ["supabase", "superbase"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "PlanetScale",
+    "aliases": ["planetscale", "planet scale", "planet-scale"],
+    "caseSensitive": false
+  },
+  { "canonical": "Prisma", "aliases": ["prisma"], "caseSensitive": false },
+  {
+    "canonical": "SQLAlchemy",
+    "aliases": ["sqlalchemy", "sql alchemy"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Sequelize",
+    "aliases": ["sequelize"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "TypeORM",
+    "aliases": ["typeorm", "type orm"],
+    "caseSensitive": false
+  },
+  { "canonical": "Mongoose", "aliases": ["mongoose"], "caseSensitive": false },
+  { "canonical": "Pydantic", "aliases": ["pydantic"], "caseSensitive": false },
+  {
+    "canonical": "LangChain",
+    "aliases": ["langchain", "lang chain"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "LlamaIndex",
+    "aliases": ["llamaindex", "llama index"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Hugging Face",
+    "aliases": ["hugging face", "huggingface", "hugging-face"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "OpenAI API",
+    "aliases": ["openai api", "openai"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Anthropic Claude",
+    "aliases": ["anthropic claude", "claude api", "anthropic api"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "TensorFlow",
+    "aliases": ["tensorflow", "tensor flow"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "PyTorch",
+    "aliases": ["pytorch", "py torch"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "scikit-learn",
+    "aliases": [
+      "scikit-learn",
+      "scikit learn",
+      "sklearn",
+      "scikit learn library"
+    ],
+    "caseSensitive": false
+  },
+  { "canonical": "Pandas", "aliases": ["pandas"], "caseSensitive": false },
+  {
+    "canonical": "NumPy",
+    "aliases": ["numpy", "num py"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Jupyter",
+    "aliases": ["jupyter", "jupyter notebook", "jupyterlab"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "MLflow",
+    "aliases": ["mlflow", "ml flow"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Kubeflow",
+    "aliases": ["kubeflow", "kube flow"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "AWS",
+    "aliases": ["aws", "amazon web services"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Azure",
+    "aliases": ["azure", "microsoft azure"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "GCP",
+    "aliases": ["gcp", "google cloud platform", "google cloud"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Amazon EC2",
+    "aliases": ["amazon ec2", "aws ec2", "ec2"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Amazon ECS",
+    "aliases": ["amazon ecs", "aws ecs", "ecs"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Amazon EKS",
+    "aliases": ["amazon eks", "aws eks", "eks"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Amazon S3",
+    "aliases": ["amazon s3", "aws s3", "s3"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Amazon RDS",
+    "aliases": ["amazon rds", "aws rds", "rds"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Amazon Lambda",
+    "aliases": ["amazon lambda", "aws lambda", "lambda"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Amazon CloudWatch",
+    "aliases": ["amazon cloudwatch", "aws cloudwatch", "cloudwatch"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Amazon Cognito",
+    "aliases": ["amazon cognito", "aws cognito", "cognito"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Amazon IAM",
+    "aliases": ["amazon iam", "aws iam", "iam"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Amazon Kinesis",
+    "aliases": ["amazon kinesis", "aws kinesis", "kinesis"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Amazon SQS",
+    "aliases": ["amazon sqs", "aws sqs", "sqs"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Amazon SNS",
+    "aliases": ["amazon sns", "aws sns", "sns"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Amazon Bedrock",
+    "aliases": ["amazon bedrock", "aws bedrock", "bedrock"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Azure Functions",
+    "aliases": ["azure functions", "azure function", "azure-functions"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Azure DevOps",
+    "aliases": ["azure devops", "azure dev ops"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Azure Kubernetes Service",
+    "aliases": ["azure kubernetes service", "aks"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Google Kubernetes Engine",
+    "aliases": ["google kubernetes engine", "gke"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Google Cloud Run",
+    "aliases": ["google cloud run", "cloud run"],
+    "caseSensitive": false
+  },
+  { "canonical": "Firebase", "aliases": ["firebase"], "caseSensitive": false },
+  { "canonical": "Vercel", "aliases": ["vercel"], "caseSensitive": false },
+  { "canonical": "Netlify", "aliases": ["netlify"], "caseSensitive": false },
+  {
+    "canonical": "Cloudflare",
+    "aliases": ["cloudflare"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Cloudflare Workers",
+    "aliases": [
+      "cloudflare workers",
+      "cloudflare worker",
+      "cf workers",
+      "cf worker"
+    ],
+    "caseSensitive": false
+  },
+  { "canonical": "Docker", "aliases": ["docker"], "caseSensitive": false },
+  {
+    "canonical": "Kubernetes",
+    "aliases": ["kubernetes", "k8s"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Terraform",
+    "aliases": ["terraform"],
+    "caseSensitive": false
+  },
+  { "canonical": "Pulumi", "aliases": ["pulumi"], "caseSensitive": false },
+  { "canonical": "Ansible", "aliases": ["ansible"], "caseSensitive": false },
+  { "canonical": "Packer", "aliases": ["packer"], "caseSensitive": false },
+  { "canonical": "Helm", "aliases": ["helm"], "caseSensitive": false },
+  { "canonical": "Istio", "aliases": ["istio"], "caseSensitive": false },
+  { "canonical": "Linkerd", "aliases": ["linkerd"], "caseSensitive": false },
+  { "canonical": "Envoy", "aliases": ["envoy"], "caseSensitive": false },
+  { "canonical": "Nginx", "aliases": ["nginx"], "caseSensitive": false },
+  {
+    "canonical": "Apache HTTP Server",
+    "aliases": ["apache http server", "apache"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Apache Tomcat",
+    "aliases": ["apache tomcat", "tomcat"],
+    "caseSensitive": false
+  },
+  { "canonical": "Traefik", "aliases": ["traefik"], "caseSensitive": false },
+  {
+    "canonical": "HAProxy",
+    "aliases": ["haproxy", "ha proxy"],
+    "caseSensitive": false
+  },
+  { "canonical": "Linux", "aliases": ["linux"], "caseSensitive": false },
+  { "canonical": "Ubuntu", "aliases": ["ubuntu"], "caseSensitive": false },
+  { "canonical": "Debian", "aliases": ["debian"], "caseSensitive": false },
+  { "canonical": "CentOS", "aliases": ["centos"], "caseSensitive": false },
+  {
+    "canonical": "Red Hat Enterprise Linux",
+    "aliases": ["red hat enterprise linux", "redhat enterprise linux", "rhel"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Alpine Linux",
+    "aliases": ["alpine linux", "alpine"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Windows Server",
+    "aliases": ["windows server"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "macOS",
+    "aliases": ["macos", "os x"],
+    "caseSensitive": false
+  },
+  { "canonical": "Bun", "aliases": ["Bun"], "caseSensitive": true },
+  { "canonical": "Deno", "aliases": ["deno"], "caseSensitive": false },
+  { "canonical": "JVM", "aliases": ["jvm"], "caseSensitive": false },
+  {
+    "canonical": "Java Virtual Machine",
+    "aliases": ["java virtual machine"],
+    "caseSensitive": false
+  },
+  { "canonical": "V8", "aliases": ["V8"], "caseSensitive": true },
+  { "canonical": "Git", "aliases": ["Git"], "caseSensitive": true },
+  {
+    "canonical": "GitHub",
+    "aliases": ["github", "git hub"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "GitLab",
+    "aliases": ["gitlab", "git lab"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Bitbucket",
+    "aliases": ["bitbucket", "bit bucket"],
+    "caseSensitive": false
+  },
+  { "canonical": "Jenkins", "aliases": ["jenkins"], "caseSensitive": false },
+  {
+    "canonical": "CircleCI",
+    "aliases": ["circleci", "circle ci"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "GitHub Actions",
+    "aliases": ["github actions", "github action", "gh actions"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "GitLab CI",
+    "aliases": ["gitlab ci", "gitlab-ci"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Travis CI",
+    "aliases": ["travis ci", "travisci"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "TeamCity",
+    "aliases": ["teamcity", "team city"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Argo CD",
+    "aliases": ["argo cd", "argocd"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Prometheus",
+    "aliases": ["prometheus"],
+    "caseSensitive": false
+  },
+  { "canonical": "Grafana", "aliases": ["grafana"], "caseSensitive": false },
+  {
+    "canonical": "Datadog",
+    "aliases": ["datadog", "data dog"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "New Relic",
+    "aliases": ["new relic"],
+    "caseSensitive": false
+  },
+  { "canonical": "Sentry", "aliases": ["sentry"], "caseSensitive": false },
+  {
+    "canonical": "ELK Stack",
+    "aliases": ["elk stack"],
+    "caseSensitive": false
+  },
+  { "canonical": "Logstash", "aliases": ["logstash"], "caseSensitive": false },
+  { "canonical": "Kibana", "aliases": ["kibana"], "caseSensitive": false },
+  { "canonical": "Splunk", "aliases": ["splunk"], "caseSensitive": false },
+  { "canonical": "Jest", "aliases": ["jest"], "caseSensitive": false },
+  { "canonical": "Vitest", "aliases": ["vitest"], "caseSensitive": false },
+  { "canonical": "Mocha", "aliases": ["mocha"], "caseSensitive": false },
+  { "canonical": "Chai", "aliases": ["chai"], "caseSensitive": false },
+  { "canonical": "Jasmine", "aliases": ["jasmine"], "caseSensitive": false },
+  { "canonical": "Cypress", "aliases": ["cypress"], "caseSensitive": false },
+  {
+    "canonical": "Playwright",
+    "aliases": ["playwright"],
+    "caseSensitive": false
+  },
+  { "canonical": "Selenium", "aliases": ["selenium"], "caseSensitive": false },
+  {
+    "canonical": "Puppeteer",
+    "aliases": ["puppeteer"],
+    "caseSensitive": false
+  },
+  { "canonical": "JUnit", "aliases": ["junit"], "caseSensitive": false },
+  {
+    "canonical": "TestNG",
+    "aliases": ["testng", "test ng"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "pytest",
+    "aliases": ["pytest", "py test", "py-test"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "unittest",
+    "aliases": ["python unittest", "unittest"],
+    "caseSensitive": false
+  },
+  { "canonical": "RSpec", "aliases": ["rspec"], "caseSensitive": false },
+  {
+    "canonical": "Minitest",
+    "aliases": ["minitest", "mini test"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "PHPUnit",
+    "aliases": ["phpunit", "php unit"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "NUnit",
+    "aliases": ["nunit", "n unit"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "xUnit",
+    "aliases": ["xunit", "x unit"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "SonarQube",
+    "aliases": ["sonarqube", "sonar qube"],
+    "caseSensitive": false
+  },
+  { "canonical": "ESLint", "aliases": ["eslint"], "caseSensitive": false },
+  { "canonical": "Prettier", "aliases": ["prettier"], "caseSensitive": false },
+  {
+    "canonical": "Black",
+    "aliases": ["black formatter", "python black"],
+    "caseSensitive": false
+  },
+  { "canonical": "Ruff", "aliases": ["ruff"], "caseSensitive": false },
+  { "canonical": "Pylint", "aliases": ["pylint"], "caseSensitive": false },
+  {
+    "canonical": "Checkstyle",
+    "aliases": ["checkstyle", "check style"],
+    "caseSensitive": false
+  },
+  { "canonical": "OAuth", "aliases": ["oauth"], "caseSensitive": false },
+  {
+    "canonical": "Auth0",
+    "aliases": ["auth0", "auth zero"],
+    "caseSensitive": false
+  },
+  { "canonical": "Okta", "aliases": ["okta"], "caseSensitive": false },
+  {
+    "canonical": "Keycloak",
+    "aliases": ["keycloak", "key cloak"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Active Directory",
+    "aliases": ["active directory", "microsoft active directory"],
+    "caseSensitive": false
+  },
+  { "canonical": "LDAP", "aliases": ["ldap"], "caseSensitive": false },
+  { "canonical": "Kerberos", "aliases": ["kerberos"], "caseSensitive": false },
+  {
+    "canonical": "HashiCorp Vault",
+    "aliases": ["hashicorp vault", "hashicorp-vault", "vault"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "AWS Secrets Manager",
+    "aliases": ["aws secrets manager", "secrets manager"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Azure Key Vault",
+    "aliases": ["azure key vault", "key vault"],
+    "caseSensitive": false
+  },
+  { "canonical": "TLS", "aliases": ["tls"], "caseSensitive": false },
+  { "canonical": "SSL", "aliases": ["ssl"], "caseSensitive": false },
+  {
+    "canonical": "mTLS",
+    "aliases": ["mtls", "mutual tls"],
+    "caseSensitive": false
+  },
+  { "canonical": "Redux", "aliases": ["redux"], "caseSensitive": false },
+  {
+    "canonical": "Redux Toolkit",
+    "aliases": ["redux toolkit"],
+    "caseSensitive": false
+  },
+  { "canonical": "MobX", "aliases": ["mobx"], "caseSensitive": false },
+  { "canonical": "RxJS", "aliases": ["rxjs", "rx js"], "caseSensitive": false },
+  {
+    "canonical": "Apollo GraphQL",
+    "aliases": [
+      "apollo graphql",
+      "apollo graph ql",
+      "apollo client",
+      "apollo server",
+      "apollo-server"
+    ],
+    "caseSensitive": false
+  },
+  { "canonical": "Relay", "aliases": ["relay"], "caseSensitive": false },
+  {
+    "canonical": "Lodash",
+    "aliases": ["lodash", "lo dash"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Bootstrap",
+    "aliases": ["bootstrap"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Tailwind CSS",
+    "aliases": ["tailwind css", "tailwindcss"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Material UI",
+    "aliases": ["material ui", "material-ui", "mui"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Chakra UI",
+    "aliases": ["chakra ui"],
+    "caseSensitive": false
+  },
+  { "canonical": "HTML", "aliases": ["html"], "caseSensitive": false },
+  { "canonical": "CSS", "aliases": ["css"], "caseSensitive": false },
+  {
+    "canonical": "Sass",
+    "aliases": ["sass", "scss", "sass css"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Less",
+    "aliases": ["less css", "less"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "WebAssembly",
+    "aliases": ["webassembly", "web assembly", "wasm"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Webpack",
+    "aliases": ["webpack", "web pack"],
+    "caseSensitive": false
+  },
+  { "canonical": "Vite", "aliases": ["vite"], "caseSensitive": false },
+  { "canonical": "Rollup", "aliases": ["rollup"], "caseSensitive": false },
+  { "canonical": "Babel", "aliases": ["babel"], "caseSensitive": false },
+  {
+    "canonical": "TurboRepo",
+    "aliases": ["turborepo", "turbo repo", "turbo-repo"],
+    "caseSensitive": false
+  },
+  { "canonical": "Nx", "aliases": ["Nx"], "caseSensitive": true },
+  { "canonical": "Android", "aliases": ["android"], "caseSensitive": false },
+  {
+    "canonical": "Android SDK",
+    "aliases": ["android sdk"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Android Studio",
+    "aliases": ["android studio"],
+    "caseSensitive": false
+  },
+  { "canonical": "iOS", "aliases": ["ios"], "caseSensitive": false },
+  { "canonical": "Xcode", "aliases": ["xcode"], "caseSensitive": false },
+  { "canonical": "Flutter", "aliases": ["flutter"], "caseSensitive": false },
+  {
+    "canonical": "Jetpack Compose",
+    "aliases": ["jetpack compose", "compose ui"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "UIKit",
+    "aliases": ["uikit", "ui kit"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "SwiftUI",
+    "aliases": ["swiftui", "swift ui"],
+    "caseSensitive": false
+  },
+  { "canonical": "Expo", "aliases": ["expo"], "caseSensitive": false },
+  {
+    "canonical": "Capacitor",
+    "aliases": ["capacitor"],
+    "caseSensitive": false
+  },
+  {
+    "canonical": "Cordova",
+    "aliases": ["cordova", "apache cordova"],
+    "caseSensitive": false
+  },
+  { "canonical": "Electron", "aliases": ["electron"], "caseSensitive": false },
+  { "canonical": "Tauri", "aliases": ["tauri"], "caseSensitive": false }
+]

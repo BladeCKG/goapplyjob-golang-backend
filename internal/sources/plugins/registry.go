@@ -21,6 +21,7 @@ type SourcePlugin struct {
 	UseCompanyMatchKeys  bool
 	RunDuplicateCheck    bool
 	InferCategories      bool
+	UseManualTechStackExtraction bool
 }
 
 var registry = map[string]SourcePlugin{
@@ -35,6 +36,7 @@ var registry = map[string]SourcePlugin{
 		UseCompanyMatchKeys:  true,
 		RunDuplicateCheck:    true,
 		InferCategories:      false,
+		UseManualTechStackExtraction: false,
 	},
 	builtin.Source: {
 		Source:      builtin.Source,
@@ -49,6 +51,7 @@ var registry = map[string]SourcePlugin{
 		UseCompanyMatchKeys:  true,
 		RunDuplicateCheck:    true,
 		InferCategories:      true,
+		UseManualTechStackExtraction: false,
 	},
 	workable.Source: {
 		Source:      workable.Source,
@@ -65,6 +68,7 @@ var registry = map[string]SourcePlugin{
 		UseCompanyMatchKeys:  true,
 		RunDuplicateCheck:    true,
 		InferCategories:      true,
+		UseManualTechStackExtraction: true,
 	},
 	hiringcafe.Source: {
 		Source:      hiringcafe.Source,
@@ -81,6 +85,7 @@ var registry = map[string]SourcePlugin{
 		UseCompanyMatchKeys:  true,
 		RunDuplicateCheck:    true,
 		InferCategories:      true,
+		UseManualTechStackExtraction: true,
 	},
 	remotive.Source: {
 		Source:               remotive.Source,
@@ -93,6 +98,7 @@ var registry = map[string]SourcePlugin{
 		UseCompanyMatchKeys:  true,
 		RunDuplicateCheck:    true,
 		InferCategories:      true,
+		UseManualTechStackExtraction: true,
 	},
 	dailyremote.Source: {
 		Source:      dailyremote.Source,
@@ -107,6 +113,7 @@ var registry = map[string]SourcePlugin{
 		UseCompanyMatchKeys:  true,
 		RunDuplicateCheck:    true,
 		InferCategories:      true,
+		UseManualTechStackExtraction: true,
 	},
 	remotedotco.Source: {
 		Source:               remotedotco.Source,
@@ -119,6 +126,7 @@ var registry = map[string]SourcePlugin{
 		UseCompanyMatchKeys:  true,
 		RunDuplicateCheck:    true,
 		InferCategories:      true,
+		UseManualTechStackExtraction: true,
 	},
 }
 

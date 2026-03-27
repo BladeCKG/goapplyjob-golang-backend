@@ -1,0 +1,81 @@
+package techstack
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestExtractMatchesMajorTechStackAliases(t *testing.T) {
+	text := `We build APIs with Node.js, PostgreSQL, Redis, Docker, Kubernetes, and React.`
+	got := Extract(text)
+	want := []string{"Node.js", "PostgreSQL", "Redis", "Docker", "Kubernetes", "React"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Extract mismatch got=%#v want=%#v", got, want)
+	}
+}
+
+func TestExtractAllowsSpecialCharactersAroundAlias(t *testing.T) {
+	text := `(C#) / .NET / Node.js / ASP.NET Core / Kafka`
+	got := Extract(text)
+	want := []string{"C#", ".NET", "Node.js", "ASP.NET Core", "Apache Kafka"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Extract mismatch got=%#v want=%#v", got, want)
+	}
+}
+
+func TestExtractDescriptionRequirements(t *testing.T) {
+	got := ExtractDescriptionRequirements(
+		`Experience with React and TypeScript.`,
+		`Must have PostgreSQL and Docker.`,
+	)
+	want := []string{"React", "TypeScript", "PostgreSQL", "Docker"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ExtractDescriptionRequirements mismatch got=%#v want=%#v", got, want)
+	}
+}
+
+func TestExtractMatchesDotNetVariants(t *testing.T) {
+	text := `Strong experience with .Net, dotnet core, ASP Net Core, and NodeJS.`
+	got := Extract(text)
+	want := []string{".NET", ".NET Core", "ASP.NET Core", "Node.js"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Extract mismatch got=%#v want=%#v", got, want)
+	}
+}
+
+func TestExtractRespectsCaseSensitiveAliases(t *testing.T) {
+	text := `We need react, go, and restful apis in general prose.`
+	got := Extract(text)
+	if len(got) != 0 {
+		t.Fatalf("expected no case-sensitive matches, got=%#v", got)
+	}
+}
+
+func TestExtractKeepsCaseInsensitiveAliasesFlexible(t *testing.T) {
+	text := `Strong experience with NODEJS, POSTGRES, and docker required.`
+	got := Extract(text)
+	want := []string{"Node.js", "PostgreSQL", "Docker"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Extract mismatch got=%#v want=%#v", got, want)
+	}
+}
+
+func TestExtractMatchesBroaderTechnologyCategories(t *testing.T) {
+	text := `We use OAuth2, OpenAPI, Kafka, Redis, Terraform, GitHub Actions, Playwright, Keycloak, Pandas, and Cloudflare Workers.`
+	got := Extract(text)
+	want := []string{
+		"OAuth 2.0",
+		"OpenAPI",
+		"Apache Kafka",
+		"Redis",
+		"Terraform",
+		"GitHub Actions",
+		"Playwright",
+		"Keycloak",
+		"Pandas",
+		"Cloudflare Workers",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Extract mismatch got=%#v want=%#v", got, want)
+	}
+}

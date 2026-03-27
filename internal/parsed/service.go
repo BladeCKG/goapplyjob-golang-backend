@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/extract/techstack"
 	"goapplyjob-golang-backend/internal/normalize/techstacknorm"
 	"goapplyjob-golang-backend/internal/sources/plugins"
 	"log"
@@ -1123,6 +1124,13 @@ func normalizeTechStack(values any) []string {
 	return techstacknorm.Normalize(values)
 }
 
+func extractManualTechStackIfNeeded(roleDescription, roleRequirements string, normalizedTechStack []string, extractionEnabled bool, categorizedTitle, categorizedFunction string) []string {
+	if len(normalizedTechStack) > 0 || !extractionEnabled || !techstack.IsAllowedInference(categorizedTitle, categorizedFunction) {
+		return normalizedTechStack
+	}
+	return techstacknorm.Normalize(techstack.ExtractDescriptionRequirements(roleDescription, roleRequirements))
+}
+
 func normalizeCountryName(value string) string {
 	normalized := regexp.MustCompile(`[^a-zA-Z.\s]`).ReplaceAllString(value, "")
 	normalized = strings.TrimSpace(strings.ToLower(regexp.MustCompile(`\s+`).ReplaceAllString(normalized, " ")))
@@ -1406,7 +1414,6 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			payload["locationUSStates"],
 		)
 		normalizedLocationCountries := normalizeLocationCountries(payload["locationCountries"])
-		normalizedTechStackJSON := jsonStringOrNil(normalizedTechStack)
 		companyID, companyErr := s.upsertCompanyFromPayload(ctx, payload, plugin)
 		if companyErr != nil {
 			log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, companyErr)
@@ -1476,6 +1483,26 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				)
 			}
 		}
+		normalizedTechStack = extractManualTechStackIfNeeded(
+			stringValue(payload["roleDescription"]),
+			stringValue(payload["roleRequirements"]),
+			normalizedTechStack,
+			plugin.UseManualTechStackExtraction,
+			stringValue(categorizedTitle),
+			stringValue(categorizedFunction),
+		)
+		if plugin.UseManualTechStackExtraction && len(normalizedTechStack) > 0 {
+			log.Printf(
+				"parsed-job-worker tech_stack_extracted raw_job_id=%d source=%s role_title=%q category=%q function=%q tech_stack_len=%d",
+				row.id,
+				row.source,
+				stringValue(payload["roleTitle"]),
+				stringValue(categorizedTitle),
+				stringValue(categorizedFunction),
+				len(normalizedTechStack),
+			)
+		}
+		normalizedTechStackJSON := jsonStringOrNil(normalizedTechStack)
 
 		if isNonRemoterocketshipDuplicate {
 			retries, retryDelay := parsedLockRetryConfig()
