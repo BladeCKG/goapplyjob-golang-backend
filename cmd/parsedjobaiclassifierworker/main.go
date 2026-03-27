@@ -24,7 +24,7 @@ func main() {
 	defer db.Close()
 
 	svc := parsedaiclassifier.New(parsedaiclassifier.Config{
-		BatchSize:           config.GetenvInt("PARSED_JOB_AI_CLASSIFIER_BATCH_SIZE", 25),
+		BatchSize:           config.GetenvInt("PARSED_JOB_AI_CLASSIFIER_BATCH_SIZE", 200),
 		PollSeconds:         config.GetenvFloat("PARSED_JOB_AI_CLASSIFIER_POLL_SECONDS", 5),
 		RunOnce:             config.GetenvBool("PARSED_JOB_AI_CLASSIFIER_RUN_ONCE", false),
 		ErrorBackoffSeconds: config.GetenvInt("WORKER_ERROR_BACKOFF_SECONDS", 10),

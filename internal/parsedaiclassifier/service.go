@@ -16,7 +16,7 @@ import (
 
 const (
 	workerStateLastClassifiedParsedJobIDKey = "last_classified_parsed_job_id"
-	defaultBatchSizeParsedJobAIClassifier   = 25
+	defaultBatchSizeParsedJobAIClassifier   = 200
 )
 
 type ClassifyFunc func(context.Context, string, string, string) (string, string, []string, error)

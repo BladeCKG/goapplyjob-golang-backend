@@ -157,7 +157,7 @@ func main() {
 				}, db)
 				parsedSvc.EnabledSources = enabledSources
 				parsedAIClassifierSvc := parsedaiclassifier.New(parsedaiclassifier.Config{
-					BatchSize:           config.GetenvInt("PARSED_JOB_AI_CLASSIFIER_BATCH_SIZE", 25),
+					BatchSize:           config.GetenvInt("PARSED_JOB_AI_CLASSIFIER_BATCH_SIZE", 200),
 					PollSeconds:         config.GetenvFloat("PARSED_JOB_AI_CLASSIFIER_POLL_SECONDS", 5),
 					RunOnce:             true,
 					ErrorBackoffSeconds: errorBackoffSeconds,
