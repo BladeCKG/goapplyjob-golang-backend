@@ -5,7 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 EXTRA = ROOT / 'extra'
-INTERNAL = ROOT / 'internal' / 'locationnorm'
+INTERNAL = ROOT / 'internal' / 'normalize' / 'locationnorm'
 COUNTRIES_CSV = EXTRA / 'wikipedia-iso-country-codes.csv'
 STATES_CSV = EXTRA / 'states.csv'
 OUTPUT_JSON = INTERNAL / 'location-normalization.json'

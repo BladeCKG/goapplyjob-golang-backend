@@ -5,9 +5,11 @@ import (
 	"errors"
 	"goapplyjob-golang-backend/internal/app"
 	"goapplyjob-golang-backend/internal/config"
+	"goapplyjob-golang-backend/internal/constants"
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/importer"
 	"goapplyjob-golang-backend/internal/parsed"
+	"goapplyjob-golang-backend/internal/parsedaiclassifier"
 	"goapplyjob-golang-backend/internal/raw"
 	"goapplyjob-golang-backend/internal/scraper"
 	"goapplyjob-golang-backend/internal/sources/remotedotco"
@@ -154,9 +156,16 @@ func main() {
 					WorkerCount:         config.GetenvInt("PARSED_JOB_WORKER_COUNT", 1),
 				}, db)
 				parsedSvc.EnabledSources = enabledSources
+				parsedAIClassifierSvc := parsedaiclassifier.New(parsedaiclassifier.Config{
+					BatchSize:           config.GetenvInt("PARSED_JOB_AI_CLASSIFIER_BATCH_SIZE", 25),
+					PollSeconds:         config.GetenvFloat("PARSED_JOB_AI_CLASSIFIER_POLL_SECONDS", 5),
+					RunOnce:             true,
+					ErrorBackoffSeconds: errorBackoffSeconds,
+				}, db)
+				parsedAIClassifierSvc.EnabledSources = enabledSources
 
 				hadError := false
-				errorDetails := make([]string, 0, 4)
+				errorDetails := make([]string, 0, 5)
 				log.Printf("worker-chain cycle_start")
 				stepTimeout := time.Duration(stepTimeoutSeconds) * time.Second
 				type stepResult struct {
@@ -164,35 +173,41 @@ func main() {
 					count int
 					err   error
 				}
-				results := make(chan stepResult, 4)
+				results := make(chan stepResult, 5)
 				go func() {
-					err := runStepWithTimeout("watcher", stepTimeout, func(ctx context.Context) error {
+					err := runStepWithTimeout(constants.WorkerNameWatcher, stepTimeout, func(ctx context.Context) error {
 						return watcherSvc.RunOnceWithContext(ctx)
 					})
-					results <- stepResult{name: "watcher", err: err}
+					results <- stepResult{name: constants.WorkerNameWatcher, err: err}
 				}()
 				go func() {
-					err := runStepWithTimeout("importer", stepTimeout, func(ctx context.Context) error {
+					err := runStepWithTimeout(constants.WorkerNameImporter, stepTimeout, func(ctx context.Context) error {
 						return importerSvc.RunOnceWithContext(ctx)
 					})
-					results <- stepResult{name: "importer", err: err}
+					results <- stepResult{name: constants.WorkerNameImporter, err: err}
 				}()
 				go func() {
 					count, err := runCountStepWithTimeout(stepTimeout, func(ctx context.Context) (int, error) {
 						return rawSvc.RunOnce(ctx)
 					})
-					results <- stepResult{name: "raw", count: count, err: err}
+					results <- stepResult{name: constants.WorkerNameRaw, count: count, err: err}
 				}()
 				go func() {
 					count, err := runCountStepWithTimeout(stepTimeout, func(ctx context.Context) (int, error) {
 						return parsedSvc.RunOnce(ctx)
 					})
-					results <- stepResult{name: "parsed", count: count, err: err}
+					results <- stepResult{name: constants.WorkerNameParsed, count: count, err: err}
 				}()
-				for i := 0; i < 4; i++ {
+				go func() {
+					count, err := runCountStepWithTimeout(stepTimeout, func(ctx context.Context) (int, error) {
+						return parsedAIClassifierSvc.RunOnce(ctx)
+					})
+					results <- stepResult{name: constants.WorkerNameParsedAIClassifier, count: count, err: err}
+				}()
+				for i := 0; i < 5; i++ {
 					res := <-results
 					switch res.name {
-					case "watcher":
+					case constants.WorkerNameWatcher:
 						if res.err != nil {
 							log.Printf("worker-chain watcher_failed error=%v", res.err)
 							hadError = true
@@ -200,7 +215,7 @@ func main() {
 						} else {
 							log.Printf("worker-chain watcher_done")
 						}
-					case "importer":
+					case constants.WorkerNameImporter:
 						if res.err != nil {
 							log.Printf("worker-chain importer_failed error=%v", res.err)
 							hadError = true
@@ -208,7 +223,7 @@ func main() {
 						} else {
 							log.Printf("worker-chain importer_done")
 						}
-					case "raw":
+					case constants.WorkerNameRaw:
 						if res.err != nil {
 							log.Printf("worker-chain raw_failed error=%v", res.err)
 							hadError = true
@@ -216,13 +231,21 @@ func main() {
 						} else {
 							log.Printf("worker-chain raw_done processed=%d", res.count)
 						}
-					case "parsed":
+					case constants.WorkerNameParsed:
 						if res.err != nil {
 							log.Printf("worker-chain parsed_failed error=%v", res.err)
 							hadError = true
 							errorDetails = append(errorDetails, "parsed="+res.err.Error())
 						} else {
 							log.Printf("worker-chain parsed_done processed=%d", res.count)
+						}
+					case constants.WorkerNameParsedAIClassifier:
+						if res.err != nil {
+							log.Printf("worker-chain parsed_ai_classifier_failed error=%v", res.err)
+							hadError = true
+							errorDetails = append(errorDetails, "parsed_ai_classifier="+res.err.Error())
+						} else {
+							log.Printf("worker-chain parsed_ai_classifier_done processed=%d", res.count)
 						}
 					}
 				}

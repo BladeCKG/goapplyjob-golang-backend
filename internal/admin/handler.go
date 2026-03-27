@@ -9,7 +9,7 @@ import (
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/email"
 	"goapplyjob-golang-backend/internal/jobs"
-	"goapplyjob-golang-backend/internal/parsed"
+	"goapplyjob-golang-backend/internal/parsedaiclassifier"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1206,8 +1206,8 @@ func (h *Handler) autoCategorizeParsedJob(c *gin.Context) {
 		return
 	}
 
-	parsedSvc := parsed.New(parsed.Config{}, h.db)
-	nextTitle, nextFunction, nextTechStack, err := parsedSvc.SuggestCategoryWithTechStack(
+	aiClassifierSvc := parsedaiclassifier.New(parsedaiclassifier.Config{}, h.db)
+	nextTitle, nextFunction, nextTechStack, err := aiClassifierSvc.SuggestCategoryWithTechStack(
 		c.Request.Context(),
 		roleRequirements.String,
 		roleTitle.String,

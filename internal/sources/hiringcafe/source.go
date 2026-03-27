@@ -1,7 +1,7 @@
 package hiringcafe
 
 import (
-	"goapplyjob-golang-backend/internal/employmentnorm"
+	"goapplyjob-golang-backend/internal/normalize/employmentnorm"
 	"goapplyjob-golang-backend/internal/sources/remoterocketship"
 	"net/url"
 	"regexp"
@@ -137,20 +137,20 @@ func NormalizeJobs(results []map[string]any) []NormalizedJob {
 			URL:      rawURL,
 			PostDate: *postDate,
 			RawPayload: map[string]any{
-				"id":               requisitionID,
-				"created_at":       postDate.UTC().Format(time.RFC3339Nano),
-				"url":              valueString(item["apply_url"]),
-				"roleTitle":        roleTitle,
-				"employmentType":   normalizeEmploymentType(valueStringSlice(v5Data["commitment"])),
-				"location":         nil,
-				"locationCity":     nil,
-				"locationUSStates": []string{},
+				"id":                requisitionID,
+				"created_at":        postDate.UTC().Format(time.RFC3339Nano),
+				"url":               valueString(item["apply_url"]),
+				"roleTitle":         roleTitle,
+				"employmentType":    normalizeEmploymentType(valueStringSlice(v5Data["commitment"])),
+				"location":          nil,
+				"locationCity":      nil,
+				"locationUSStates":  []string{},
 				"locationCountries": []string{},
-				"isEntryLevel": isEntry,
-				"isJunior":     isJunior,
-				"isMidLevel":   isMid,
-				"isSenior":     isSenior,
-				"isLead":       isLead,
+				"isEntryLevel":      isEntry,
+				"isJunior":          isJunior,
+				"isMidLevel":        isMid,
+				"isSenior":          isSenior,
+				"isLead":            isLead,
 				"educationRequirementsCredentialCategory": nil,
 			},
 		})

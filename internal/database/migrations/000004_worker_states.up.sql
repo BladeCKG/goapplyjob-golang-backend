@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS worker_states (
+    id SERIAL PRIMARY KEY,
+    worker_name VARCHAR(128) NOT NULL UNIQUE,
+    state JSON,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

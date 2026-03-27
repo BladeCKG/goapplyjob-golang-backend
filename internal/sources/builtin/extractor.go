@@ -3,8 +3,8 @@ package builtin
 import (
 	"encoding/json"
 	"errors"
-	"goapplyjob-golang-backend/internal/employmentnorm"
-	"goapplyjob-golang-backend/internal/locationnorm"
+	"goapplyjob-golang-backend/internal/normalize/employmentnorm"
+	"goapplyjob-golang-backend/internal/normalize/locationnorm"
 	"html"
 	"net/url"
 	"regexp"

@@ -146,41 +146,6 @@ func TestTokenizeRoleTitleRemovesWorkModeNoise(t *testing.T) {
 	}
 }
 
-func TestShouldUseGroqClassificationAllowsRequestedRoleFamilies(t *testing.T) {
-	for _, roleTitle := range []string{
-		"Backend Engineer",
-		"Senior Developer Advocate",
-		"Data Scientist",
-		"Security Analyst",
-		"Systems Administrator",
-		"Product Designer",
-		"Solutions Architect",
-		"Field Technician",
-		"Radiology Technologist",
-		"CNC Machinist",
-		"Engineering Manager",
-		"Physical Therapist",
-		"Implementation Specialist",
-		"Operations Coordinator",
-	} {
-		if !shouldUseGroqClassification(roleTitle) {
-			t.Fatalf("expected Groq classification for %q", roleTitle)
-		}
-	}
-}
-
-func TestShouldUseGroqClassificationSkipsOtherRoleFamilies(t *testing.T) {
-	for _, roleTitle := range []string{
-		"Recruiter",
-		"Sales Representative",
-		"",
-	} {
-		if shouldUseGroqClassification(roleTitle) {
-			t.Fatalf("did not expect Groq classification for %q", roleTitle)
-		}
-	}
-}
-
 func TestJaccardSimilarityWorksForOverlap(t *testing.T) {
 	left := map[string]struct{}{"backend": {}, "engineer": {}, "python": {}}
 	right := map[string]struct{}{"backend": {}, "engineer": {}, "go": {}}

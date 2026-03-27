@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/normalize/techstacknorm"
 	"goapplyjob-golang-backend/internal/sources/plugins"
 	"log"
 	"net/url"
@@ -90,158 +91,6 @@ var countryAliases = map[string]string{
 	"netherlands":    "Netherlands",
 }
 
-var techStackAliases = map[string]string{
-	"nodejs":                   "Node.js",
-	"node.js":                  "Node.js",
-	"node js":                  "Node.js",
-	"reactjs":                  "React",
-	"react.js":                 "React",
-	"nextjs":                   "Next.js",
-	"next.js":                  "Next.js",
-	"vuejs":                    "Vue.js",
-	"vue.js":                   "Vue.js",
-	"angularjs":                "AngularJS",
-	"javascript":               "JavaScript",
-	"typescript":               "TypeScript",
-	"c#":                       "C#",
-	"csharp":                   "C#",
-	"c++":                      "C++",
-	"cplusplus":                "C++",
-	"golang":                   "Go",
-	"postgres":                 "PostgreSQL",
-	"postgresql":               "PostgreSQL",
-	"mongodb":                  "MongoDB",
-	"graphql":                  "GraphQL",
-	"graph ql":                 "GraphQL",
-	"rest api":                 "REST API",
-	"restful api":              "REST API",
-	"rest apis":                "REST API",
-	"restful apis":             "REST API",
-	"apis":                     "API",
-	"aws":                      "AWS",
-	"gcp":                      "GCP",
-	"azure":                    "Azure",
-	".net":                     ".NET",
-	"dotnet":                   ".NET",
-	"asp.net":                  "ASP.NET",
-	"asp.net core":             "ASP.NET Core",
-	"grpc":                     "gRPC",
-	"json":                     "JSON",
-	"xml":                      "XML",
-	"html":                     "HTML",
-	"html5":                    "HTML5",
-	"css":                      "CSS",
-	"css3":                     "CSS3",
-	"scss":                     "SCSS",
-	"sass":                     "Sass",
-	"sql":                      "SQL",
-	"nosql":                    "NoSQL",
-	"no-sql":                   "NoSQL",
-	"etl":                      "ETL",
-	"elt":                      "ELT",
-	"etl/elt":                  "ETL/ELT",
-	"ci/cd":                    "CI/CD",
-	"cicd":                     "CI/CD",
-	"iac":                      "IaC",
-	"infrastructure as code":   "Infrastructure as Code",
-	"k8s":                      "Kubernetes",
-	"kubernetes (k8s)":         "Kubernetes",
-	"tailwindcss":              "Tailwind CSS",
-	"tailwind css":             "Tailwind CSS",
-	"google tag manager (gtm)": "Google Tag Manager",
-	"google tag manager":       "Google Tag Manager",
-	"gtm":                      "Google Tag Manager",
-	"sfdc":                     "Salesforce",
-	"sfdc crm":                 "Salesforce",
-	"salesforce.com":           "Salesforce",
-	"salesforce crm":           "Salesforce",
-}
-
-var groqTechStackExtractAllowedCategories = []string{
-	"expert",
-	"experts",
-	"engineer",
-	"engineers",
-	"programmer",
-	"programmers",
-	"developer",
-	"developers",
-	"scientist",
-	"scientists",
-	"analyst",
-	"analysts",
-	"administrator",
-	"administrators",
-	"designer",
-	"designers",
-	"architect",
-	"architects",
-	"technician",
-	"technicians",
-	"technologist",
-	"technologists",
-	"machinist",
-	"machinists",
-	"manager",
-	"managers",
-	"therapist",
-	"therapists",
-	"specialist",
-	"specialists",
-	"coordinator",
-	"coordinators",
-	"eng",
-	"engr",
-	"engrs",
-	"dev",
-	"devs",
-	"scient",
-	"anal",
-	"admin",
-	"admins",
-	"des",
-	"arch",
-	"tech",
-	"technol",
-	"machin",
-	"mgr",
-	"therap",
-	"spec",
-	"specs",
-	"coord",
-	"coords",
-	"swe",
-	"se",
-	"sse",
-	"sde",
-	"sdet",
-	"de",
-	"da",
-	"ba",
-	"ds",
-	"dba",
-	"sysadmin",
-	"netadmin",
-	"uxd",
-	"uid",
-	"ux",
-	"ui",
-	"ea",
-	"ta",
-	"pm",
-	"em",
-	"pt",
-	"ot",
-	"rt",
-	"spec",
-	"engineering",
-	"technology",
-}
-
-var techStackDropValues = map[string]struct{}{
-	"n/a": {}, "na": {}, "none": {}, "null": {}, "unknown": {}, "tbd": {},
-}
-
 var normalizationReplacements = []struct {
 	pattern     *regexp.Regexp
 	replacement string
@@ -318,66 +167,6 @@ func (s *Service) RunForever() error {
 	}
 }
 
-func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, roleRequirements, roleTitle, roleDescription string, techStack any, overrideTechStack bool) (string, string, []string, error) {
-	normalizedTechStack := normalizeTechStack(techStack)
-	categorizedTitle := ""
-	categorizedFunction := ""
-
-	if len(normalizedTechStack) == 0 || overrideTechStack {
-		allowedCategories, categoryFunctions, _ := s.loadAllowedJobCategoriesAndFunctionsForGroq(ctx)
-		if shouldUseGroqClassification(stringValue(roleTitle)) {
-			groqCategory, groqRequiredSkills := classifyJobTitleWithGroqSync(
-				stringValue(roleTitle),
-				groqClassifierDescription(roleDescription, roleRequirements),
-				allowedCategories,
-			)
-			if groqCategory != "" {
-				categorizedTitle = groqCategory
-				categorizedFunction = categoryFunctions[groqCategory]
-				log.Printf(
-					"parsed-job-worker groq_inferred role_title=%q category=%q function=%q required_skills_len=%d",
-					stringValue(roleTitle),
-					categorizedTitle,
-					categorizedFunction,
-					len(groqRequiredSkills),
-				)
-				normalizedTechStack = normalizeTechStack(groqRequiredSkills)
-			}
-		} else {
-			groqCategory := classifyJobCategoryWithGroqSync(
-				stringValue(roleTitle),
-				allowedCategories,
-			)
-			if groqCategory != "" {
-				categorizedTitle = groqCategory
-				categorizedFunction = categoryFunctions[groqCategory]
-				log.Printf(
-					"parsed-job-worker groq_inferred role_title=%q category=%q function=%q",
-					stringValue(roleTitle),
-					categorizedTitle,
-					categorizedFunction,
-				)
-			}
-		}
-	}
-	if categorizedTitle == "" {
-		inferredTitle, inferredFunction, err := s.findSimilarRemoteRoekctshipCategories(ctx, roleTitle, normalizedTechStack)
-		if err != nil {
-			return "", "", nil, err
-		}
-		categorizedTitle = strings.TrimSpace(inferredTitle)
-		categorizedFunction = strings.TrimSpace(inferredFunction)
-		log.Printf(
-			"parsed-job-worker remoterocketship_inferred role_title=%q category=%q function=%q",
-			stringValue(roleTitle),
-			categorizedTitle,
-			categorizedFunction,
-		)
-	}
-
-	return categorizedTitle, categorizedFunction, normalizedTechStack, nil
-}
-
 func parseDT(value any) *time.Time {
 	raw, ok := value.(string)
 	if !ok || raw == "" {
@@ -390,36 +179,6 @@ func parseDT(value any) *time.Time {
 		return &parsed
 	}
 	return nil
-}
-
-func shouldUseGroqClassification(roleTitle string) bool {
-	normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(strings.TrimSpace(roleTitle)), " ")
-	normalized = strings.TrimSpace(normalized)
-	if normalized == "" {
-		return false
-	}
-	return func(a, b []string) bool {
-		if len(a) == 0 || len(b) == 0 {
-			return false
-		}
-
-		// Build the map from the smaller slice to reduce memory use.
-		if len(a) > len(b) {
-			a, b = b, a
-		}
-
-		set := make(map[string]struct{}, len(a))
-		for _, s := range a {
-			set[s] = struct{}{}
-		}
-
-		for _, s := range b {
-			if _, ok := set[s]; ok {
-				return true
-			}
-		}
-		return false
-	}(strings.Fields(normalized), groqTechStackExtractAllowedCategories)
 }
 
 func normalizeDT(value *time.Time) *time.Time {
@@ -599,7 +358,7 @@ func normalizeSkillValuesForQuery(values []string) []string {
 	out := make([]string, 0, len(values))
 	seen := make(map[string]struct{}, len(values))
 	for _, value := range values {
-		normalized := strings.ToLower(strings.TrimSpace(normalizeTechStackValue(value)))
+		normalized := strings.ToLower(strings.TrimSpace(techstacknorm.NormalizeValue(value)))
 		if normalized == "" {
 			continue
 		}
@@ -1359,68 +1118,8 @@ func normalizeEducationCredentialCategory(value any) any {
 	return normalized
 }
 
-func normalizeTechStackValue(value string) string {
-	normalized := strings.TrimSpace(value)
-	normalized = strings.Trim(normalized, "\"'")
-	normalized = regexp.MustCompile(`\([^)]*\)`).ReplaceAllString(normalized, "")
-	if strings.Contains(normalized, "(") && !strings.Contains(normalized, ")") {
-		normalized = strings.SplitN(normalized, "(", 2)[0]
-	}
-	normalized = strings.ReplaceAll(normalized, ")", "")
-	normalized = strings.ReplaceAll(normalized, "]", "")
-	normalized = strings.ReplaceAll(normalized, "}", "")
-	normalized = regexp.MustCompile(`\s*/\s*`).ReplaceAllString(normalized, "/")
-	normalized = regexp.MustCompile(`\s*-\s*`).ReplaceAllString(normalized, "-")
-	normalized = regexp.MustCompile(`[;,:]+$`).ReplaceAllString(normalized, "")
-	normalized = regexp.MustCompile(`\s+`).ReplaceAllString(normalized, " ")
-	normalized = strings.Trim(normalized, " -_/")
-	normalized = strings.TrimRight(normalized, ".")
-	if normalized == "" {
-		return ""
-	}
-	lowered := strings.ToLower(normalized)
-	if _, ok := techStackDropValues[lowered]; ok {
-		return ""
-	}
-	if alias, ok := techStackAliases[lowered]; ok {
-		return alias
-	}
-	return normalized
-}
-
 func normalizeTechStack(values any) []string {
-	var source []string
-	switch items := values.(type) {
-	case []string:
-		source = items
-	case []any:
-		for _, item := range items {
-			text, _ := item.(string)
-			if strings.TrimSpace(text) != "" {
-				source = append(source, text)
-			}
-		}
-	default:
-		return nil
-	}
-	out := make([]string, 0, len(source))
-	seen := map[string]struct{}{}
-	for _, value := range source {
-		next := normalizeTechStackValue(value)
-		if next == "" {
-			continue
-		}
-		key := strings.ToLower(next)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, next)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+	return techstacknorm.Normalize(values)
 }
 
 func normalizeCountryName(value string) string {
@@ -1754,58 +1453,10 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			}
 		}
 
-		inferCategories := !isNonRemoterocketshipDuplicate
+		inferCategories := !isNonRemoterocketshipDuplicate && plugin.InferCategories
 		categorizedTitle := stringFromPayload(payload["categorizedJobTitle"])
 		categorizedFunction := stringFromPayload(payload["categorizedJobFunction"])
 		if inferCategories && categorizedTitle == nil {
-			if len(normalizedTechStack) == 0 {
-				allowedCategories, categoryFunctions, _ := s.loadAllowedJobCategoriesAndFunctionsForGroq(ctx)
-				if shouldUseGroqClassification(stringValue(payload["roleTitle"])) {
-					log.Printf("parsed-job-worker groq_title_classify_start raw_job_id=%d source=%s role_title=%s", row.id, row.source, stringValue(payload["roleTitle"]))
-					groqCategory, groqRequiredSkills := classifyJobTitleWithGroqSync(
-						stringValue(payload["roleTitle"]),
-						groqClassifierDescription(payload["roleDescription"], payload["roleRequirements"]),
-						allowedCategories,
-					)
-					if groqCategory != "" {
-						categorizedTitle = groqCategory
-						categorizedFunction = categoryFunctions[groqCategory]
-						log.Printf(
-							"parsed-job-worker groq_inferred raw_job_id=%d source=%s role_title=%q category=%q function=%q required_skills_len=%d",
-							row.id,
-							row.source,
-							stringValue(payload["roleTitle"]),
-							stringValue(categorizedTitle),
-							stringValue(categorizedFunction),
-							len(groqRequiredSkills),
-						)
-					}
-					if len(groqRequiredSkills) > 0 {
-						normalizedTechStack = normalizeTechStack(groqRequiredSkills)
-						normalizedTechStackJSON = jsonStringOrNil(normalizedTechStack)
-
-					}
-				} else {
-					log.Printf("parsed-job-worker groq_category_classify_start raw_job_id=%d source=%s role_title=%s", row.id, row.source, stringValue(payload["roleTitle"]))
-					groqCategory := classifyJobCategoryWithGroqSync(
-						stringValue(payload["roleTitle"]),
-						allowedCategories,
-					)
-
-					if groqCategory != "" {
-						categorizedTitle = groqCategory
-						categorizedFunction = categoryFunctions[groqCategory]
-						log.Printf(
-							"parsed-job-worker groq_inferred raw_job_id=%d source=%s role_title=%q category=%q function=%q",
-							row.id,
-							row.source,
-							stringValue(payload["roleTitle"]),
-							stringValue(categorizedTitle),
-							stringValue(categorizedFunction),
-						)
-					}
-				}
-			}
 			if categorizedTitle == nil {
 				inferredTitle, inferredFunction, err := s.findSimilarRemoteRoekctshipCategories(ctx, stringValue(payload["roleTitle"]), normalizedTechStack)
 				if err != nil {
@@ -2830,16 +2481,4 @@ func stringFromPayload(value any) any {
 func stringValue(value any) string {
 	text, _ := value.(string)
 	return strings.TrimSpace(text)
-}
-
-func groqClassifierDescription(roleDescription, roleRequirements any) string {
-	description := stringValue(roleDescription)
-	requirements := stringValue(roleRequirements)
-	if requirements == "" {
-		return description
-	}
-	if description == "" {
-		return requirements
-	}
-	return description + "\n\nRole requirements:\n" + requirements
 }

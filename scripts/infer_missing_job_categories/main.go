@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
-	"goapplyjob-golang-backend/internal/parsed"
+	"goapplyjob-golang-backend/internal/parsedaiclassifier"
 	"log"
 	"time"
 )
@@ -44,7 +44,7 @@ func main() {
 	}
 	defer rows.Close()
 
-	svc := parsed.New(parsed.Config{}, db)
+	svc := parsedaiclassifier.New(parsedaiclassifier.Config{}, db)
 	updatedRows := 0
 	skippedRows := 0
 	for rows.Next() {

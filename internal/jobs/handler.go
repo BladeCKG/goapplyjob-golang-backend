@@ -8,8 +8,8 @@ import (
 	"goapplyjob-golang-backend/internal/auth"
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
-	"goapplyjob-golang-backend/internal/locationnorm"
-	"goapplyjob-golang-backend/internal/parsed"
+	"goapplyjob-golang-backend/internal/normalize/locationnorm"
+	"goapplyjob-golang-backend/internal/parsedaiclassifier"
 	"net/http"
 	"regexp"
 	"sort"
@@ -714,7 +714,7 @@ func (h *Handler) refreshFilterCache(ctx context.Context) error {
 	}
 
 	h.filterCache.jobCategoryParents = buildJobCategoryParentsMap(categoryRows)
-	parsed.SetCachedGroqCategorizedJobTitles(categoryTitles, categoryFunctions)
+	parsedaiclassifier.SetCachedGroqCategorizedJobTitles(categoryTitles, categoryFunctions)
 	locationParents := buildLocationParentsMap(locationCountryRows)
 	for _, state := range locationnorm.USStateNames() {
 		locationParents[state] = []string{unitedStatesCountry}

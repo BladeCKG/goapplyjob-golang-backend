@@ -39,12 +39,12 @@ const (
 )
 
 var preservedRegionTokens = map[string]struct{}{
-	"APAC": {},
-	"EMEA": {},
+	"APAC":  {},
+	"EMEA":  {},
 	"LATAM": {},
-	"MENA": {},
-	"USA": {},
-	"US":   {},
+	"MENA":  {},
+	"USA":   {},
+	"US":    {},
 }
 
 func load() {

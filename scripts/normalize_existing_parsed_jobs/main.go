@@ -11,7 +11,7 @@ import (
 
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
-	"goapplyjob-golang-backend/internal/employmentnorm"
+	"goapplyjob-golang-backend/internal/normalize/employmentnorm"
 )
 
 var countryAliases = map[string]string{

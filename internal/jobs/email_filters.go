@@ -3,7 +3,7 @@ package jobs
 import (
 	"encoding/json"
 	"fmt"
-	"goapplyjob-golang-backend/internal/locationnorm"
+	"goapplyjob-golang-backend/internal/normalize/locationnorm"
 	"strings"
 )
 

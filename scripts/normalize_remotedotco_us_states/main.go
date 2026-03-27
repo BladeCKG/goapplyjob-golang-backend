@@ -11,7 +11,7 @@ import (
 
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
-	"goapplyjob-golang-backend/internal/locationnorm"
+	"goapplyjob-golang-backend/internal/normalize/locationnorm"
 )
 
 const remotedotcoSource = "remotedotco"

@@ -1,8 +1,9 @@
-package parsed
+package parsedaiclassifier
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"goapplyjob-golang-backend/internal/database"
 	"io"
 	"net/http"
@@ -99,7 +100,7 @@ func TestLoadAllowedJobCategoriesAndFunctionsForGroq(t *testing.T) {
 	groqCategoryCache.mu.Unlock()
 
 	svc := New(Config{}, db)
-	categories, functions, err := svc.loadAllowedJobCategoriesAndFunctionsForGroq(context.Background())
+	categories, functions, err := svc.loadAllowedJobCategoriesAndFunctions(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +166,10 @@ func TestClassifySyncRotatesModelOn503(t *testing.T) {
 		},
 	}
 
-	category, skills := classifier.classifySync("Software Engineer", "Build services", []string{"Software Engineer", "Blank"})
+	category, skills, err := classifier.classifySync("Software Engineer", "Build services", []string{"Software Engineer", "Blank"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if category != "Software Engineer" {
 		t.Fatalf("expected rotated model to classify category, got %q", category)
 	}
@@ -180,5 +184,21 @@ func TestClassifySyncRotatesModelOn503(t *testing.T) {
 	}
 	if requestModels[1] != models[1] {
 		t.Fatalf("expected second attempt to rotate to %q, got %q", models[1], requestModels[1])
+	}
+}
+
+func TestClassifySyncReturnsErrorWhenNoAPIKeysConfigured(t *testing.T) {
+	t.Setenv(envGroqAPIKey, "")
+	t.Setenv(envGroqAPIKeys, "")
+
+	category, skills, err := defaultGroqClassifier.classifySync("Software Engineer", "Build services", []string{"Software Engineer", "Blank"})
+	if !errors.Is(err, errGroqAPIKeysNotConfigured) {
+		t.Fatalf("expected missing-api-keys error, got %v", err)
+	}
+	if category != "" {
+		t.Fatalf("expected empty category, got %q", category)
+	}
+	if skills != nil {
+		t.Fatalf("expected nil skills, got %#v", skills)
 	}
 }

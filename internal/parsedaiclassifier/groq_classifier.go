@@ -1,4 +1,4 @@
-package parsed
+package parsedaiclassifier
 
 import (
 	"bytes"
@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"embed"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"goapplyjob-golang-backend/internal/config"
 	"html"
 	"io"
@@ -27,7 +29,7 @@ const (
 	envGroqClassifierPromptSource = "GROQ_CLASSIFIER_PROMPT_SOURCE"
 
 	defaultGroqModel                = "openai/gpt-oss-120b"
-	defaultGroqClassifierPromptPath = "internal/parsed/prompts/job_title_classification.txt"
+	defaultGroqClassifierPromptPath = "internal/parsedaiclassifier/prompts/job_title_classification.txt"
 )
 
 var groq503FallbackModels = []string{
@@ -36,6 +38,87 @@ var groq503FallbackModels = []string{
 	"openai/gpt-oss-safeguard-20b",
 	"moonshotai/kimi-k2-instruct-0905",
 	// "meta-llama/llama-4-scout-17b-16e-instruct", //--- IGNORE --- does not support strict mode
+}
+
+var groqTechStackExtractAllowedCategories = []string{
+	"expert",
+	"experts",
+	"engineer",
+	"engineers",
+	"programmer",
+	"programmers",
+	"developer",
+	"developers",
+	"scientist",
+	"scientists",
+	"analyst",
+	"analysts",
+	"administrator",
+	"administrators",
+	"designer",
+	"designers",
+	"architect",
+	"architects",
+	"technician",
+	"technicians",
+	"technologist",
+	"technologists",
+	"machinist",
+	"machinists",
+	"manager",
+	"managers",
+	"therapist",
+	"therapists",
+	"specialist",
+	"specialists",
+	"coordinator",
+	"coordinators",
+	"eng",
+	"engr",
+	"engrs",
+	"dev",
+	"devs",
+	"scient",
+	"anal",
+	"admin",
+	"admins",
+	"des",
+	"arch",
+	"tech",
+	"technol",
+	"machin",
+	"mgr",
+	"therap",
+	"spec",
+	"specs",
+	"coord",
+	"coords",
+	"swe",
+	"se",
+	"sse",
+	"sde",
+	"sdet",
+	"de",
+	"da",
+	"ba",
+	"ds",
+	"dba",
+	"sysadmin",
+	"netadmin",
+	"uxd",
+	"uid",
+	"ux",
+	"ui",
+	"ea",
+	"ta",
+	"pm",
+	"em",
+	"pt",
+	"ot",
+	"rt",
+	"spec",
+	"engineering",
+	"technology",
 }
 
 type GroqJobClassifier struct {
@@ -63,6 +146,8 @@ var groqPromptCache = struct {
 }{}
 
 var groqHTMLTagPattern = regexp.MustCompile(`(?is)<[^>]+>`)
+
+var errGroqAPIKeysNotConfigured = errors.New("groq api keys not configured")
 
 //go:embed prompts/job_title_classification.txt
 var groqPromptFS embed.FS
@@ -122,11 +207,11 @@ func groqKeyRingSetNext(keys []string, next int) {
 	groqAPIKeyRing.next = next % len(keys)
 }
 
-func classifyJobTitleWithGroqSync(jobTitle, jobDescription string, allowedCategories []string) (string, []string) {
+func classifyJobTitleWithGroqSync(jobTitle, jobDescription string, allowedCategories []string) (string, []string, error) {
 	return defaultGroqClassifier.classifySync(jobTitle, jobDescription, allowedCategories)
 }
 
-func classifyJobCategoryWithGroqSync(jobTitle string, allowedCategories []string) string {
+func classifyJobCategoryWithGroqSync(jobTitle string, allowedCategories []string) (string, error) {
 	return defaultGroqClassifier.classifyCategoryOnlySync(jobTitle, allowedCategories)
 }
 
@@ -445,15 +530,18 @@ func (g *GroqJobClassifier) readPromptContentSource(source string) (string, erro
 	return string(body), nil
 }
 
-func (g *GroqJobClassifier) classifySync(jobTitle, jobDescription string, allowedCategories []string) (string, []string) {
+func (g *GroqJobClassifier) classifySync(jobTitle, jobDescription string, allowedCategories []string) (string, []string, error) {
 	normalizedTitle := strings.TrimSpace(jobTitle)
 	if normalizedTitle == "" {
-		return "", nil
+		return "", nil, nil
 	}
 
 	keys := collectGroqAPIKeys()
-	if len(keys) == 0 || len(allowedCategories) == 0 {
-		return "", nil
+	if len(keys) == 0 {
+		return "", nil, errGroqAPIKeysNotConfigured
+	}
+	if len(allowedCategories) == 0 {
+		return "", nil, nil
 	}
 
 	models := collectGroqModels()
@@ -467,6 +555,7 @@ func (g *GroqJobClassifier) classifySync(jobTitle, jobDescription string, allowe
 	}
 
 	start := groqKeyRingStart(keys)
+	var lastErr error
 keyAttempts:
 	for attempt := 0; attempt < len(keys); attempt++ {
 		keyIndex := (start + attempt) % len(keys)
@@ -501,7 +590,7 @@ keyAttempts:
 
 			req, err := http.NewRequest(http.MethodPost, "https://api.groq.com/openai/v1/chat/completions", bytes.NewReader(body))
 			if err != nil {
-				return "", nil
+				return "", nil, err
 			}
 			req.Header.Set("Authorization", "Bearer "+apiKey)
 			req.Header.Set("Content-Type", "application/json")
@@ -509,16 +598,19 @@ keyAttempts:
 			resp, err := client.Do(req)
 			if err != nil {
 				log.Printf("parsed-job-worker groq_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+				lastErr = err
 				groqKeyRingSetNext(keys, keyIndex+1)
 				continue keyAttempts
 			}
 			if resp.StatusCode == http.StatusServiceUnavailable {
 				log.Printf("parsed-job-worker groq_classify_failed key_index=%d model=%s status=%d model_index=%d", keyIndex, model, resp.StatusCode, modelIndex)
+				lastErr = fmt.Errorf("groq returned status %d", resp.StatusCode)
 				resp.Body.Close()
 				continue
 			}
 			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 				log.Printf("parsed-job-worker groq_classify_failed key_index=%d model=%s status=%d", keyIndex, model, resp.StatusCode)
+				lastErr = fmt.Errorf("groq returned status %d", resp.StatusCode)
 				resp.Body.Close()
 				groqKeyRingSetNext(keys, keyIndex+1)
 				continue keyAttempts
@@ -527,17 +619,20 @@ keyAttempts:
 			resp.Body.Close()
 			if err != nil {
 				log.Printf("parsed-job-worker groq_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+				lastErr = err
 				groqKeyRingSetNext(keys, keyIndex+1)
 				continue keyAttempts
 			}
 			var envelope map[string]any
 			if err := json.Unmarshal(rawResp, &envelope); err != nil {
 				log.Printf("parsed-job-worker groq_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+				lastErr = err
 				groqKeyRingSetNext(keys, keyIndex+1)
 				continue keyAttempts
 			}
 			choices, _ := envelope["choices"].([]any)
 			if len(choices) == 0 {
+				lastErr = errors.New("groq response missing choices")
 				groqKeyRingSetNext(keys, keyIndex+1)
 				continue keyAttempts
 			}
@@ -545,28 +640,40 @@ keyAttempts:
 			message, _ := firstChoice["message"].(map[string]any)
 			content, _ := message["content"].(string)
 			if strings.TrimSpace(content) == "" {
+				lastErr = errors.New("groq response content empty")
 				groqKeyRingSetNext(keys, keyIndex+1)
 				continue keyAttempts
 			}
 			category, skills := extractGroqClassification(content, allowedCategories)
+			if category == "" && extractJSONPayload(content) == nil {
+				lastErr = errors.New("groq response did not contain valid classification payload")
+				groqKeyRingSetNext(keys, keyIndex+1)
+				continue keyAttempts
+			}
 			groqKeyRingSetNext(keys, keyIndex)
-			return category, skills
+			return category, skills, nil
 		}
 		groqKeyRingSetNext(keys, keyIndex+1)
 	}
 
-	return "", nil
+	if lastErr != nil {
+		return "", nil, lastErr
+	}
+	return "", nil, errors.New("groq classification failed")
 }
 
-func (g *GroqJobClassifier) classifyCategoryOnlySync(jobTitle string, allowedCategories []string) string {
+func (g *GroqJobClassifier) classifyCategoryOnlySync(jobTitle string, allowedCategories []string) (string, error) {
 	normalizedTitle := strings.TrimSpace(jobTitle)
 	if normalizedTitle == "" {
-		return ""
+		return "", nil
 	}
 
 	keys := collectGroqAPIKeys()
-	if len(keys) == 0 || len(allowedCategories) == 0 {
-		return ""
+	if len(keys) == 0 {
+		return "", errGroqAPIKeysNotConfigured
+	}
+	if len(allowedCategories) == 0 {
+		return "", nil
 	}
 
 	models := collectGroqModels()
@@ -578,6 +685,7 @@ func (g *GroqJobClassifier) classifyCategoryOnlySync(jobTitle string, allowedCat
 	}
 
 	start := groqKeyRingStart(keys)
+	var lastErr error
 keyAttempts:
 	for attempt := 0; attempt < len(keys); attempt++ {
 		keyIndex := (start + attempt) % len(keys)
@@ -615,7 +723,7 @@ keyAttempts:
 
 			req, err := http.NewRequest(http.MethodPost, "https://api.groq.com/openai/v1/chat/completions", bytes.NewReader(body))
 			if err != nil {
-				return ""
+				return "", err
 			}
 			req.Header.Set("Authorization", "Bearer "+apiKey)
 			req.Header.Set("Content-Type", "application/json")
@@ -623,16 +731,19 @@ keyAttempts:
 			resp, err := client.Do(req)
 			if err != nil {
 				log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+				lastErr = err
 				groqKeyRingSetNext(keys, keyIndex+1)
 				continue keyAttempts
 			}
 			if resp.StatusCode == http.StatusServiceUnavailable {
 				log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s status=%d model_index=%d", keyIndex, model, resp.StatusCode, modelIndex)
+				lastErr = fmt.Errorf("groq returned status %d", resp.StatusCode)
 				resp.Body.Close()
 				continue
 			}
 			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 				log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s status=%d", keyIndex, model, resp.StatusCode)
+				lastErr = fmt.Errorf("groq returned status %d", resp.StatusCode)
 				resp.Body.Close()
 				groqKeyRingSetNext(keys, keyIndex+1)
 				continue keyAttempts
@@ -641,17 +752,20 @@ keyAttempts:
 			resp.Body.Close()
 			if err != nil {
 				log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+				lastErr = err
 				groqKeyRingSetNext(keys, keyIndex+1)
 				continue keyAttempts
 			}
 			var envelope map[string]any
 			if err := json.Unmarshal(rawResp, &envelope); err != nil {
 				log.Printf("parsed-job-worker groq_category_only_classify_failed key_index=%d model=%s error=%v", keyIndex, model, err)
+				lastErr = err
 				groqKeyRingSetNext(keys, keyIndex+1)
 				continue keyAttempts
 			}
 			choices, _ := envelope["choices"].([]any)
 			if len(choices) == 0 {
+				lastErr = errors.New("groq response missing choices")
 				groqKeyRingSetNext(keys, keyIndex+1)
 				continue keyAttempts
 			}
@@ -659,16 +773,26 @@ keyAttempts:
 			message, _ := firstChoice["message"].(map[string]any)
 			content, _ := message["content"].(string)
 			if strings.TrimSpace(content) == "" {
+				lastErr = errors.New("groq response content empty")
+				groqKeyRingSetNext(keys, keyIndex+1)
+				continue keyAttempts
+			}
+			category := extractGroqCategoryOnly(content, allowedCategories)
+			if category == "" && extractJSONPayload(content) == nil {
+				lastErr = errors.New("groq response did not contain valid classification payload")
 				groqKeyRingSetNext(keys, keyIndex+1)
 				continue keyAttempts
 			}
 			groqKeyRingSetNext(keys, keyIndex)
-			return extractGroqCategoryOnly(content, allowedCategories)
+			return category, nil
 		}
 		groqKeyRingSetNext(keys, keyIndex+1)
 	}
 
-	return ""
+	if lastErr != nil {
+		return "", lastErr
+	}
+	return "", errors.New("groq category-only classification failed")
 }
 
 func containsCaseSensitive(values []string, expected string) bool {
@@ -681,11 +805,11 @@ func containsCaseSensitive(values []string, expected string) bool {
 }
 
 func (s *Service) loadAllowedJobCategoriesForGroq(ctx context.Context) ([]string, error) {
-	categories, _, err := s.loadAllowedJobCategoriesAndFunctionsForGroq(ctx)
+	categories, _, err := s.loadAllowedJobCategoriesAndFunctions(ctx)
 	return categories, err
 }
 
-func (s *Service) loadAllowedJobCategoriesAndFunctionsForGroq(ctx context.Context) ([]string, map[string]string, error) {
+func (s *Service) loadAllowedJobCategoriesAndFunctions(ctx context.Context) ([]string, map[string]string, error) {
 	groqCategoryCache.mu.RLock()
 	cached := append([]string(nil), groqCategoryCache.items...)
 	cachedFunctions := groqCategoryCache.functions
@@ -738,4 +862,42 @@ func (s *Service) loadAllowedJobCategoriesAndFunctionsForGroq(ctx context.Contex
 	groqCategoryCache.mu.Unlock()
 
 	return out, functions, nil
+}
+
+func shouldUseGroqClassification(roleTitle string) bool {
+	normalized := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(strings.TrimSpace(roleTitle)), " ")
+	normalized = strings.TrimSpace(normalized)
+	if normalized == "" {
+		return false
+	}
+	return func(a, b []string) bool {
+		if len(a) == 0 || len(b) == 0 {
+			return false
+		}
+		if len(a) > len(b) {
+			a, b = b, a
+		}
+		set := make(map[string]struct{}, len(a))
+		for _, s := range a {
+			set[s] = struct{}{}
+		}
+		for _, s := range b {
+			if _, ok := set[s]; ok {
+				return true
+			}
+		}
+		return false
+	}(strings.Fields(normalized), groqTechStackExtractAllowedCategories)
+}
+
+func groqClassifierDescription(roleDescription, roleRequirements any) string {
+	description, _ := roleDescription.(string)
+	requirements, _ := roleRequirements.(string)
+	if requirements == "" {
+		return description
+	}
+	if description == "" {
+		return requirements
+	}
+	return description + "\n\nRole requirements:\n" + requirements
 }

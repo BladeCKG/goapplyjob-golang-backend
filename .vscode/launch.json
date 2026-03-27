@@ -57,6 +57,17 @@
       }
     },
     {
+      "name": "Parsed AI Classifier Worker (cmd/parsedjobaiclassifierworker)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/parsedjobaiclassifierworker/main.go",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "WORKERS_DEBUG": "true"
+      }
+    },
+    {
       "name": "Worker Chain (cmd/workerchain)",
       "type": "go",
       "request": "launch",
@@ -75,7 +86,8 @@
         "Watcher (cmd/watcher)",
         "Importer (cmd/importer)",
         "Raw Job Worker (cmd/rawjobworker)",
-        "Parsed Job Worker (cmd/parsedjobworker)"
+        "Parsed Job Worker (cmd/parsedjobworker)",
+        "Parsed AI Classifier Worker (cmd/parsedjobaiclassifierworker)"
       ]
     }
   ]
