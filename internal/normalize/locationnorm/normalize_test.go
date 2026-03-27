@@ -4,6 +4,7 @@ import "testing"
 
 const (
 	testRegionAPAC      = "APAC"
+	testRegionAsia      = "ASIA"
 	testRegionAnywhere  = "Anywhere"
 	testRegionEMEA      = "EMEA"
 	testRegionEurope    = "Europe"
@@ -51,6 +52,7 @@ func TestNormalizeCountryNameSupportsPlainAliases(t *testing.T) {
 func TestNormalizeCountryNameSupportsRegionTerms(t *testing.T) {
 	tests := map[string]string{
 		testRegionAPAC:      "Asia Pacific",
+		testRegionAsia:      "Asia",
 		testRegionEMEA:      testRegionEMEA,
 		testRegionAnywhere:  "Worldwide",
 		testRegionUSATZ:     "USA Timezones",
@@ -67,6 +69,7 @@ func TestNormalizeCountryNameSupportsRegionTerms(t *testing.T) {
 func TestNormalizeRegionNameSupportsAliases(t *testing.T) {
 	tests := map[string]string{
 		testRegionAPAC:      "Asia Pacific",
+		testRegionAsia:      "Asia",
 		testRegionEMEA:      testRegionEMEA,
 		testRegionAnywhere:  "Worldwide",
 		testRegionUSATZ:     "USA Timezones",

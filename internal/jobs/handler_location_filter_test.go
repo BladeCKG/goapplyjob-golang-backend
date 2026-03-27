@@ -82,3 +82,19 @@ func TestBroadRegionTermsForUSStates(t *testing.T) {
 		t.Fatalf("did not expect %q in broad region values, got %v", unitedStatesCountry, got)
 	}
 }
+
+func TestBuildLocationParentsMapNormalizesRegionCountryLabels(t *testing.T) {
+	got := buildLocationParentsMap([][2][]string{
+		{
+			nil,
+			[]string{"ASIA"},
+		},
+	})
+
+	if _, ok := got["Asia"]; !ok {
+		t.Fatalf("expected canonical %q key in location parents, got %v", "Asia", got)
+	}
+	if _, ok := got["ASIA"]; ok {
+		t.Fatalf("did not expect raw %q key in location parents, got %v", "ASIA", got)
+	}
+}

@@ -317,7 +317,7 @@ func regionDisplayName(key string) string {
 	if key == "" {
 		return ""
 	}
-	if !strings.Contains(key, " ") && len(key) <= 5 {
+	if _, ok := preservedRegionTokens[key]; ok {
 		return key
 	}
 	parts := strings.Fields(strings.ToLower(key))
@@ -328,10 +328,6 @@ func regionDisplayName(key string) string {
 				parts[i] = rawParts[i]
 				continue
 			}
-		}
-		if i < len(rawParts) && len(rawParts[i]) <= 5 && rawParts[i] == strings.ToUpper(rawParts[i]) && len(rawParts) == 1 {
-			parts[i] = rawParts[i]
-			continue
 		}
 		parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
 	}
