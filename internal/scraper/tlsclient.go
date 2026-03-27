@@ -109,9 +109,13 @@ func (f *TLSClientFetcher) ReadHTML(ctx context.Context, targetURL string) (stri
 		}
 		ch <- result{body: string(body), status: resp.StatusCode, err: nil}
 	}()
+	timer := time.NewTimer(f.timeout)
+	defer timer.Stop()
 	select {
 	case <-ctx.Done():
 		return "", -1, ctx.Err()
+	case <-timer.C:
+		return "", -1, context.DeadlineExceeded
 	case res := <-ch:
 		return res.body, res.status, res.err
 	}
@@ -174,9 +178,13 @@ func (f *TLSClientFetcher) ReadHTMLWithHeaders(ctx context.Context, targetURL st
 		}
 		ch <- result{body: string(body), status: resp.StatusCode, err: nil}
 	}()
+	timer := time.NewTimer(f.timeout)
+	defer timer.Stop()
 	select {
 	case <-ctx.Done():
 		return "", -1, ctx.Err()
+	case <-timer.C:
+		return "", -1, context.DeadlineExceeded
 	case res := <-ch:
 		return res.body, res.status, res.err
 	}
@@ -233,9 +241,13 @@ func (f *TLSClientFetcher) ResolveFinalURL(ctx context.Context, targetURL string
 		}
 		ch <- result{url: finalURL, status: resp.StatusCode, err: nil}
 	}()
+	timer := time.NewTimer(f.timeout)
+	defer timer.Stop()
 	select {
 	case <-ctx.Done():
 		return "", -1, ctx.Err()
+	case <-timer.C:
+		return "", -1, context.DeadlineExceeded
 	case res := <-ch:
 		return res.url, res.status, res.err
 	}

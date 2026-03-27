@@ -41,6 +41,7 @@ func main() {
 		PollSeconds:           config.GetenvInt("RAW_JOB_WORKER_POLL_SECONDS", 5),
 		RunOnce:               config.GetenvBool("RAW_JOB_RUN_ONCE", false),
 		ErrorBackoffSeconds:   config.GetenvInt("WORKER_ERROR_BACKOFF_SECONDS", 10),
+		FetchTimeoutSeconds:   config.GetenvInt("RAW_JOB_FETCH_TIMEOUT_SECONDS", 45),
 		RetentionDays:         config.GetenvInt("RAW_JOB_RETENTION_DAYS", 365),
 		RetentionCleanupBatch: config.GetenvInt("RAW_JOB_RETENTION_CLEANUP_BATCH", 5000),
 		WorkerCount:           config.GetenvInt("RAW_JOB_WORKER_COUNT", 4),

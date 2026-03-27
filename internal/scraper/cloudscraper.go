@@ -94,9 +94,18 @@ func (f *CloudscraperFetcher) ReadHTMLWithLimit(ctx context.Context, targetURL s
 		ch <- result{body: string(decoded), status: resp.StatusCode, err: nil}
 	}()
 
+	timeout := f.timeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
 	select {
 	case <-ctx.Done():
 		return "", -1, ctx.Err()
+	case <-timer.C:
+		return "", -1, context.DeadlineExceeded
 	case res := <-ch:
 		return res.body, res.status, res.err
 	}
@@ -176,9 +185,18 @@ func (f *CloudscraperFetcher) ResolveFinalURL(ctx context.Context, targetURL str
 		ch <- result{url: finalURL, status: resp.StatusCode, err: nil}
 	}()
 
+	timeout := f.timeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
 	select {
 	case <-ctx.Done():
 		return "", -1, ctx.Err()
+	case <-timer.C:
+		return "", -1, context.DeadlineExceeded
 	case res := <-ch:
 		return res.url, res.status, res.err
 	}

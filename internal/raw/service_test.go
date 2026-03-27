@@ -352,6 +352,56 @@ func TestProcessPendingDoesNotParseNon2xxResponse(t *testing.T) {
 	}
 }
 
+func TestProcessPendingFetchErrorRetriesJobWithoutFailingCycle(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_raw_fetch_error_retry"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
+		 VALUES ('remoterocketship', 'https://remote.example/job/fetch-error', '2026-02-12T10:00:00Z', false, false, false, 0, NULL)`,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(Config{}, db)
+	svc.EnabledSources = map[string]struct{}{"remoterocketship": {}}
+	svc.ReadHTMLForSource = func(ctx context.Context, _ string, targetURL string) (string, int, error) {
+		return "", 0, errors.New("dial tcp timeout")
+	}
+
+	processed, err := svc.ProcessPending(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected one processed job, got %d", processed)
+	}
+
+	var isReady bool
+	var retryCount int
+	var rawJSON sql.NullString
+	if err := db.SQL.QueryRowContext(
+		context.Background(),
+		`SELECT is_ready, retry_count, raw_json FROM raw_us_jobs WHERE url = 'https://remote.example/job/fetch-error'`,
+	).Scan(&isReady, &retryCount, &rawJSON); err != nil {
+		t.Fatal(err)
+	}
+	if isReady {
+		t.Fatal("expected fetch error job to remain not ready")
+	}
+	if retryCount != 1 {
+		t.Fatalf("expected retry_count increment, got %d", retryCount)
+	}
+	if rawJSON.Valid {
+		t.Fatalf("expected raw_json unchanged/null, got %#v", rawJSON.String)
+	}
+}
+
 func TestIsTransientDBErrorDetectsClosedConnectionMessage(t *testing.T) {
 	if !isTransientDBError(errors.New("InterfaceError: connection is closed")) {
 		t.Fatal("expected closed connection to be treated as transient")

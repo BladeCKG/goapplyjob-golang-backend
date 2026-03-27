@@ -59,6 +59,12 @@ func TestToTargetJobURL(t *testing.T) {
 }
 
 func TestParseRawHTMLExtractsSalarySummaryAndCompanyEnrichment(t *testing.T) {
+	orig := resolveRedirectURLDailyRemoteFunc
+	resolveRedirectURLDailyRemoteFunc = func(_url string) string {
+		return "https://boards.greenhouse.io/acme/jobs/4683161"
+	}
+	defer func() { resolveRedirectURLDailyRemoteFunc = orig }()
+
 	html := `
 <div class="job_head_info_container">
   <div class="inline-flex items-center">$104K - $175K per year</div>

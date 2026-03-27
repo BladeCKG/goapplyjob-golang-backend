@@ -22,6 +22,7 @@ const (
 	statusNotFound        = 404
 	statusGone            = 410
 	statusTooManyRequests = 429
+	defaultFetchTimeout   = 45 * time.Second
 )
 
 const (
@@ -51,6 +52,7 @@ type Config struct {
 	PollSeconds           int
 	RunOnce               bool
 	ErrorBackoffSeconds   int
+	FetchTimeoutSeconds   int
 	RetentionDays         int
 	RetentionCleanupBatch int
 	WorkerCount           int
@@ -76,6 +78,13 @@ func (s *Service) readHTMLForSource(ctx context.Context, source, targetURL strin
 		return s.ReadHTMLForSource(ctx, source, targetURL)
 	}
 	return s.ReadHTML(ctx, targetURL)
+}
+
+func (s *Service) fetchTimeout() time.Duration {
+	if s.Config.FetchTimeoutSeconds > 0 {
+		return time.Duration(s.Config.FetchTimeoutSeconds) * time.Second
+	}
+	return defaultFetchTimeout
 }
 
 func (s *Service) RunOnce(ctx context.Context) (int, error) {
@@ -355,10 +364,21 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				}
 				targetURL := toTargetJobURLForSource(job.source, job.url)
 				log.Printf("raw-us-job-worker fetch_start job_id=%d source=%s target_url=%s", job.id, job.source, targetURL)
-				html, statusCode, err := s.readHTMLForSource(ctx, job.source, targetURL)
+				fetchCtx, cancelFetch := context.WithTimeout(ctx, s.fetchTimeout())
+				html, statusCode, err := s.readHTMLForSource(fetchCtx, job.source, targetURL)
+				cancelFetch()
 				if err != nil {
-					reportErr(err)
-					return
+					if ctx.Err() != nil {
+						reportErr(ctx.Err())
+						return
+					}
+					log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s retry_later error=%v", job.id, job.source, err)
+					if err := setRetry(job.id); err != nil {
+						reportErr(err)
+						return
+					}
+					atomic.AddInt64(&processed, 1)
+					continue
 				}
 
 				setSkippable := func(job_id int64) error {
