@@ -58,7 +58,7 @@ func (s *Service) BuildMarketingEmailText(data MarketingEmailData) string {
 	lines := []string{
 		"Hi " + firstName + ",",
 		"",
-		"Here are some new US remote jobs for you:",
+		"Here are some new remote jobs for you:",
 		"",
 	}
 	for _, job := range data.Jobs {
@@ -85,9 +85,9 @@ func (s *Service) BuildMarketingEmailText(data MarketingEmailData) string {
 }
 
 func (s *Service) SendMarketingEmail(toEmail string, data MarketingEmailData) error {
-	subject := data.SiteName + " - new US remote jobs for you"
+	subject := data.SiteName + " - new remote jobs for you"
 	if strings.TrimSpace(data.SiteName) == "" {
-		subject = "GoApplyJob - new US remote jobs for you"
+		subject = "GoApplyJob - new remote jobs for you"
 	}
 	htmlContent := s.BuildMarketingEmailHTML(data)
 	textContent := s.BuildMarketingEmailText(data)
