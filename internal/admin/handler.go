@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"goapplyjob-golang-backend/internal/email"
 	"goapplyjob-golang-backend/internal/jobs"
 	"goapplyjob-golang-backend/internal/parsedaiclassifier"
+	"net/mail"
 	"net/http"
 	"strconv"
 	"strings"
@@ -42,6 +44,7 @@ func (h *Handler) Register(router gin.IRouter) {
 	router.PATCH("/admin/users/:userID/subscription", h.upsertUserSubscription)
 	router.DELETE("/admin/users/:userID", h.deleteUser)
 	router.POST("/admin/users/marketing-email", h.sendMarketingEmail)
+	router.POST("/admin/parsed-jobs/marketing-email", h.sendMarketingEmailForParsedJobs)
 	router.GET("/admin/watcher-payloads", h.listWatcherPayloads)
 	router.PATCH("/admin/watcher-payloads/:payloadID", h.updateWatcherPayload)
 	router.DELETE("/admin/watcher-payloads/:payloadID", h.deleteWatcherPayload)
@@ -457,6 +460,171 @@ func (h *Handler) sendMarketingEmail(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"items": results})
+}
+
+func (h *Handler) sendMarketingEmailForParsedJobs(c *gin.Context) {
+	if _, ok := h.requireAdmin(c); !ok {
+		return
+	}
+	var payload struct {
+		Emails []string `json:"emails"`
+		JobIDs []int64  `json:"job_ids"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid request"})
+		return
+	}
+
+	emails := normalizeMarketingEmails(payload.Emails)
+	if len(emails) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "emails is required"})
+		return
+	}
+	jobIDs := uniquePositiveInt64s(payload.JobIDs)
+	if len(jobIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "job_ids is required"})
+		return
+	}
+
+	jobsList, err := h.fetchMarketingJobsByParsedJobIDs(c.Request.Context(), jobIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load selected jobs"})
+		return
+	}
+
+	type resultRow struct {
+		Email   string `json:"email"`
+		Status  string `json:"status"`
+		Message string `json:"message,omitempty"`
+	}
+	results := make([]resultRow, 0, len(emails))
+	for _, emailAddr := range emails {
+		mailData := h.buildMarketingEmailData(emailAddr, jobsList)
+		if err := h.emailService.SendMarketingEmail(emailAddr, mailData); err != nil {
+			results = append(results, resultRow{Email: emailAddr, Status: "error", Message: err.Error()})
+			continue
+		}
+		results = append(results, resultRow{Email: emailAddr, Status: "sent"})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"items": results})
+}
+
+func (h *Handler) buildMarketingEmailData(emailAddr string, jobsList []email.MarketingJob) email.MarketingEmailData {
+	siteURL := strings.TrimRight(h.cfg.SiteURL, "/")
+	siteName := strings.TrimSpace(h.cfg.SiteName)
+	firstName := strings.Split(strings.TrimSpace(emailAddr), "@")[0]
+	return email.MarketingEmailData{
+		SiteName:       siteName,
+		SiteURL:        siteURL,
+		SiteLogoURL:    siteURL + "/logo.png",
+		FirstName:      firstName,
+		BrowseJobsURL:  siteURL + "/us-remote-jobs",
+		ManagePrefsURL: siteURL + "/account",
+		UnsubscribeURL: siteURL + "/account",
+		Jobs:           jobsList,
+	}
+}
+
+func (h *Handler) fetchMarketingJobsByParsedJobIDs(ctx context.Context, jobIDs []int64) ([]email.MarketingJob, error) {
+	placeholders := make([]string, 0, len(jobIDs))
+	args := make([]any, 0, len(jobIDs))
+	for _, jobID := range jobIDs {
+		placeholders = append(placeholders, "?")
+		args = append(args, jobID)
+	}
+
+	rows, err := h.db.SQL.QueryContext(
+		ctx,
+		`SELECT p.id, p.role_title, c.name, c.profile_pic_url, p.url, p.slug, p.created_at_source, p.categorized_job_title, p.categorized_job_function, p.salary_human_text
+		   FROM parsed_jobs p
+		   LEFT JOIN parsed_companies c ON c.id = p.company_id
+		  WHERE p.id IN (`+strings.Join(placeholders, ", ")+`)`,
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	siteURL := strings.TrimRight(h.cfg.SiteURL, "/")
+	byID := map[int64]email.MarketingJob{}
+	for rows.Next() {
+		var (
+			jobID                                              int64
+			roleTitle, companyName, companyLogoURL, jobURL     sql.NullString
+			slug, createdAt, categorizedTitle, categorizedFunc sql.NullString
+			salaryHumanText                                    sql.NullString
+		)
+		if err := rows.Scan(&jobID, &roleTitle, &companyName, &companyLogoURL, &jobURL, &slug, &createdAt, &categorizedTitle, &categorizedFunc, &salaryHumanText); err != nil {
+			return nil, err
+		}
+		link := strings.TrimSpace(jobURL.String)
+		if link == "" && strings.TrimSpace(slug.String) != "" {
+			link = siteURL + "/jobs/" + strings.TrimSpace(slug.String)
+		}
+		byID[jobID] = email.MarketingJob{
+			Title:               strings.TrimSpace(roleTitle.String),
+			Company:             strings.TrimSpace(companyName.String),
+			CompanyLogoURL:      strings.TrimSpace(companyLogoURL.String),
+			URL:                 link,
+			PostedAt:            strings.TrimSpace(createdAt.String),
+			CategorizedTitle:    strings.TrimSpace(categorizedTitle.String),
+			CategorizedFunction: strings.TrimSpace(categorizedFunc.String),
+			Salary:              strings.TrimSpace(salaryHumanText.String),
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make([]email.MarketingJob, 0, len(jobIDs))
+	for _, jobID := range jobIDs {
+		job, ok := byID[jobID]
+		if !ok {
+			continue
+		}
+		out = append(out, job)
+	}
+	return out, nil
+}
+
+func normalizeMarketingEmails(values []string) []string {
+	out := []string{}
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		emailAddr := strings.TrimSpace(value)
+		if emailAddr == "" {
+			continue
+		}
+		parsed, err := mail.ParseAddress(emailAddr)
+		if err != nil {
+			continue
+		}
+		normalized := strings.ToLower(parsed.Address)
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, parsed.Address)
+	}
+	return out
+}
+
+func uniquePositiveInt64s(values []int64) []int64 {
+	out := []int64{}
+	seen := map[int64]struct{}{}
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func (h *Handler) listWatcherPayloads(c *gin.Context) {
