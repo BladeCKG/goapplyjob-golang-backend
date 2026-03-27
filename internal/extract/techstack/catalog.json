@@ -233,7 +233,7 @@
   { "canonical": "Elixir", "aliases": ["Elixir"], "caseSensitive": true },
   {
     "canonical": "C#",
-    "aliases": ["c#", "c-sharp", "c sharp"],
+    "aliases": ["c#", "c-sharp", "c sharp", "csharp"],
     "caseSensitive": false
   },
   {
