@@ -23,7 +23,7 @@ func main() {
 	defer db.Close()
 
 	const (
-		defaultBuiltinBaseURL             = "https://builtin.com/jobs/remote?country=USA&allLocations=true&page={page}"
+		defaultBuiltinBaseURL             = "https://builtin.com/jobs/remote?allLocations=true&page={page}"
 		defaultWorkableAPIURL             = "https://jobs.workable.com/api/v1/jobs?location=United States&workplace=remote&day_range=1"
 		defaultRemotiveSitemapURLTemplate = "https://remotive.com/sitemap-job-postings-{partition}.xml"
 		defaultRemotiveSitemapMaxIndex    = 10
@@ -58,7 +58,7 @@ func main() {
 		TimeoutSeconds:                   config.GetenvFloat("WATCH_TIMEOUT_SECONDS", 30),
 		BuiltinBaseURL:                   defaultBuiltinBaseURL,
 		BuiltinMaxPage:                   config.GetenvInt("WATCH_BUILTIN_MAX_PAGE", 1000),
-		BuiltinPagesPerCycle:             config.GetenvInt("WATCH_BUILTIN_PAGES_PER_CYCLE", 25),
+		BuiltinPagesPerCycle:             config.GetenvInt("WATCH_BUILTIN_PAGES_PER_CYCLE", 200),
 		BuiltinCheckpointPages:           config.GetenvInt("WATCH_BUILTIN_STATE_CHECKPOINT_PAGES", 5),
 		BuiltinFetchIntervalSeconds:      config.GetenvFloat("WATCH_BUILTIN_FETCH_INTERVAL_SECONDS", 0),
 		Builtin429RetryCount:             config.GetenvInt("WATCH_BUILTIN_429_RETRY_COUNT", 3),
