@@ -2,6 +2,8 @@ package dailyremote
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +50,24 @@ func TestParseRawHTMLDoesNotInventUnitedStatesWhenCountriesMissing(t *testing.T)
 	values, _ := payload["locationCountries"].([]string)
 	if len(values) != 0 {
 		t.Fatalf("expected empty locationCountries, got %#v", payload["locationCountries"])
+	}
+}
+
+func TestParseRawHTMLFixtureUsesDisplayedWorldwideInsteadOfApplicantCountryList(t *testing.T) {
+	orig := resolveRedirectURLDailyRemoteFunc
+	resolveRedirectURLDailyRemoteFunc = func(url string) string { return url }
+	defer func() { resolveRedirectURLDailyRemoteFunc = orig }()
+
+	fixturePath := filepath.Join("..", "..", "..", "test-extract", "dailyremote", "raw-job-2.html")
+	html, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	payload := ParseRawHTML(string(html), "https://dailyremote.com/remote-job/1023-mid-level-software-engineer-4795688")
+	values, _ := payload["locationCountries"].([]string)
+	if len(values) != 1 || values[0] != "Worldwide" {
+		t.Fatalf("expected displayed Worldwide locationCountries, got %#v", payload["locationCountries"])
 	}
 }
 

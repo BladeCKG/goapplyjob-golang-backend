@@ -141,7 +141,10 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 	if len(jobPosting) == 0 {
 		return map[string]any{}
 	}
-	locationCountries := extractLocationCountries(jobPosting["applicantLocationRequirements"])
+	locationCountries := extractDisplayedLocationCountriesFromHTML(htmlText)
+	if len(locationCountries) == 0 {
+		locationCountries = extractLocationCountries(jobPosting["applicantLocationRequirements"])
+	}
 	externalID := extractExternalID(jobPosting, sourceURL)
 	roleTitle := normalizeText(jobPosting["title"])
 	roleDescription := decodeHTMLText(stringValue(jobPosting["description"]))
@@ -254,6 +257,64 @@ func extractLocationCountries(value any) []string {
 		}
 		seen[key] = struct{}{}
 		out = append(out, normalized)
+	}
+	return out
+}
+
+func extractDisplayedLocationCountriesFromHTML(htmlText string) []string {
+	doc, err := nethtml.Parse(strings.NewReader(htmlText))
+	if err != nil {
+		return nil
+	}
+	container := findFirstNodeWithClass(doc, "div", "job_head_info_container")
+	if container == nil {
+		return nil
+	}
+	items := findNodesWithClasses(container, "div", []string{"inline-flex", "items-center"})
+	for _, item := range items {
+		text := normalizeText(textContent(item))
+		if text == "" {
+			continue
+		}
+		lowered := strings.ToLower(text)
+		if strings.Contains(lowered, "posted ") || looksLikeSalaryText(text) || experienceHintPattern.MatchString(text) {
+			continue
+		}
+		if countries := normalizeDisplayedLocationCountries(text); len(countries) > 0 {
+			return countries
+		}
+	}
+	return nil
+}
+
+func normalizeDisplayedLocationCountries(value string) []string {
+	text := normalizeText(value)
+	if text == "" {
+		return nil
+	}
+	if normalized := locationnorm.NormalizeCountryName(text); normalized != "" {
+		return []string{normalized}
+	}
+	parts := regexp.MustCompile(`\s*[,/|;]\s*`).Split(text, -1)
+	if len(parts) <= 1 {
+		return nil
+	}
+	out := []string{}
+	seen := map[string]struct{}{}
+	for _, part := range parts {
+		normalized := locationnorm.NormalizeCountryName(part)
+		if normalized == "" {
+			continue
+		}
+		key := strings.ToLower(normalized)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, normalized)
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

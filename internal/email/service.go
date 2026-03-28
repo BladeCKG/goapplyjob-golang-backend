@@ -2,6 +2,7 @@ package email
 
 import (
 	"bytes"
+	"crypto/tls"
 	"embed"
 	"fmt"
 	"goapplyjob-golang-backend/internal/config"
@@ -205,7 +206,7 @@ func (s *Service) sendViaSMTP(toEmail, subject, textContent, htmlContent string)
 			return err
 		}
 		defer client.Close()
-		if err := client.StartTLS(nil); err != nil {
+		if err := client.StartTLS(&tls.Config{ServerName: smtpHost}); err != nil {
 			return err
 		}
 		if auth != nil {
