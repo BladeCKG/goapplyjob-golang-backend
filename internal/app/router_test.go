@@ -2315,8 +2315,23 @@ func testRouter(t *testing.T) (*gin.Engine, *database.DB) {
 
 func testConfig() config.Config {
 	cfg := config.Load()
-	// Keep router tests hermetic even when local Turnstile env vars are set.
+	// Keep router tests hermetic even when local auth/email env vars are set.
 	cfg.AuthTurnstileSecretKey = ""
+	cfg.EmailProvider = "smtp"
+	cfg.EmailProviders = ""
+	cfg.MailtrapAPIToken = ""
+	cfg.MailtrapAPITokens = ""
+	cfg.MailtrapFromEmail = ""
+	cfg.BrevoAPIKey = ""
+	cfg.BrevoAPIKeys = ""
+	cfg.BrevoFromEmail = ""
+	cfg.CyberPanelAPIKey = ""
+	cfg.CyberPanelAPIKeys = ""
+	cfg.CyberPanelFromEmail = ""
+	cfg.SMTPHost = ""
+	cfg.SMTPUser = ""
+	cfg.SMTPPass = ""
+	cfg.SMTPFrom = ""
 	return cfg
 }
 
