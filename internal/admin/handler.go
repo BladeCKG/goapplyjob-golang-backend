@@ -1206,6 +1206,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 		"external_job_id":          "p.external_job_id",
 		"role_title":               "p.role_title",
 		"role_description":         "p.role_description",
+		"role_requirements":        "p.role_requirements",
 		"url":                      "p.url",
 		"slug":                     "p.slug",
 		"employment_type":          "p.employment_type",
@@ -1217,6 +1218,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 		"categorized_job_function": "p.categorized_job_function",
 		"tech_stack":               "p.tech_stack",
 		"salary_type":              "p.salary_type",
+		"salary_human_text":        "p.salary_human_text",
 		"salary_currency_code":     "p.salary_currency_code",
 		"salary_currency_symbol":   "p.salary_currency_symbol",
 		"salary_min_usd":           "p.salary_min_usd",
@@ -1242,8 +1244,8 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 	}
 	if q != "" {
 		needle := "%" + q + "%"
-		filters = append(filters, `(p.role_title LIKE ? OR p.external_job_id LIKE ? OR p.url LIKE ? OR p.categorized_job_title LIKE ? OR p.categorized_job_function LIKE ? OR p.location_us_states::text LIKE ? OR p.location_countries::text LIKE ? OR p.tech_stack::text LIKE ?)`)
-		for i := 0; i < 8; i++ {
+		filters = append(filters, `(p.role_title LIKE ? OR p.role_description LIKE ? OR p.role_requirements LIKE ? OR p.external_job_id LIKE ? OR p.url LIKE ? OR p.categorized_job_title LIKE ? OR p.categorized_job_function LIKE ? OR p.location_us_states::text LIKE ? OR p.location_countries::text LIKE ? OR p.tech_stack::text LIKE ?)`)
+		for i := 0; i < 10; i++ {
 			args = append(args, needle)
 		}
 	}
@@ -1255,6 +1257,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 		"external_job_id":          {columnExpr: "p.external_job_id", valueType: "text"},
 		"role_title":               {columnExpr: "p.role_title", valueType: "text"},
 		"role_description":         {columnExpr: "p.role_description", valueType: "text"},
+		"role_requirements":        {columnExpr: "p.role_requirements", valueType: "text"},
 		"url":                      {columnExpr: "p.url", valueType: "text"},
 		"slug":                     {columnExpr: "p.slug", valueType: "text"},
 		"employment_type":          {columnExpr: "p.employment_type", valueType: "text"},
@@ -1266,6 +1269,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 		"categorized_job_function": {columnExpr: "p.categorized_job_function", valueType: "text"},
 		"tech_stack":               {columnExpr: "p.tech_stack::text", valueType: "text"},
 		"salary_type":              {columnExpr: "p.salary_type", valueType: "text"},
+		"salary_human_text":        {columnExpr: "p.salary_human_text", valueType: "text"},
 		"salary_currency_code":     {columnExpr: "p.salary_currency_code", valueType: "text"},
 		"salary_currency_symbol":   {columnExpr: "p.salary_currency_symbol", valueType: "text"},
 		"salary_min_usd":           {columnExpr: "p.salary_min_usd", valueType: "float"},
@@ -1303,7 +1307,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list parsed jobs"})
 		return
 	}
-	query := `SELECT p.id, p.raw_us_job_id, r.source, p.company_id, p.external_job_id, p.role_title, p.role_description, p.url, p.slug, p.employment_type, p.location_type, p.location_city, p.location_us_states::text, p.location_countries::text, p.categorized_job_title, p.categorized_job_function, p.tech_stack::text, p.salary_type, p.salary_currency_code, p.salary_currency_symbol, p.salary_min_usd, p.salary_max_usd, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.created_at_source, p.updated_at` +
+	query := `SELECT p.id, p.raw_us_job_id, r.source, p.company_id, p.external_job_id, p.role_title, p.role_description, p.role_requirements, p.url, p.slug, p.employment_type, p.location_type, p.location_city, p.location_us_states::text, p.location_countries::text, p.categorized_job_title, p.categorized_job_function, p.tech_stack::text, p.salary_type, p.salary_human_text, p.salary_currency_code, p.salary_currency_symbol, p.salary_min_usd, p.salary_max_usd, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.created_at_source, p.updated_at` +
 		baseFrom + where + orderClause + ` LIMIT ? OFFSET ?`
 	queryArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, queryArgs...)
@@ -1321,6 +1325,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 			externalJobID     sql.NullString
 			roleTitle         sql.NullString
 			roleDesc          sql.NullString
+			roleRequirements  sql.NullString
 			url               sql.NullString
 			slug              sql.NullString
 			employmentType    sql.NullString
@@ -1332,6 +1337,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 			categoryFunc      sql.NullString
 			techStack         sql.NullString
 			salaryType        sql.NullString
+			salaryHumanText   sql.NullString
 			salaryCurrency    sql.NullString
 			salarySymbol      sql.NullString
 			salaryMinUSD      sql.NullFloat64
@@ -1344,7 +1350,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 			createdAt         sql.NullString
 			updatedAt         sql.NullString
 		)
-		if err := rows.Scan(&id, &rawUSJobID, &sourceVal, &companyID, &externalJobID, &roleTitle, &roleDesc, &url, &slug, &employmentType, &locationType, &locationCity, &locationStates, &locationCountries, &categoryTitle, &categoryFunc, &techStack, &salaryType, &salaryCurrency, &salarySymbol, &salaryMinUSD, &salaryMaxUSD, &isEntry, &isJunior, &isMid, &isSenior, &isLead, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&id, &rawUSJobID, &sourceVal, &companyID, &externalJobID, &roleTitle, &roleDesc, &roleRequirements, &url, &slug, &employmentType, &locationType, &locationCity, &locationStates, &locationCountries, &categoryTitle, &categoryFunc, &techStack, &salaryType, &salaryHumanText, &salaryCurrency, &salarySymbol, &salaryMinUSD, &salaryMaxUSD, &isEntry, &isJunior, &isMid, &isSenior, &isLead, &createdAt, &updatedAt); err != nil {
 			continue
 		}
 		items = append(items, gin.H{
@@ -1355,6 +1361,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 			"external_job_id":          nullableString(externalJobID),
 			"role_title":               nullableString(roleTitle),
 			"role_description":         nullableString(roleDesc),
+			"role_requirements":        nullableString(roleRequirements),
 			"url":                      nullableString(url),
 			"slug":                     nullableString(slug),
 			"employment_type":          nullableString(employmentType),
@@ -1366,6 +1373,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 			"categorized_job_function": nullableString(categoryFunc),
 			"tech_stack":               parseJSONStringArray(techStack),
 			"salary_type":              nullableString(salaryType),
+			"salary_human_text":        nullableString(salaryHumanText),
 			"salary_currency_code":     nullableString(salaryCurrency),
 			"salary_currency_symbol":   nullableString(salarySymbol),
 			"salary_min_usd":           nullableFloatPtr(salaryMinUSD),
@@ -1401,6 +1409,7 @@ func (h *Handler) updateParsedJob(c *gin.Context) {
 		"external_job_id":          jsonPatchStringOrNull,
 		"role_title":               jsonPatchStringOrNull,
 		"role_description":         jsonPatchStringOrNull,
+		"role_requirements":        jsonPatchStringOrNull,
 		"url":                      jsonPatchStringOrNull,
 		"slug":                     jsonPatchStringOrNull,
 		"employment_type":          jsonPatchStringOrNull,
@@ -1412,6 +1421,7 @@ func (h *Handler) updateParsedJob(c *gin.Context) {
 		"categorized_job_function": jsonPatchStringOrNull,
 		"tech_stack":               jsonPatchStringArrayOrNull,
 		"salary_type":              jsonPatchStringOrNull,
+		"salary_human_text":        jsonPatchStringOrNull,
 		"salary_currency_code":     jsonPatchStringOrNull,
 		"salary_currency_symbol":   jsonPatchStringOrNull,
 		"salary_min_usd":           jsonPatchFloatOrNull,
