@@ -27,6 +27,16 @@ var SymbolToCode = map[string]string{
 	"HK$": "HKD",
 	"R$":  "BRL",
 	"MX$": "MXN",
+	"NT$": "TWD",
+	"₡":   "CRC",
+	"₨":   "PKR",
+	"₭":   "LAK",
+	"₮":   "MNT",
+	"₴":   "UAH",
+	"₸":   "KZT",
+	"₼":   "AZN",
+	"₾":   "GEL",
+	"₿":   "BTC",
 }
 
 var CodeToSymbol = map[string]string{
@@ -48,11 +58,43 @@ var CodeToSymbol = map[string]string{
 	"DKK": "DKK",
 	"BRL": "R$",
 	"MXN": "MX$",
+	"ARS": "ARS",
+	"BOB": "BOB",
+	"CLP": "CLP",
+	"COP": "COP",
+	"CRC": "₡",
+	"DOP": "DOP",
+	"GTQ": "GTQ",
+	"HNL": "HNL",
+	"NIO": "NIO",
+	"PAB": "PAB",
+	"PEN": "PEN",
+	"PYG": "PYG",
+	"UYU": "UYU",
+	"VES": "VES",
+	"AED": "AED",
+	"SAR": "SAR",
+	"QAR": "QAR",
+	"KWD": "KWD",
+	"BHD": "BHD",
+	"OMR": "OMR",
+	"JOD": "JOD",
+	"EGP": "EGP",
+	"MAD": "MAD",
+	"TND": "TND",
 	"ZAR": "ZAR",
 	"PLN": "PLN",
 	"CZK": "CZK",
 	"HUF": "HUF",
 	"RON": "RON",
+	"BGN": "BGN",
+	"HRK": "HRK",
+	"RSD": "RSD",
+	"ISK": "ISK",
+	"UAH": "₴",
+	"KZT": "₸",
+	"AZN": "₼",
+	"GEL": "₾",
 	"KRW": "₩",
 	"RUB": "₽",
 	"TRY": "₺",
@@ -61,34 +103,59 @@ var CodeToSymbol = map[string]string{
 	"THB": "฿",
 	"PHP": "₱",
 	"NGN": "₦",
+	"KES": "KES",
+	"GHS": "GHS",
+	"UGX": "UGX",
+	"TZS": "TZS",
+	"ZMW": "ZMW",
+	"BWP": "BWP",
+	"MUR": "MUR",
+	"XOF": "XOF",
+	"XAF": "XAF",
+	"ETB": "ETB",
+	"PKR": "₨",
+	"BDT": "৳",
+	"LKR": "Rs",
+	"NPR": "Rs",
+	"IDR": "IDR",
+	"MYR": "MYR",
+	"LAK": "₭",
+	"MMK": "MMK",
+	"KHR": "KHR",
+	"MNT": "₮",
+	"TWD": "NT$",
+	"FJD": "FJD",
+	"PGK": "PGK",
+	"WST": "WST",
+	"TOP": "TOP",
+	"BTC": "₿",
 }
 
 var (
-	SalaryNumberPattern = regexp.MustCompile(`([€£¥₹₩₽₺₫₪฿₱₦$]|\b(?:C\$|A\$|NZ\$|S\$|HK\$|R\$|MX\$)\b)?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*([kKmM])?`)
-	SalaryHintPattern   = regexp.MustCompile(`(?:[$€£¥₹₩₽₺₫₪฿₱₦]|\b(?:c\$|a\$|nz\$|s\$|hk\$|r\$|mx\$)\b|\b(?:usd|eur|gbp|cad|aud|nzd|sgd|hkd|inr|jpy|cny|rmb|chf|sek|nok|dkk|brl|mxn|zar|pln|czk|huf|ron|krw|rub|try|vnd|ils|thb|php|ngn|salary|compensation|hour|hr|day|week|month|year|annual|annum|monthly|weekly|daily)\b|/[a-z]+)`)
+	SalaryNumberPattern = regexp.MustCompile(`([$€£₹¥₩₽₺₫₪฿₱₦₡₨₭₮₴₸₼₾₿]|\b(?:C\$|A\$|NZ\$|S\$|HK\$|R\$|MX\$|NT\$)\b)?\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*([kKmM])?`)
+	SalaryHintPattern   = regexp.MustCompile(`(?:[$€£₹¥₩₽₺₫₪฿₱₦₡₨₭₮₴₸₼₾₿]|\b(?:c\$|a\$|nz\$|s\$|hk\$|r\$|mx\$|nt\$)\b|\b(?:usd|eur|gbp|cad|aud|nzd|sgd|hkd|inr|jpy|cny|rmb|chf|sek|nok|dkk|brl|mxn|ars|bob|clp|cop|crc|dop|gtq|hnl|nio|pab|pen|pyg|uyu|ves|aed|sar|qar|kwd|bhd|omr|jod|egp|mad|tnd|zar|pln|czk|huf|ron|bgn|hrk|rsd|isk|uah|kzt|azn|gel|krw|rub|try|vnd|ils|thb|php|ngn|kes|ghs|ugx|tzs|zmw|bwp|mur|xof|xaf|etb|pkr|bdt|lkr|npr|idr|myr|lak|mmk|khr|mnt|twd|fjd|pgk|wst|top|btc|salary|compensation|hour|hr|day|week|month|year|annual|annum|monthly|weekly|daily)\b|/[a-z]+)`)
 )
 
 func DetectCurrency(txt string) (code string, symbol string, ok bool) {
 	txtUpper := strings.ToUpper(txt)
 
-	// Prefer explicit currency code first
 	for c, s := range CodeToSymbol {
 		if strings.Contains(txtUpper, c) {
 			return c, s, true
 		}
 	}
 
-	// Then detect by symbol, preferring longer symbols first
 	longestCode := ""
 	longestSymbol := ""
-
 	for c, s := range CodeToSymbol {
+		if s == "" {
+			continue
+		}
 		if strings.Contains(txt, s) && len(s) > len(longestSymbol) {
 			longestCode = c
 			longestSymbol = s
 		}
 	}
-
 	if longestCode != "" {
 		return longestCode, longestSymbol, true
 	}
@@ -120,6 +187,8 @@ func Detect(text, symbol string) (string, string) {
 		return "BRL", "R$"
 	case strings.Contains(lowered, "mx$"):
 		return "MXN", "MX$"
+	case strings.Contains(lowered, "nt$"):
+		return "TWD", "NT$"
 	}
 
 	for sym, code := range SymbolToCode {
@@ -129,8 +198,8 @@ func Detect(text, symbol string) (string, string) {
 	}
 
 	for _, token := range SplitTokens(text) {
-		if symbol, ok := CodeToSymbol[token]; ok {
-			return token, symbol
+		if sym, ok := CodeToSymbol[token]; ok {
+			return token, sym
 		}
 	}
 
