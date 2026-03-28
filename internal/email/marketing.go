@@ -14,6 +14,7 @@ type MarketingJob struct {
 	PostedAt            string
 	CategorizedTitle    string
 	CategorizedFunction string
+	Countries           string
 	Salary              string
 }
 
@@ -72,6 +73,9 @@ func (s *Service) BuildMarketingEmailText(data MarketingEmailData) string {
 		if job.CategorizedFunction != "" {
 			line += " | " + job.CategorizedFunction
 		}
+		if job.Countries != "" {
+			line += " | " + job.Countries
+		}
 		if job.Salary != "" {
 			line += " | salary: " + job.Salary
 		}
@@ -111,6 +115,7 @@ func buildJobsBlockHTML(jobs []MarketingJob, lightTheme bool) string {
 		companyLogoURL := html.EscapeString(strings.TrimSpace(job.CompanyLogoURL))
 		categorizedTitle := html.EscapeString(strings.TrimSpace(job.CategorizedTitle))
 		categorizedFunction := html.EscapeString(strings.TrimSpace(job.CategorizedFunction))
+		countries := html.EscapeString(strings.TrimSpace(job.Countries))
 		salary := html.EscapeString(strings.TrimSpace(job.Salary))
 		posted := strings.TrimSpace(job.PostedAt)
 		if posted != "" {
@@ -148,6 +153,9 @@ func buildJobsBlockHTML(jobs []MarketingJob, lightTheme bool) string {
 				}
 				builder.WriteString(`</div>`)
 			}
+			if countries != "" {
+				builder.WriteString(`<div style="margin-top:4px;font-size:12px;color:#475569;">` + countries + `</div>`)
+			}
 			if salary != "" {
 				builder.WriteString(`<div style="margin-top:4px;font-size:12px;color:#0369a1;">` + salary + `</div>`)
 			}
@@ -183,6 +191,9 @@ func buildJobsBlockHTML(jobs []MarketingJob, lightTheme bool) string {
 				builder.WriteString(categorizedFunction)
 			}
 			builder.WriteString(`</div>`)
+		}
+		if countries != "" {
+			builder.WriteString(`<div style="margin-top:4px;font-size:12px;color:#cbd5e1;">` + countries + `</div>`)
 		}
 		if salary != "" {
 			builder.WriteString(`<div style="margin-top:4px;font-size:12px;color:#67e8f9;">` + salary + `</div>`)

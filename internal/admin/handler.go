@@ -383,7 +383,6 @@ func (h *Handler) sendMarketingEmail(c *gin.Context) {
 	results := []resultRow{}
 
 	siteURL := strings.TrimRight(h.cfg.SiteURL, "/")
-	siteName := strings.TrimSpace(h.cfg.SiteName)
 
 	for _, userID := range payload.UserIDs {
 		var emailAddr string
@@ -419,8 +418,8 @@ func (h *Handler) sendMarketingEmail(c *gin.Context) {
 		for rows.Next() {
 			var roleTitle, companyName, companyLogoURL, jobURL, slug sql.NullString
 			var createdAt sql.NullString
-			var categorizedTitle, categorizedFunction, salaryHumanText sql.NullString
-			if err := rows.Scan(&roleTitle, &companyName, &companyLogoURL, &jobURL, &slug, &createdAt, &categorizedTitle, &categorizedFunction, &salaryHumanText); err != nil {
+			var categorizedTitle, categorizedFunction, locationCountries, salaryHumanText sql.NullString
+			if err := rows.Scan(&roleTitle, &companyName, &companyLogoURL, &jobURL, &slug, &createdAt, &categorizedTitle, &categorizedFunction, &locationCountries, &salaryHumanText); err != nil {
 				continue
 			}
 			link := strings.TrimSpace(jobURL.String)
@@ -435,22 +434,13 @@ func (h *Handler) sendMarketingEmail(c *gin.Context) {
 				PostedAt:            strings.TrimSpace(createdAt.String),
 				CategorizedTitle:    strings.TrimSpace(categorizedTitle.String),
 				CategorizedFunction: strings.TrimSpace(categorizedFunction.String),
+				Countries:           formatMarketingCountries(locationCountries),
 				Salary:              strings.TrimSpace(salaryHumanText.String),
 			})
 		}
 		rows.Close()
 
-		firstName := strings.Split(strings.TrimSpace(emailAddr), "@")[0]
-		mailData := email.MarketingEmailData{
-			SiteName:       siteName,
-			SiteURL:        siteURL,
-			SiteLogoURL:    siteURL + "/logo.png",
-			FirstName:      firstName,
-			BrowseJobsURL:  siteURL + "/us-remote-jobs",
-			ManagePrefsURL: siteURL + "/account",
-			UnsubscribeURL: siteURL + "/account",
-			Jobs:           jobsList,
-		}
+		mailData := h.buildMarketingEmailData(emailAddr, jobsList, buildBrowseJobsURL(siteURL, jobs.BuildBrowseJobsQuery(filters)))
 
 		if err := h.emailService.SendMarketingEmail(emailAddr, mailData); err != nil {
 			results = append(results, resultRow{UserID: userID, Email: emailAddr, Status: "error", Message: err.Error()})
@@ -467,8 +457,9 @@ func (h *Handler) sendMarketingEmailForParsedJobs(c *gin.Context) {
 		return
 	}
 	var payload struct {
-		Emails []string `json:"emails"`
-		JobIDs []int64  `json:"job_ids"`
+		Emails         []string `json:"emails"`
+		JobIDs         []int64  `json:"job_ids"`
+		BrowseJobsQuery string  `json:"browse_jobs_query"`
 	}
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid request"})
@@ -498,8 +489,9 @@ func (h *Handler) sendMarketingEmailForParsedJobs(c *gin.Context) {
 		Message string `json:"message,omitempty"`
 	}
 	results := make([]resultRow, 0, len(emails))
+	browseJobsURL := buildBrowseJobsURL(strings.TrimRight(h.cfg.SiteURL, "/"), strings.TrimSpace(payload.BrowseJobsQuery))
 	for _, emailAddr := range emails {
-		mailData := h.buildMarketingEmailData(emailAddr, jobsList)
+		mailData := h.buildMarketingEmailData(emailAddr, jobsList, browseJobsURL)
 		if err := h.emailService.SendMarketingEmail(emailAddr, mailData); err != nil {
 			results = append(results, resultRow{Email: emailAddr, Status: "error", Message: err.Error()})
 			continue
@@ -510,16 +502,19 @@ func (h *Handler) sendMarketingEmailForParsedJobs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": results})
 }
 
-func (h *Handler) buildMarketingEmailData(emailAddr string, jobsList []email.MarketingJob) email.MarketingEmailData {
+func (h *Handler) buildMarketingEmailData(emailAddr string, jobsList []email.MarketingJob, browseJobsURL string) email.MarketingEmailData {
 	siteURL := strings.TrimRight(h.cfg.SiteURL, "/")
 	siteName := strings.TrimSpace(h.cfg.SiteName)
 	firstName := strings.Split(strings.TrimSpace(emailAddr), "@")[0]
+	if browseJobsURL == "" {
+		browseJobsURL = siteURL + "/remote-jobs"
+	}
 	return email.MarketingEmailData{
 		SiteName:       siteName,
 		SiteURL:        siteURL,
 		SiteLogoURL:    siteURL + "/logo.png",
 		FirstName:      firstName,
-		BrowseJobsURL:  siteURL + "/us-remote-jobs",
+		BrowseJobsURL:  browseJobsURL,
 		ManagePrefsURL: siteURL + "/account",
 		UnsubscribeURL: siteURL + "/account",
 		Jobs:           jobsList,
@@ -536,7 +531,7 @@ func (h *Handler) fetchMarketingJobsByParsedJobIDs(ctx context.Context, jobIDs [
 
 	rows, err := h.db.SQL.QueryContext(
 		ctx,
-		`SELECT p.id, p.role_title, c.name, c.profile_pic_url, p.url, p.slug, p.created_at_source, p.categorized_job_title, p.categorized_job_function, p.salary_human_text
+		`SELECT p.id, p.role_title, c.name, c.profile_pic_url, p.url, p.slug, p.created_at_source, p.categorized_job_title, p.categorized_job_function, p.location_countries::text, p.salary_human_text
 		   FROM parsed_jobs p
 		   LEFT JOIN parsed_companies c ON c.id = p.company_id
 		  WHERE p.id IN (`+strings.Join(placeholders, ", ")+`)`,
@@ -554,9 +549,9 @@ func (h *Handler) fetchMarketingJobsByParsedJobIDs(ctx context.Context, jobIDs [
 			jobID                                              int64
 			roleTitle, companyName, companyLogoURL, jobURL     sql.NullString
 			slug, createdAt, categorizedTitle, categorizedFunc sql.NullString
-			salaryHumanText                                    sql.NullString
+			locationCountries, salaryHumanText                sql.NullString
 		)
-		if err := rows.Scan(&jobID, &roleTitle, &companyName, &companyLogoURL, &jobURL, &slug, &createdAt, &categorizedTitle, &categorizedFunc, &salaryHumanText); err != nil {
+		if err := rows.Scan(&jobID, &roleTitle, &companyName, &companyLogoURL, &jobURL, &slug, &createdAt, &categorizedTitle, &categorizedFunc, &locationCountries, &salaryHumanText); err != nil {
 			return nil, err
 		}
 		link := strings.TrimSpace(jobURL.String)
@@ -571,6 +566,7 @@ func (h *Handler) fetchMarketingJobsByParsedJobIDs(ctx context.Context, jobIDs [
 			PostedAt:            strings.TrimSpace(createdAt.String),
 			CategorizedTitle:    strings.TrimSpace(categorizedTitle.String),
 			CategorizedFunction: strings.TrimSpace(categorizedFunc.String),
+			Countries:           formatMarketingCountries(locationCountries),
 			Salary:              strings.TrimSpace(salaryHumanText.String),
 		}
 	}
@@ -2337,6 +2333,23 @@ func parseJSONStringArray(value sql.NullString) any {
 		return out
 	}
 	return nil
+}
+
+func formatMarketingCountries(value sql.NullString) string {
+	parsed := parseJSONStringArray(value)
+	countries, _ := parsed.([]string)
+	if len(countries) == 0 {
+		return ""
+	}
+	return strings.Join(countries, ", ")
+}
+
+func buildBrowseJobsURL(siteURL, rawQuery string) string {
+	baseURL := siteURL + "/remote-jobs"
+	if rawQuery == "" {
+		return baseURL
+	}
+	return baseURL + "?" + rawQuery
 }
 
 func nilIfBlank(value string) any {
