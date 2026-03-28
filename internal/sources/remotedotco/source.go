@@ -148,6 +148,7 @@ func ParseRawHTML(htmlText, _ string) map[string]any {
 	if salaryRangeMap, ok := salaryRange.(map[string]any); ok && salaryRangeText != "" {
 		salaryRangeMap["salaryHumanReadableText"] = salaryRangeText
 	}
+	normalizeSalaryRangeMap(salaryRange)
 	slug := stripExternalIDFromSlug(stringValue(jobDetails["slug"]))
 
 	payload := map[string]any{
@@ -765,6 +766,33 @@ func buildSalaryRangeFromBaseSalary(value any) any {
 		payload["maxSalaryAsUSD"] = maxValue
 	}
 	return payload
+}
+
+func normalizeSalaryRangeMap(value any) {
+	salaryRange, _ := value.(map[string]any)
+	if salaryRange == nil {
+		return
+	}
+	currencyCode := strings.ToUpper(stringValue(salaryRange["currencyCode"]))
+	currencySymbol := stringValue(salaryRange["currencySymbol"])
+	if currencyCode == "" && currencySymbol != "" {
+		upperSymbol := strings.ToUpper(currencySymbol)
+		if inferredSymbol := currency.SymbolForCode(upperSymbol); inferredSymbol != "" {
+			currencyCode = upperSymbol
+			currencySymbol = inferredSymbol
+		} else if inferredCode, ok := currency.SymbolToCode[currencySymbol]; ok {
+			currencyCode = inferredCode
+		}
+	}
+	if currencySymbol == "" && currencyCode != "" {
+		currencySymbol = currency.SymbolForCode(currencyCode)
+	}
+	if currencyCode != "" {
+		salaryRange["currencyCode"] = currencyCode
+	}
+	if currencySymbol != "" {
+		salaryRange["currencySymbol"] = currencySymbol
+	}
 }
 
 func salaryTypeFromUnitText(value string) string {

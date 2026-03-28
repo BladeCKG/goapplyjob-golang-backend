@@ -203,3 +203,53 @@ func TestParseRawHTMLEducationRequirementFromFixtures(t *testing.T) {
 		})
 	}
 }
+
+func TestParseRawHTMLNormalizesSalarySymbolFromCode(t *testing.T) {
+	htmlText := `
+<html>
+<body>
+<script type="application/json">
+{"props":{"pageProps":{"jobDetails":{
+  "id":"job-1",
+  "title":"Engineer",
+  "description":"Build things",
+  "jobSummary":"Summary",
+  "applyURL":"https://remote.co/remote-jobs/job-1",
+  "postedDate":"2026-03-01T10:00:00Z",
+  "remoteOptions":["100% remote work"],
+  "jobSchedules":["Full-time"],
+  "cities":["Austin"],
+  "states":["Texas"],
+  "countries":["United States"]
+}}}}
+</script>
+<script type="application/ld+json">
+{"@type":"JobPosting","baseSalary":{"currency":"usd","value":{"minValue":100000,"maxValue":150000,"unitText":"YEAR"}}}
+</script>
+</body>
+</html>`
+	payload := ParseRawHTML(htmlText, "")
+	salaryRange, _ := payload["salaryRange"].(map[string]any)
+	if salaryRange["currencyCode"] != "USD" {
+		t.Fatalf("expected normalized currencyCode, got %#v", salaryRange["currencyCode"])
+	}
+	if salaryRange["currencySymbol"] != "$" {
+		t.Fatalf("expected inferred currencySymbol, got %#v", salaryRange["currencySymbol"])
+	}
+}
+
+func TestNormalizeSalaryRangeMapInfersCodeWhenSymbolContainsCode(t *testing.T) {
+	salaryRange := map[string]any{
+		"currencyCode":   "",
+		"currencySymbol": "usd",
+	}
+	salaryRange["currencyCode"] = ""
+	salaryRange["currencySymbol"] = "usd"
+	normalizeSalaryRangeMap(salaryRange)
+	if salaryRange["currencyCode"] != "USD" {
+		t.Fatalf("expected inferred currencyCode, got %#v", salaryRange["currencyCode"])
+	}
+	if salaryRange["currencySymbol"] != "$" {
+		t.Fatalf("expected normalized currencySymbol, got %#v", salaryRange["currencySymbol"])
+	}
+}
