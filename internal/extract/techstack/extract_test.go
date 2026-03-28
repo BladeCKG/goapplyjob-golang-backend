@@ -23,6 +23,15 @@ func TestExtractAllowsSpecialCharactersAroundAlias(t *testing.T) {
 	}
 }
 
+func TestExtractKeepsDelimitedTechStacksSeparate(t *testing.T) {
+	text := `Strong systems work in C/C++ with Python/Golang integrations.`
+	got := Extract(text)
+	want := []string{"C", "C++", "Python", "Go"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Extract mismatch got=%#v want=%#v", got, want)
+	}
+}
+
 func TestExtractDescriptionRequirements(t *testing.T) {
 	got := ExtractDescriptionRequirements(
 		`Experience with React and TypeScript.`,

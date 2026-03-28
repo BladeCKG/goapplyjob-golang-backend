@@ -45,9 +45,10 @@ func Extract(text string) []string {
 		for _, pattern := range entry.patterns {
 			match := pattern.FindStringIndex(text)
 			if match != nil {
+				aliasStart, aliasEnd := trimBoundaryMatch(text, match[0], match[1])
 				candidate := matchCandidate{
-					start:     match[0],
-					end:       match[1],
+					start:     aliasStart,
+					end:       aliasEnd,
 					canonical: entry.canonical,
 				}
 				if best == nil || candidate.start < best.start || (candidate.start == best.start && (candidate.end-candidate.start) > (best.end-best.start)) {
@@ -151,4 +152,35 @@ func buildAliasPattern(alias string, caseSensitive bool) string {
 		prefix = `(?i)`
 	}
 	return prefix + `(^|[^[:alnum:]])` + regexp.QuoteMeta(alias) + `($|[^[:alnum:]])`
+}
+
+func trimBoundaryMatch(text string, start, end int) (int, int) {
+	for start < end {
+		r := rune(text[start])
+		if isAlphaNumericByte(r) {
+			break
+		}
+		start++
+	}
+	for end > start {
+		r := rune(text[end-1])
+		if isAlphaNumericByte(r) || isTechSymbolByte(r) {
+			break
+		}
+		end--
+	}
+	return start, end
+}
+
+func isAlphaNumericByte(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+}
+
+func isTechSymbolByte(r rune) bool {
+	switch r {
+	case '+', '#', '.', '-':
+		return true
+	default:
+		return false
+	}
 }
