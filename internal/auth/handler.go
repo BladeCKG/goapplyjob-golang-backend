@@ -101,7 +101,8 @@ func (h *Handler) requestCode(c *gin.Context) {
 		return
 	}
 	var payload struct {
-		Email string `json:"email"`
+		Email          string `json:"email"`
+		TurnstileToken string `json:"turnstile_token"`
 	}
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid request"})
@@ -110,6 +111,10 @@ func (h *Handler) requestCode(c *gin.Context) {
 	email, err := normalizeEmail(payload.Email)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid email"})
+		return
+	}
+	if err := h.verifyTurnstileToken(c, payload.TurnstileToken, "login"); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"detail": err.Error()})
 		return
 	}
 
@@ -320,6 +325,7 @@ func (h *Handler) passwordSignup(c *gin.Context) {
 	var payload struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
+		TurnstileToken string `json:"turnstile_token"`
 	}
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid request"})
@@ -333,6 +339,10 @@ func (h *Handler) passwordSignup(c *gin.Context) {
 	password, err := validatePassword(payload.Password)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+	if err := h.verifyTurnstileToken(c, payload.TurnstileToken, "login"); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"detail": err.Error()})
 		return
 	}
 
@@ -426,6 +436,7 @@ func (h *Handler) passwordLogin(c *gin.Context) {
 	var payload struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
+		TurnstileToken string `json:"turnstile_token"`
 	}
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid request"})
@@ -439,6 +450,10 @@ func (h *Handler) passwordLogin(c *gin.Context) {
 	password, err := validatePassword(payload.Password)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
+		return
+	}
+	if err := h.verifyTurnstileToken(c, payload.TurnstileToken, "login"); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"detail": err.Error()})
 		return
 	}
 

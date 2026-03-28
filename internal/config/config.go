@@ -23,6 +23,8 @@ type Config struct {
 	AuthDebugReturnCode           bool
 	AuthEnableCodeLogin           bool
 	AuthEnableGoogleLogin         bool
+	AuthTurnstileSecretKey        string
+	AuthTurnstileVerifyURL        string
 	EmployerPostingFeeUSD         int
 	EmailProvider                 string
 	EmailProviders                string
@@ -98,6 +100,8 @@ func Load() Config {
 		AuthDebugReturnCode:           getenvBool("AUTH_DEBUG_RETURN_CODE", false),
 		AuthEnableCodeLogin:           getenvBool("AUTH_ENABLE_CODE_LOGIN", true),
 		AuthEnableGoogleLogin:         getenvBool("AUTH_ENABLE_GOOGLE_LOGIN", false),
+		AuthTurnstileSecretKey:        getenv("AUTH_TURNSTILE_SECRET_KEY", ""),
+		AuthTurnstileVerifyURL:        getenv("AUTH_TURNSTILE_VERIFY_URL", "https://challenges.cloudflare.com/turnstile/v0/siteverify"),
 		EmployerPostingFeeUSD:         getenvInt("EMPLOYER_POSTING_FEE_USD", 10),
 		EmailProvider:                 getenv("EMAIL_PROVIDER", "brevo"),
 		EmailProviders:                getenv("EMAIL_PROVIDERS", ""),

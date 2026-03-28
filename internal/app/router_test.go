@@ -110,7 +110,7 @@ func TestMagicLinkAuthFlow(t *testing.T) {
 }
 
 func TestJobsPublicPreviewIsLimited(t *testing.T) {
-	cfg := config.Load()
+	cfg := testConfig()
 	cfg.DatabaseURL = testDatabaseURL(t, "test_preview")
 	cfg.AuthDebugReturnCode = true
 	cfg.PublicJobsMaxPerPage = 3
@@ -151,7 +151,7 @@ func TestJobsPublicPreviewIsLimited(t *testing.T) {
 }
 
 func TestJobsSitemapEndpointNotPreviewLimited(t *testing.T) {
-	cfg := config.Load()
+	cfg := testConfig()
 	cfg.DatabaseURL = testDatabaseURL(t, "test_jobs_sitemap_not_preview_limited")
 	cfg.AuthDebugReturnCode = true
 	cfg.PublicJobsMaxPerPage = 2
@@ -1505,7 +1505,7 @@ func TestPricingProvidersEndpointReportsEnabledMethods(t *testing.T) {
 }
 
 func TestDefaultFreeSubscriptionAndUpgradePreview(t *testing.T) {
-	cfg := config.Load()
+	cfg := testConfig()
 	cfg.DatabaseURL = testDatabaseURL(t, "test_upgrade_preview")
 	cfg.AuthDebugReturnCode = true
 	cfg.AuthEnableCodeLogin = true
@@ -1598,7 +1598,7 @@ func TestExpiredFreePlanIsNotRecreatedOnLogin(t *testing.T) {
 }
 
 func TestCryptoWebhookRequiresSignatureAndActivatesSubscription(t *testing.T) {
-	cfg := config.Load()
+	cfg := testConfig()
 	cfg.DatabaseURL = testDatabaseURL(t, "test_crypto_webhook_paid")
 	cfg.AuthDebugReturnCode = true
 	cfg.AuthEnableCodeLogin = true
@@ -1640,7 +1640,7 @@ func TestCryptoWebhookRequiresSignatureAndActivatesSubscription(t *testing.T) {
 }
 
 func TestOxaPayWebhookRequestShapeMarksPaymentPaid(t *testing.T) {
-	cfg := config.Load()
+	cfg := testConfig()
 	cfg.DatabaseURL = testDatabaseURL(t, "test_oxapay_webhook_paid")
 	cfg.CryptoPaymentProvider = "oxapay"
 	cfg.OxaPayMerchantAPIKey = "secret-token"
@@ -1732,7 +1732,7 @@ func TestOxaPayWebhookRequestShapeMarksPaymentPaid(t *testing.T) {
 }
 
 func TestPricingCryptoCurrenciesSupportsAmountFiltering(t *testing.T) {
-	cfg := config.Load()
+	cfg := testConfig()
 	cfg.DatabaseURL = testDatabaseURL(t, "test_currency_filtering")
 	cfg.NowPaymentsCurrencyCandidates = "btc,eth,usdttrc20"
 	db, err := database.Open(cfg.DatabaseURL)
@@ -2057,7 +2057,7 @@ func TestPasswordSignupAndLoginFlow(t *testing.T) {
 }
 
 func TestSupabaseGoogleLoginFlow(t *testing.T) {
-	cfg := config.Load()
+	cfg := testConfig()
 	cfg.DatabaseURL = testDatabaseURL(t, "test_supabase_login")
 	cfg.AuthEnableGoogleLogin = true
 	cfg.SupabaseAnonKey = "anon-key"
@@ -2106,7 +2106,7 @@ func TestSupabaseGoogleLoginFlow(t *testing.T) {
 }
 
 func TestCodeLoginDisabled(t *testing.T) {
-	cfg := config.Load()
+	cfg := testConfig()
 	cfg.DatabaseURL = testDatabaseURL(t, "test_code_login_disabled")
 	cfg.AuthEnableCodeLogin = false
 	db, err := database.Open(cfg.DatabaseURL)
@@ -2275,7 +2275,7 @@ func TestJobActionsFlow(t *testing.T) {
 
 func testRouter(t *testing.T) (*gin.Engine, *database.DB) {
 	t.Helper()
-	cfg := config.Load()
+	cfg := testConfig()
 	cfg.DatabaseURL = testDatabaseURL(t, "test_page_extract")
 	cfg.AuthDebugReturnCode = true
 	cfg.AuthEnableCodeLogin = true
@@ -2284,6 +2284,13 @@ func testRouter(t *testing.T) (*gin.Engine, *database.DB) {
 		t.Fatal(err)
 	}
 	return NewRouter(cfg, db), db
+}
+
+func testConfig() config.Config {
+	cfg := config.Load()
+	// Keep router tests hermetic even when local Turnstile env vars are set.
+	cfg.AuthTurnstileSecretKey = ""
+	return cfg
 }
 
 func testDatabaseURL(t *testing.T, name string) string {
