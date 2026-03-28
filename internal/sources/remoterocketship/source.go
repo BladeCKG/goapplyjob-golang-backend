@@ -6,6 +6,7 @@ import (
 	"errors"
 	"goapplyjob-golang-backend/internal/normalize/employmentnorm"
 	"goapplyjob-golang-backend/internal/normalize/locationnorm"
+	"goapplyjob-golang-backend/internal/sources/currency"
 	"html"
 	"net/url"
 	"regexp"
@@ -79,6 +80,7 @@ func ParseRawHTML(htmlText, sourceUrl string) map[string]any {
 	if company, ok := jobData["company"].(map[string]any); ok {
 		company["id"] = namespacedCompanyID(company["id"])
 	}
+	normalizeSalaryRange(jobData)
 	jobData["locationCountries"] = []string{}
 	if country := normalizeCountryToken(stringValue(jobData["location"])); country != "" {
 		jobData["locationCountries"] = []string{country}
@@ -119,6 +121,33 @@ func namespacedCompanyID(value any) any {
 
 func normalizeCountryToken(value string) string {
 	return locationnorm.NormalizeCountryName(value)
+}
+
+func normalizeSalaryRange(jobData map[string]any) {
+	salaryRange, _ := jobData["salaryRange"].(map[string]any)
+	if salaryRange == nil {
+		return
+	}
+	currencyCode := strings.ToUpper(stringValue(salaryRange["currencyCode"]))
+	currencySymbol := stringValue(salaryRange["currencySymbol"])
+	if currencyCode == "" && currencySymbol != "" {
+		upperSymbol := strings.ToUpper(currencySymbol)
+		if inferredSymbol := currency.SymbolForCode(upperSymbol); inferredSymbol != "" {
+			currencyCode = upperSymbol
+			currencySymbol = inferredSymbol
+		} else if inferredCode, ok := currency.SymbolToCode[currencySymbol]; ok {
+			currencyCode = inferredCode
+		}
+	}
+	if currencySymbol == "" && currencyCode != "" {
+		currencySymbol = currency.SymbolForCode(currencyCode)
+	}
+	if currencyCode != "" {
+		salaryRange["currencyCode"] = currencyCode
+	}
+	if currencySymbol != "" {
+		salaryRange["currencySymbol"] = currencySymbol
+	}
 }
 
 func ParseImportRows(bodyText string) ([]map[string]any, int) {

@@ -49,3 +49,41 @@ func TestParseRawHTMLNormalizesNumericCompanyIDToString(t *testing.T) {
 		t.Fatalf("expected company.id string, got %#v", company["id"])
 	}
 }
+
+func TestParseRawHTMLInfersCurrencySymbolFromCode(t *testing.T) {
+	htmlText := `
+<html>
+<body>
+<script type="application/json">
+{"props":{"pageProps":{"jobOpening":{"title":"Engineer","salaryRange":{"currencyCode":"usd","currencySymbol":""}}}}}
+</script>
+</body>
+</html>`
+	payload := ParseRawHTML(htmlText, "")
+	salaryRange, _ := payload["salaryRange"].(map[string]any)
+	if salaryRange["currencyCode"] != "USD" {
+		t.Fatalf("expected normalized currencyCode, got %#v", salaryRange["currencyCode"])
+	}
+	if salaryRange["currencySymbol"] != "$" {
+		t.Fatalf("expected inferred currencySymbol, got %#v", salaryRange["currencySymbol"])
+	}
+}
+
+func TestParseRawHTMLInfersCurrencyCodeWhenSymbolContainsCode(t *testing.T) {
+	htmlText := `
+<html>
+<body>
+<script type="application/json">
+{"props":{"pageProps":{"jobOpening":{"title":"Engineer","salaryRange":{"currencyCode":"","currencySymbol":"usd"}}}}}
+</script>
+</body>
+</html>`
+	payload := ParseRawHTML(htmlText, "")
+	salaryRange, _ := payload["salaryRange"].(map[string]any)
+	if salaryRange["currencyCode"] != "USD" {
+		t.Fatalf("expected inferred currencyCode, got %#v", salaryRange["currencyCode"])
+	}
+	if salaryRange["currencySymbol"] != "$" {
+		t.Fatalf("expected normalized currencySymbol, got %#v", salaryRange["currencySymbol"])
+	}
+}

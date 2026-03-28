@@ -137,6 +137,14 @@ func Detect(text, symbol string) (string, string) {
 	return "USD", firstNonEmpty(trimmedSymbol, CodeToSymbol["USD"])
 }
 
+func SymbolForCode(code string) string {
+	normalized := strings.ToUpper(code)
+	if normalized == "" {
+		return ""
+	}
+	return CodeToSymbol[normalized]
+}
+
 func SplitTokens(value string) []string {
 	upper := strings.ToUpper(value)
 	tokens := []string{}
