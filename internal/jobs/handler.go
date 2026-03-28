@@ -208,6 +208,7 @@ func (h *Handler) Register(router gin.IRouter) {
 	router.GET("/jobs/metrics", h.metrics)
 	router.GET("/jobs/related-categories", h.relatedCategories)
 	router.GET("/jobs/top-categories", h.topCategories)
+	router.GET("/jobs/top-functions", h.topFunctions)
 	router.GET("/jobs/sitemap", h.sitemap)
 	router.GET("/jobs/count", h.jobsCount)
 	router.GET("/job/:jobID", h.jobDetail)
@@ -1510,6 +1511,109 @@ LIMIT $` + strconv.Itoa(len(args))
 	}
 	if err := rows.Err(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load top categories"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (h *Handler) topFunctions(c *gin.Context) {
+	limit := max(parseIntDefault(c.Query("limit"), 10), 1)
+	if limit > 30 {
+		limit = 30
+	}
+	days := max(parseIntDefault(c.Query("days"), 30), 1)
+	if days > 365 {
+		days = 365
+	}
+	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
+
+	input := listingFilterInput{
+		USStates:  []string{},
+		Countries: []string{},
+	}
+	for _, state := range uniqueStrings(parseCSVQuery(c.Query("us_states"))) {
+		if normalized := locationnorm.NormalizeUSStateName(state); normalized != "" {
+			input.USStates = append(input.USStates, normalized)
+		}
+	}
+	for _, country := range uniqueStrings(parseCSVQuery(c.Query("countries"))) {
+		if trimmed := strings.TrimSpace(country); trimmed != "" {
+			input.Countries = append(input.Countries, trimmed)
+		}
+	}
+	input.Countries = expandCountryFilterTerms(input.Countries)
+	input.HasStructuredLocation = len(input.USStates) > 0 || len(input.Countries) > 0
+
+	args := []any{cutoff}
+	clauses := []string{
+		"p.categorized_job_function IS NOT NULL",
+		"p.categorized_job_function != ''",
+		"p.created_at_source IS NOT NULL",
+		fmt.Sprintf("p.created_at_source >= $%d", len(args)),
+	}
+	if input.HasStructuredLocation {
+		locOr := make([]string, 0, len(input.USStates)+len(input.Countries)+2)
+		for _, state := range input.USStates {
+			if strings.TrimSpace(state) == "" {
+				continue
+			}
+			args = append(args, state)
+			locOr = append(locOr, fmt.Sprintf("CAST(p.location_us_states AS jsonb) @> to_jsonb(ARRAY[$%d::text])", len(args)))
+		}
+		if len(input.USStates) > 0 {
+			args = append(args, unitedStatesCountry)
+			locOr = append(
+				locOr,
+				fmt.Sprintf(
+					"(CAST(p.location_countries AS jsonb) @> to_jsonb(ARRAY[$%d::text]) AND COALESCE(jsonb_array_length(CAST(p.location_us_states AS jsonb)), 0) = 0)",
+					len(args),
+				),
+			)
+			for _, region := range broadRegionTermsForUSStates(input.USStates) {
+				args = append(args, region)
+				locOr = append(locOr, fmt.Sprintf("CAST(p.location_countries AS jsonb) @> to_jsonb(ARRAY[$%d::text])", len(args)))
+			}
+		}
+		for _, country := range input.Countries {
+			if strings.TrimSpace(country) == "" {
+				continue
+			}
+			args = append(args, country)
+			locOr = append(locOr, fmt.Sprintf("CAST(p.location_countries AS jsonb) @> to_jsonb(ARRAY[$%d::text])", len(args)))
+		}
+		if len(locOr) > 0 {
+			clauses = append(clauses, "("+strings.Join(locOr, " OR ")+")")
+		}
+	}
+	args = append(args, limit)
+	query := `SELECT p.categorized_job_function, COUNT(p.id)::bigint AS score
+FROM parsed_jobs p
+WHERE ` + strings.Join(clauses, " AND ") + `
+GROUP BY p.categorized_job_function
+ORDER BY score DESC, p.categorized_job_function ASC
+LIMIT $` + strconv.Itoa(len(args))
+
+	rows, err := h.db.PGX.Query(c.Request.Context(), query, args...)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load top job functions"})
+		return
+	}
+	defer rows.Close()
+	items := []gin.H{}
+	for rows.Next() {
+		var jobFunction string
+		var score int64
+		if err := rows.Scan(&jobFunction, &score); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load top job functions"})
+			return
+		}
+		jobFunction = strings.TrimSpace(jobFunction)
+		if jobFunction != "" {
+			items = append(items, gin.H{"job_function": jobFunction, "score": score})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load top job functions"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})

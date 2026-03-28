@@ -276,6 +276,33 @@ func TestJobsTopCategoriesRespectsLocationAndWindow(t *testing.T) {
 	}
 }
 
+func TestJobsTopFunctionsRespectsLocationAndWindow(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	now := time.Now().UTC()
+	insertJobWithFunctionAndCreatedAt(t, db, 9301, "Software Engineer", "Engineering", "United States", now.Add(-2*time.Hour))
+	insertJobWithFunctionAndCreatedAt(t, db, 9302, "Backend Engineer", "Engineering", "United States", now.Add(-3*time.Hour))
+	insertJobWithFunctionAndCreatedAt(t, db, 9303, "Account Executive", "Sales", "United States", now.Add(-2*time.Hour))
+	insertJobWithFunctionAndCreatedAt(t, db, 9304, "Data Engineer", "Data", "Canada", now.Add(-2*time.Hour))
+	insertJobWithFunctionAndCreatedAt(t, db, 9305, "Old Sales Role", "Sales", "United States", now.Add(-40*24*time.Hour))
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs/top-functions?countries=United+States&days=30&limit=5", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+	var body map[string]any
+	decodeBody(t, rec.Body.Bytes(), &body)
+	items := body["items"].([]any)
+	if len(items) == 0 {
+		t.Fatalf("expected top functions payload %#v", body)
+	}
+	first := items[0].(map[string]any)
+	if first["job_function"].(string) != "Engineering" {
+		t.Fatalf("unexpected top functions payload %#v", body)
+	}
+}
+
 func TestJobsDefaultSortUsesCreatedAtSource(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
@@ -2469,6 +2496,19 @@ func insertJobWithCreatedAt(t *testing.T, db *database.DB, rawID int, category, 
 	}
 	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, role_title, location_countries, created_at_source, url) VALUES (?, ?, ?, ?, ?, ?)`,
 		rawID+7000, category, category, `["`+location+`"]`, createdAt.Format(time.RFC3339Nano), "https://jobs.example.com/top-"+strconv.Itoa(rawID))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertJobWithFunctionAndCreatedAt(t *testing.T, db *database.DB, rawID int, title, jobFunction, location string, createdAt time.Time) {
+	t.Helper()
+	_, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (?, ?, ?, true, false, true, 0, '{}')`, rawID+8000, "https://example.com/function-"+strconv.Itoa(rawID), createdAt.Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, categorized_job_title, categorized_job_function, role_title, location_countries, created_at_source, url) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		rawID+8000, title, jobFunction, title, `["`+location+`"]`, createdAt.Format(time.RFC3339Nano), "https://jobs.example.com/function-"+strconv.Itoa(rawID))
 	if err != nil {
 		t.Fatal(err)
 	}
