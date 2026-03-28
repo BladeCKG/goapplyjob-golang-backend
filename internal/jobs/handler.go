@@ -120,6 +120,8 @@ type jobItem struct {
 	SalaryMax             *float64   `json:"salary_max"`
 	SalaryMinUSD          *float64   `json:"salary_min_usd"`
 	SalaryMaxUSD          *float64   `json:"salary_max_usd"`
+	SalaryCurrencyCode    *string    `json:"salary_currency_code"`
+	SalaryCurrencySymbol  *string    `json:"salary_currency_symbol"`
 	SalaryType            *string    `json:"salary_type"`
 	IsEntryLevel          *bool      `json:"is_entry_level"`
 	IsJunior              *bool      `json:"is_junior"`
@@ -156,6 +158,8 @@ type jobDetail struct {
 	SalaryMax                               *float64 `json:"salary_max"`
 	SalaryMinUSD                            *float64 `json:"salary_min_usd"`
 	SalaryMaxUSD                            *float64 `json:"salary_max_usd"`
+	SalaryCurrencyCode                      *string  `json:"salary_currency_code"`
+	SalaryCurrencySymbol                    *string  `json:"salary_currency_symbol"`
 	SalaryType                              *string  `json:"salary_type"`
 	IsEntryLevel                            *bool    `json:"is_entry_level"`
 	IsJunior                                *bool    `json:"is_junior"`
@@ -925,6 +929,8 @@ type listJobsQueryRow struct {
 	SalaryMax              pgtype.Float8
 	SalaryMinUsd           pgtype.Float8
 	SalaryMaxUsd           pgtype.Float8
+	SalaryCurrencyCode     pgtype.Text
+	SalaryCurrencySymbol   pgtype.Text
 	SalaryType             pgtype.Text
 	IsEntryLevel           pgtype.Bool
 	IsJunior               pgtype.Bool
@@ -957,6 +963,8 @@ func mapListJobsQueryRow(row listJobsQueryRow) jobItem {
 		LocationCity:          pgTextPtr(row.LocationCity),
 		LocationType:          pgTextPtr(row.LocationType),
 		EmploymentType:        pgTextPtr(row.EmploymentType),
+		SalaryCurrencyCode:    pgTextPtr(row.SalaryCurrencyCode),
+		SalaryCurrencySymbol:  pgTextPtr(row.SalaryCurrencySymbol),
 		SalaryType:            pgTextPtr(row.SalaryType),
 		IsEntryLevel:          pgBoolPtr(row.IsEntryLevel),
 		IsJunior:              pgBoolPtr(row.IsJunior),
@@ -1209,7 +1217,7 @@ func queryJobsByIDsInOrder(ctx context.Context, pool *pgxpool.Pool, ids []int64)
 SELECT p.id, p.raw_us_job_id, p.role_title, p.job_description_summary,
        c.name, c.slug, c.tagline, c.profile_pic_url, c.home_page_url, c.linkedin_url, c.employee_range, c.founded_year, c.sponsors_h1b,
        p.categorized_job_title, p.categorized_job_function, p.location_city, p.location_type, p.location_us_states, p.location_countries, p.employment_type,
-       p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_type,
+       p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_currency_code, p.salary_currency_symbol, p.salary_type,
        p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead,
        p.tech_stack, p.updated_at, p.created_at_source, p.url
 FROM parsed_jobs p
@@ -1251,6 +1259,8 @@ ORDER BY array_position($1::bigint[], p.id)
 			&row.SalaryMax,
 			&row.SalaryMinUsd,
 			&row.SalaryMaxUsd,
+			&row.SalaryCurrencyCode,
+			&row.SalaryCurrencySymbol,
 			&row.SalaryType,
 			&row.IsEntryLevel,
 			&row.IsJunior,
@@ -1753,10 +1763,10 @@ func (h *Handler) buildListingFilterInput(c *gin.Context, currentUser *auth.User
 
 func scanJob(scanner interface{ Scan(dest ...any) error }) (jobItem, error) {
 	var item jobItem
-	var roleTitle, summary, companyName, companySlug, companyTagline, companyProfilePicURL, companyHomePageURL, companyLinkedInURL, companyEmployeeRange, companyFoundedYear, categorizedTitle, categorizedFunction, locationCity, locationType, locationUSStates, locationCountries, employmentType, salaryType, techStack, updatedAt, createdAt, url sql.NullString
+	var roleTitle, summary, companyName, companySlug, companyTagline, companyProfilePicURL, companyHomePageURL, companyLinkedInURL, companyEmployeeRange, companyFoundedYear, categorizedTitle, categorizedFunction, locationCity, locationType, locationUSStates, locationCountries, employmentType, salaryCurrencyCode, salaryCurrencySymbol, salaryType, techStack, updatedAt, createdAt, url sql.NullString
 	var companySponsorsH1B, isEntry, isJunior, isMid, isSenior, isLead sql.NullBool
 	var salaryMin, salaryMax, salaryMinUSD, salaryMaxUSD sql.NullFloat64
-	err := scanner.Scan(&item.ID, &item.RawUSJobID, &roleTitle, &summary, &companyName, &companySlug, &companyTagline, &companyProfilePicURL, &companyHomePageURL, &companyLinkedInURL, &companyEmployeeRange, &companyFoundedYear, &companySponsorsH1B, &categorizedTitle, &categorizedFunction, &locationCity, &locationType, &locationUSStates, &locationCountries, &employmentType, &salaryMin, &salaryMax, &salaryMinUSD, &salaryMaxUSD, &salaryType, &isEntry, &isJunior, &isMid, &isSenior, &isLead, &techStack, &updatedAt, &createdAt, &url)
+	err := scanner.Scan(&item.ID, &item.RawUSJobID, &roleTitle, &summary, &companyName, &companySlug, &companyTagline, &companyProfilePicURL, &companyHomePageURL, &companyLinkedInURL, &companyEmployeeRange, &companyFoundedYear, &companySponsorsH1B, &categorizedTitle, &categorizedFunction, &locationCity, &locationType, &locationUSStates, &locationCountries, &employmentType, &salaryMin, &salaryMax, &salaryMinUSD, &salaryMaxUSD, &salaryCurrencyCode, &salaryCurrencySymbol, &salaryType, &isEntry, &isJunior, &isMid, &isSenior, &isLead, &techStack, &updatedAt, &createdAt, &url)
 	if err != nil {
 		return item, err
 	}
@@ -1780,6 +1790,8 @@ func scanJob(scanner interface{ Scan(dest ...any) error }) (jobItem, error) {
 	item.SalaryMax = nullableFloatPtr(salaryMax)
 	item.SalaryMinUSD = nullableFloatPtr(salaryMinUSD)
 	item.SalaryMaxUSD = nullableFloatPtr(salaryMaxUSD)
+	item.SalaryCurrencyCode = nullableString(salaryCurrencyCode)
+	item.SalaryCurrencySymbol = nullableString(salaryCurrencySymbol)
 	item.SalaryType = nullableString(salaryType)
 	item.IsEntryLevel = nullableBool(isEntry)
 	item.IsJunior = nullableBool(isJunior)
@@ -1811,11 +1823,11 @@ func scanJob(scanner interface{ Scan(dest ...any) error }) (jobItem, error) {
 
 func scanJobDetail(scanner interface{ Scan(dest ...any) error }) (jobDetail, error) {
 	var detail jobDetail
-	var companyName, companySlug, companyTagline, companyProfilePicURL, companyHomePageURL, companyLinkedInURL, companyEmployeeRange, companyFoundedYear, categorizedTitle, categorizedFunction, roleTitle, locationCity, locationType, locationUSStates, locationCountries, employmentType, salaryType, updatedAt, createdAt, roleDescription, roleRequirements, educationCategory, requiredLanguages, techStack, benefits, url sql.NullString
+	var companyName, companySlug, companyTagline, companyProfilePicURL, companyHomePageURL, companyLinkedInURL, companyEmployeeRange, companyFoundedYear, categorizedTitle, categorizedFunction, roleTitle, locationCity, locationType, locationUSStates, locationCountries, employmentType, salaryCurrencyCode, salaryCurrencySymbol, salaryType, updatedAt, createdAt, roleDescription, roleRequirements, educationCategory, requiredLanguages, techStack, benefits, url sql.NullString
 	var companySponsorsH1B, experienceInPlaceOfEducation sql.NullBool
 	var salaryMin, salaryMax, salaryMinUSD, salaryMaxUSD sql.NullFloat64
 	var experienceRequirementsMonths sql.NullInt64
-	err := scanner.Scan(&detail.ID, &detail.RawUSJobID, &companyName, &companySlug, &companyTagline, &companyProfilePicURL, &companyHomePageURL, &companyLinkedInURL, &companyEmployeeRange, &companyFoundedYear, &companySponsorsH1B, &categorizedTitle, &categorizedFunction, &roleTitle, &locationCity, &locationType, &locationUSStates, &locationCountries, &employmentType, &salaryMin, &salaryMax, &salaryMinUSD, &salaryMaxUSD, &salaryType, &updatedAt, &createdAt, &roleDescription, &roleRequirements, &educationCategory, &experienceRequirementsMonths, &experienceInPlaceOfEducation, &requiredLanguages, &techStack, &benefits, &url)
+	err := scanner.Scan(&detail.ID, &detail.RawUSJobID, &companyName, &companySlug, &companyTagline, &companyProfilePicURL, &companyHomePageURL, &companyLinkedInURL, &companyEmployeeRange, &companyFoundedYear, &companySponsorsH1B, &categorizedTitle, &categorizedFunction, &roleTitle, &locationCity, &locationType, &locationUSStates, &locationCountries, &employmentType, &salaryMin, &salaryMax, &salaryMinUSD, &salaryMaxUSD, &salaryCurrencyCode, &salaryCurrencySymbol, &salaryType, &updatedAt, &createdAt, &roleDescription, &roleRequirements, &educationCategory, &experienceRequirementsMonths, &experienceInPlaceOfEducation, &requiredLanguages, &techStack, &benefits, &url)
 	if err != nil {
 		return detail, err
 	}
@@ -1838,6 +1850,8 @@ func scanJobDetail(scanner interface{ Scan(dest ...any) error }) (jobDetail, err
 	detail.SalaryMax = nullableFloatPtr(salaryMax)
 	detail.SalaryMinUSD = nullableFloatPtr(salaryMinUSD)
 	detail.SalaryMaxUSD = nullableFloatPtr(salaryMaxUSD)
+	detail.SalaryCurrencyCode = nullableString(salaryCurrencyCode)
+	detail.SalaryCurrencySymbol = nullableString(salaryCurrencySymbol)
 	detail.SalaryType = nullableString(salaryType)
 	if updatedAt.Valid {
 		detail.UpdatedAt = &updatedAt.String
@@ -1952,6 +1966,8 @@ func mapJobDetailRow(row *gensqlc.GetJobDetailByIDRow) jobDetail {
 		LocationCity:                            pgTextPtr(row.LocationCity),
 		LocationType:                            pgTextPtr(row.LocationType),
 		EmploymentType:                          pgTextPtr(row.EmploymentType),
+		SalaryCurrencyCode:                      pgTextPtr(row.SalaryCurrencyCode),
+		SalaryCurrencySymbol:                    pgTextPtr(row.SalaryCurrencySymbol),
 		SalaryType:                              pgTextPtr(row.SalaryType),
 		IsEntryLevel:                            pgBoolPtr(row.IsEntryLevel),
 		IsJunior:                                pgBoolPtr(row.IsJunior),
