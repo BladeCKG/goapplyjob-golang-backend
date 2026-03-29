@@ -6,7 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"goapplyjob-golang-backend/internal/config"
@@ -47,6 +50,15 @@ type parsedJobRow struct {
 	ParsedJobID   int64
 	TechStackJSON string
 }
+
+type techstackCatalogEntry struct {
+	Canonical string `json:"canonical"`
+}
+
+var (
+	loadCanonicalsOnce sync.Once
+	exactCanonicals    map[string]string
+)
 
 func run(ctx context.Context, db *database.DB, dryRun bool, batchSize int) (int, int, error) {
 	scanned := 0
@@ -190,7 +202,64 @@ func normalizeTechStack(values []string) []string {
 	if len(values) == 0 {
 		return []string{}
 	}
-	return techstack.Extract(strings.Join(values, "\n"))
+	normalized := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if canonical, ok := normalizeExactCanonical(value); ok {
+			if _, ok := seen[canonical]; ok {
+				continue
+			}
+			normalized = append(normalized, canonical)
+			seen[canonical] = struct{}{}
+			continue
+		}
+		extracted := techstack.Extract(value)
+		if len(extracted) == 0 {
+			continue
+		}
+		canonical := extracted[0]
+		if _, ok := seen[canonical]; ok {
+			continue
+		}
+		normalized = append(normalized, canonical)
+		seen[canonical] = struct{}{}
+	}
+	return normalized
+}
+
+func normalizeExactCanonical(value string) (string, bool) {
+	if exactCanonicals != nil {
+		canonical, ok := exactCanonicals[strings.ToLower(value)]
+		return canonical, ok
+	}
+	loadCanonicalsOnce.Do(loadExactCanonicals)
+	if value == "" {
+		return "", false
+	}
+	canonical, ok := exactCanonicals[strings.ToLower(value)]
+	return canonical, ok
+}
+
+func loadExactCanonicals() {
+	path := filepath.Join("internal", "extract", "techstack", "catalog.json")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		exactCanonicals = map[string]string{}
+		return
+	}
+	var entries []techstackCatalogEntry
+	if err := json.Unmarshal(content, &entries); err != nil {
+		exactCanonicals = map[string]string{}
+		return
+	}
+	loaded := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		if entry.Canonical == "" {
+			continue
+		}
+		loaded[strings.ToLower(entry.Canonical)] = entry.Canonical
+	}
+	exactCanonicals = loaded
 }
 
 func equalStringSlices(left, right []string) bool {
