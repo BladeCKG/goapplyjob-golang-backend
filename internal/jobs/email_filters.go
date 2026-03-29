@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"goapplyjob-golang-backend/internal/normalize/locationnorm"
@@ -149,37 +150,50 @@ func BuildBrowseJobsQuery(payload LastJobFiltersPayload) string {
 	query := url.Values{}
 
 	if values := compactUniqueStrings(payload.JobCategories); len(values) > 0 {
-		query.Set("job_categories", strings.Join(values, ","))
+		query.Set("job_categories", encodeCSVQuery(values))
 	}
 	if values := compactUniqueStrings(payload.JobFunctions); len(values) > 0 {
-		query.Set("job_functions", strings.Join(values, ","))
+		query.Set("job_functions", encodeCSVQuery(values))
 	}
 	if values := compactUniqueStrings(payload.JobTitles); len(values) > 0 {
-		query.Set("job_titles", strings.Join(values, ","))
+		query.Set("job_titles", encodeCSVQuery(values))
 	}
 	if value := strings.TrimSpace(payload.Company); value != "" {
 		query.Set("company", value)
 	}
 	if values := compactUniqueStrings(payload.USStates); len(values) > 0 {
-		query.Set("us_states", strings.Join(values, ","))
+		query.Set("us_states", encodeCSVQuery(values))
 	}
 	if values := compactUniqueStrings(payload.Countries); len(values) > 0 {
-		query.Set("countries", strings.Join(values, ","))
+		query.Set("countries", encodeCSVQuery(values))
 	}
 	if values := compactUniqueStrings(payload.EmploymentTypes); len(values) > 0 {
-		query.Set("employment_type", strings.Join(values, ","))
+		query.Set("employment_type", encodeCSVQuery(values))
 	}
 	if values := compactUniqueStrings(payload.TechStacks); len(values) > 0 {
-		query.Set("tech_stack", strings.Join(values, ","))
+		query.Set("tech_stack", encodeCSVQuery(values))
 	}
 	if payload.SalaryMin != nil && *payload.SalaryMin > 0 {
 		query.Set("min_salary", fmt.Sprintf("%.0f", *payload.SalaryMin))
 	}
 	if values := mapSenioritiesToAPI(payload.Seniorities); len(values) > 0 {
-		query.Set("seniority", strings.Join(values, ","))
+		query.Set("seniority", encodeCSVQuery(values))
 	}
 
 	return query.Encode()
+}
+
+func encodeCSVQuery(values []string) string {
+	var builder strings.Builder
+	writer := csv.NewWriter(&builder)
+	if err := writer.Write(values); err != nil {
+		return ""
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		return ""
+	}
+	return strings.TrimSuffix(builder.String(), "\n")
 }
 
 func compactUniqueStrings(values []string) []string {

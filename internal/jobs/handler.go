@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"database/sql"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"goapplyjob-golang-backend/internal/auth"
@@ -268,8 +269,13 @@ func parseCSVQuery(value string) []string {
 	if value == "" {
 		return nil
 	}
-	items := []string{}
-	for _, item := range strings.Split(value, ",") {
+	reader := csv.NewReader(strings.NewReader(value))
+	record, err := reader.Read()
+	if err != nil {
+		return nil
+	}
+	items := make([]string, 0, len(record))
+	for _, item := range record {
 		trimmed := strings.TrimSpace(item)
 		if trimmed != "" {
 			items = append(items, trimmed)

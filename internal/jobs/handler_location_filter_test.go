@@ -98,3 +98,16 @@ func TestBuildLocationParentsMapNormalizesRegionCountryLabels(t *testing.T) {
 		t.Fatalf("did not expect raw %q key in location parents, got %v", "ASIA", got)
 	}
 }
+
+func TestParseCSVQueryPreservesQuotedCommas(t *testing.T) {
+	got := parseCSVQuery(`"Sudan, Republic of",Canada`)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 values, got %v", got)
+	}
+	if got[0] != "Sudan, Republic of" {
+		t.Fatalf("expected first value to preserve comma, got %q", got[0])
+	}
+	if got[1] != "Canada" {
+		t.Fatalf("expected second value to be Canada, got %q", got[1])
+	}
+}

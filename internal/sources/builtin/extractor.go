@@ -5,6 +5,7 @@ import (
 	"errors"
 	"goapplyjob-golang-backend/internal/normalize/employmentnorm"
 	"goapplyjob-golang-backend/internal/normalize/locationnorm"
+	"goapplyjob-golang-backend/internal/sources/currency"
 	"html"
 	"net/url"
 	"regexp"
@@ -22,7 +23,6 @@ var (
 	jobPostInitRegex        = regexp.MustCompile(`(?is)Builtin\.jobPostInit\((.*)\)`)
 	howToApplyRegex         = regexp.MustCompile(`(?is)howToApply\s*:\s*"([^"]+)"`)
 	topSkillsRegex          = regexp.MustCompile(`(?is)Top Skills\s*</h[1-6]>.*?<div[^>]*>\s*([^<]*,[^<]*)\s*</div>`)
-	salaryChipRegex         = regexp.MustCompile(`(?is)(\d[\d,]*)\s*K?\s*-\s*(\d[\d,]*)\s*K?\s*(Annually|Yearly|Hourly|Monthly)?`)
 	seniorityRegex          = regexp.MustCompile(`(?is)\b(Entry level|Junior level|Mid level|Senior level|Junior|Expert\s*/\s*Leader)\b`)
 	senioritySpanRegex      = regexp.MustCompile(`(?is)<span[^>]*>(.*?)</span>`)
 	tagPattern              = regexp.MustCompile(`(?is)<[^>]+>`)
@@ -1346,22 +1346,24 @@ func extractSeniorityLabel(htmlText string) string {
 	return ""
 }
 
-func parseSalaryRange(jobPosting map[string]any, htmlText string) map[string]any {
+func parseSalaryRange(jobPosting map[string]any, _ string) map[string]any {
 	out := map[string]any{
 		"max":                     nil,
 		"min":                     nil,
 		"salaryType":              nil,
-		"currencyCode":            "USD",
-		"currencySymbol":          "$",
+		"currencyCode":            nil,
+		"currencySymbol":          nil,
 		"maxSalaryAsUSD":          nil,
 		"minSalaryAsUSD":          nil,
 		"salaryHumanReadableText": nil,
 	}
 	baseSalary, _ := jobPosting["baseSalary"].(map[string]any)
-	if currency := stringValue(baseSalary["currency"]); currency != "" {
-		out["currencyCode"] = strings.ToUpper(currency)
-		if out["currencyCode"] != "USD" {
-			out["currencySymbol"] = nil
+	if rawCurrency := stringValue(baseSalary["currency"]); rawCurrency != "" {
+		currencyCode := strings.ToUpper(rawCurrency)
+		out["currencyCode"] = currencyCode
+		currencySymbol := currency.SymbolForCode(currencyCode)
+		if currencySymbol != "" {
+			out["currencySymbol"] = currencySymbol
 		}
 	}
 	valueMap, _ := baseSalary["value"].(map[string]any)
@@ -1374,29 +1376,16 @@ func parseSalaryRange(jobPosting map[string]any, htmlText string) map[string]any
 	if salaryType := salaryTypeFromUnit(stringValue(valueMap["unitText"])); salaryType != nil {
 		out["salaryType"] = salaryType
 	}
-	if out["min"] == nil && out["max"] == nil {
-		if match := salaryChipRegex.FindStringSubmatch(htmlText); len(match) >= 3 {
-			left, _ := strconv.Atoi(strings.ReplaceAll(match[1], ",", ""))
-			right, _ := strconv.Atoi(strings.ReplaceAll(match[2], ",", ""))
-			if strings.Contains(strings.ToLower(match[0]), "k") && len(match[1]) <= 3 {
-				left *= 1000
-				right *= 1000
-			}
-			out["min"] = left
-			out["max"] = right
-			out["salaryType"] = salaryTypeFromUnit(match[3])
-		}
-	}
 	if out["currencyCode"] == "USD" {
 		out["minSalaryAsUSD"] = out["min"]
 		out["maxSalaryAsUSD"] = out["max"]
 	}
-	if out["min"] != nil && out["max"] != nil {
+	if out["min"] != nil && out["max"] != nil && out["currencySymbol"] != nil {
 		typeLabel := stringValue(out["salaryType"])
 		if typeLabel == "" {
 			typeLabel = "salary"
 		}
-		out["salaryHumanReadableText"] = "$" + humanizeInt(out["min"]) + "-$" + humanizeInt(out["max"]) + " " + typeLabel
+		out["salaryHumanReadableText"] = stringValue(out["currencySymbol"]) + humanizeInt(out["min"]) + "-" + stringValue(out["currencySymbol"]) + humanizeInt(out["max"]) + " " + typeLabel
 	}
 	return out
 }

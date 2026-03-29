@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"goapplyjob-golang-backend/internal/sources/currency"
 )
 
 func TestExtractJobBuildsBuiltInRawJobShape(t *testing.T) {
@@ -126,6 +128,48 @@ func TestExtractJobBuildsBuiltInRawJobShape(t *testing.T) {
 	}
 }
 
+func TestExtractJobBuildsNonUSDSalaryCurrencyShape(t *testing.T) {
+	htmlText := `
+<html>
+  <head>
+    <script type="application/ld+json">
+      {
+        "@type": "JobPosting",
+        "title": "Platform Engineer",
+        "datePosted": "2026-02-12T10:00:00Z",
+        "description": "<p>Build internal systems.</p>",
+        "employmentType": "FULL_TIME",
+        "jobLocationType": "TELECOMMUTE",
+        "identifier": {"value": "12345"},
+        "hiringOrganization": {"sameAs": "https://builtin.com/company/acme"},
+        "baseSalary": {
+          "currency": "EUR",
+          "value": {
+            "minValue": 90000,
+            "maxValue": 120000,
+            "unitText": "year"
+          }
+        }
+      }
+    </script>
+  </head>
+  <body></body>
+</html>`
+
+	payload := ExtractJob(htmlText, "")
+	salaryRange, _ := payload["salaryRange"].(map[string]any)
+	if salaryRange["currencyCode"] != "EUR" {
+		t.Fatalf("expected EUR currencyCode, got %#v", salaryRange["currencyCode"])
+	}
+	currencySymbol := currency.SymbolForCode("EUR")
+	if salaryRange["currencySymbol"] != currencySymbol {
+		t.Fatalf("expected EUR currencySymbol, got %#v", salaryRange["currencySymbol"])
+	}
+	if salaryRange["salaryHumanReadableText"] != currencySymbol+"90,000-"+currencySymbol+"120,000 per year" {
+		t.Fatalf("unexpected salaryHumanReadableText %#v", salaryRange["salaryHumanReadableText"])
+	}
+}
+
 func TestExtractJobSkipsNullLikeUSState(t *testing.T) {
 	htmlText := `
 <html>
@@ -241,6 +285,26 @@ func TestExtractJobUsesTooltipCountriesForMultipleBuiltinLocations(t *testing.T)
 	expectedStates := []string{"Indiana"}
 	if !reflect.DeepEqual(locationStates, expectedStates) {
 		t.Fatalf("expected locationUSStates from jobLocation only got=%#v want=%#v", locationStates, expectedStates)
+	}
+}
+
+func TestExtractJobFromHTMLDoesNotInferSalaryWithoutBaseSalaryValues(t *testing.T) {
+	htmlPath := filepath.Join("..", "..", "..", "test-extract", "builtin", "raw-job-3.html")
+	htmlBytes, err := os.ReadFile(htmlPath)
+	if err != nil {
+		t.Fatalf("read html: %v", err)
+	}
+
+	payload := ExtractJobFromHTML(string(htmlBytes), "")
+	salaryRange, _ := payload["salaryRange"].(map[string]any)
+	if salaryRange["min"] != nil {
+		t.Fatalf("expected nil min salary, got %#v", salaryRange["min"])
+	}
+	if salaryRange["max"] != nil {
+		t.Fatalf("expected nil max salary, got %#v", salaryRange["max"])
+	}
+	if salaryRange["salaryHumanReadableText"] != nil {
+		t.Fatalf("expected nil salaryHumanReadableText, got %#v", salaryRange["salaryHumanReadableText"])
 	}
 }
 
