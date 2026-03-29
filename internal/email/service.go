@@ -68,25 +68,65 @@ func (s *Service) SendEmail(toEmail, subject, textContent, htmlContent string) e
 	}
 	errors := []string{}
 	for _, provider := range providers {
-		var err error
-		switch provider {
-		case "mailtrap":
-			err = s.sendViaMailtrap(toEmail, subject, textContent, htmlContent)
-		case "brevo":
-			err = s.sendViaBrevo(toEmail, subject, textContent, htmlContent)
-		case "cyberpanel":
-			err = s.sendViaCyberPanel(toEmail, subject, textContent, htmlContent)
-		case "smtp":
-			err = s.sendViaSMTP(toEmail, subject, textContent, htmlContent)
-		default:
-			err = fmt.Errorf("unsupported provider")
-		}
+		err := s.sendWithProvider(provider, toEmail, subject, textContent, htmlContent)
 		if err == nil {
 			return nil
 		}
 		errors = append(errors, provider+": "+err.Error())
 	}
 	return fmt.Errorf("All email providers failed (%s). Errors: %s", strings.Join(providers, ","), strings.Join(errors, " | "))
+}
+
+func (s *Service) SendEmailBatch(toEmails []string, subject, textContent, htmlContent string) error {
+	if len(toEmails) == 0 {
+		return nil
+	}
+	providers := s.resolveProviders()
+	if len(providers) == 0 {
+		return fmt.Errorf("No usable email providers configured")
+	}
+	errors := []string{}
+	for _, provider := range providers {
+		err := s.sendBatchWithProvider(provider, toEmails, subject, textContent, htmlContent)
+		if err == nil {
+			return nil
+		}
+		errors = append(errors, provider+": "+err.Error())
+	}
+	return fmt.Errorf("All email providers failed (%s). Errors: %s", strings.Join(providers, ","), strings.Join(errors, " | "))
+}
+
+func (s *Service) sendWithProvider(provider, toEmail, subject, textContent, htmlContent string) error {
+	switch provider {
+	case "mailtrap":
+		return s.sendViaMailtrap(toEmail, subject, textContent, htmlContent)
+	case "brevo":
+		return s.sendViaBrevo(toEmail, subject, textContent, htmlContent)
+	case "cyberpanel":
+		return s.sendViaCyberPanel(toEmail, subject, textContent, htmlContent)
+	case "smtp":
+		return s.sendViaSMTP(toEmail, subject, textContent, htmlContent)
+	default:
+		return fmt.Errorf("unsupported provider")
+	}
+}
+
+func (s *Service) sendBatchWithProvider(provider string, toEmails []string, subject, textContent, htmlContent string) error {
+	switch provider {
+	case "mailtrap":
+		return s.sendViaMailtrapBatch(toEmails, subject, textContent, htmlContent)
+	case "brevo":
+		return s.sendViaBrevoBatch(toEmails, subject, textContent, htmlContent)
+	case "cyberpanel", "smtp":
+		for _, toEmail := range toEmails {
+			if err := s.sendWithProvider(provider, toEmail, subject, textContent, htmlContent); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported provider")
+	}
 }
 
 func (s *Service) normalizeProvider() string {

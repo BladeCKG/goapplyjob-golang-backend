@@ -440,7 +440,7 @@ func (h *Handler) sendMarketingEmail(c *gin.Context) {
 		}
 		rows.Close()
 
-		mailData := h.buildMarketingEmailData(emailAddr, jobsList, buildBrowseJobsURL(siteURL, jobs.BuildBrowseJobsQuery(filters)))
+		mailData := h.buildMarketingEmailData(jobsList, buildBrowseJobsURL(siteURL, jobs.BuildBrowseJobsQuery(filters)))
 
 		if err := h.emailService.SendMarketingEmail(emailAddr, mailData); err != nil {
 			results = append(results, resultRow{UserID: userID, Email: emailAddr, Status: "error", Message: err.Error()})
@@ -490,22 +490,24 @@ func (h *Handler) sendMarketingEmailForParsedJobs(c *gin.Context) {
 	}
 	results := make([]resultRow, 0, len(emails))
 	browseJobsURL := buildBrowseJobsURL(strings.TrimRight(h.cfg.SiteURL, "/"), strings.TrimSpace(payload.BrowseJobsQuery))
-	for _, emailAddr := range emails {
-		mailData := h.buildMarketingEmailData(emailAddr, jobsList, browseJobsURL)
-		if err := h.emailService.SendMarketingEmail(emailAddr, mailData); err != nil {
+	mailData := h.buildMarketingEmailData(jobsList, browseJobsURL)
+	if err := h.emailService.SendMarketingEmails(emails, mailData); err != nil {
+		for _, emailAddr := range emails {
 			results = append(results, resultRow{Email: emailAddr, Status: "error", Message: err.Error()})
-			continue
 		}
+		c.JSON(http.StatusOK, gin.H{"items": results})
+		return
+	}
+	for _, emailAddr := range emails {
 		results = append(results, resultRow{Email: emailAddr, Status: "sent"})
 	}
 
 	c.JSON(http.StatusOK, gin.H{"items": results})
 }
 
-func (h *Handler) buildMarketingEmailData(emailAddr string, jobsList []email.MarketingJob, browseJobsURL string) email.MarketingEmailData {
+func (h *Handler) buildMarketingEmailData(jobsList []email.MarketingJob, browseJobsURL string) email.MarketingEmailData {
 	siteURL := strings.TrimRight(h.cfg.SiteURL, "/")
 	siteName := strings.TrimSpace(h.cfg.SiteName)
-	firstName := strings.Split(strings.TrimSpace(emailAddr), "@")[0]
 	if browseJobsURL == "" {
 		browseJobsURL = siteURL + "/remote-jobs"
 	}
@@ -513,7 +515,6 @@ func (h *Handler) buildMarketingEmailData(emailAddr string, jobsList []email.Mar
 		SiteName:       siteName,
 		SiteURL:        siteURL,
 		SiteLogoURL:    siteURL + "/logo.png",
-		FirstName:      firstName,
 		BrowseJobsURL:  browseJobsURL,
 		ManagePrefsURL: siteURL + "/account",
 		UnsubscribeURL: siteURL + "/account",
@@ -1229,6 +1230,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 		"is_senior":                "p.is_senior",
 		"is_lead":                  "p.is_lead",
 		"created_at_source":        "p.created_at_source",
+		"date_deleted":             "p.date_deleted",
 		"updated_at":               "p.updated_at",
 	}, "id")
 	if err != nil {
@@ -1282,6 +1284,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 		"is_senior":                {columnExpr: "p.is_senior", valueType: "bool"},
 		"is_lead":                  {columnExpr: "p.is_lead", valueType: "bool"},
 		"created_at_source":        {columnExpr: "p.created_at_source", valueType: "datetime"},
+		"date_deleted":             {columnExpr: "p.date_deleted", valueType: "datetime"},
 		"updated_at":               {columnExpr: "p.updated_at", valueType: "datetime"},
 	}
 	for _, item := range parsedFilters {
@@ -1309,7 +1312,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list parsed jobs"})
 		return
 	}
-	query := `SELECT p.id, p.raw_us_job_id, r.source, p.company_id, p.external_job_id, p.role_title, p.role_description, p.role_requirements, p.url, p.slug, p.employment_type, p.location_type, p.location_city, p.location_us_states::text, p.location_countries::text, p.categorized_job_title, p.categorized_job_function, p.tech_stack::text, p.salary_type, p.salary_min, p.salary_max, p.salary_human_text, p.salary_currency_code, p.salary_currency_symbol, p.salary_min_usd, p.salary_max_usd, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.created_at_source, p.updated_at` +
+	query := `SELECT p.id, p.raw_us_job_id, r.source, p.company_id, p.external_job_id, p.role_title, p.role_description, p.role_requirements, p.url, p.slug, p.employment_type, p.location_type, p.location_city, p.location_us_states::text, p.location_countries::text, p.categorized_job_title, p.categorized_job_function, p.tech_stack::text, p.salary_type, p.salary_min, p.salary_max, p.salary_human_text, p.salary_currency_code, p.salary_currency_symbol, p.salary_min_usd, p.salary_max_usd, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.created_at_source, p.date_deleted, p.updated_at` +
 		baseFrom + where + orderClause + ` LIMIT ? OFFSET ?`
 	queryArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, queryArgs...)
@@ -1352,9 +1355,10 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 			isSenior          sql.NullBool
 			isLead            sql.NullBool
 			createdAt         sql.NullString
+			dateDeleted       sql.NullString
 			updatedAt         sql.NullString
 		)
-		if err := rows.Scan(&id, &rawUSJobID, &sourceVal, &companyID, &externalJobID, &roleTitle, &roleDesc, &roleRequirements, &url, &slug, &employmentType, &locationType, &locationCity, &locationStates, &locationCountries, &categoryTitle, &categoryFunc, &techStack, &salaryType, &salaryMin, &salaryMax, &salaryHumanText, &salaryCurrency, &salarySymbol, &salaryMinUSD, &salaryMaxUSD, &isEntry, &isJunior, &isMid, &isSenior, &isLead, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&id, &rawUSJobID, &sourceVal, &companyID, &externalJobID, &roleTitle, &roleDesc, &roleRequirements, &url, &slug, &employmentType, &locationType, &locationCity, &locationStates, &locationCountries, &categoryTitle, &categoryFunc, &techStack, &salaryType, &salaryMin, &salaryMax, &salaryHumanText, &salaryCurrency, &salarySymbol, &salaryMinUSD, &salaryMaxUSD, &isEntry, &isJunior, &isMid, &isSenior, &isLead, &createdAt, &dateDeleted, &updatedAt); err != nil {
 			continue
 		}
 		items = append(items, gin.H{
@@ -1390,6 +1394,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 			"is_senior":                nullableBool(isSenior),
 			"is_lead":                  nullableBool(isLead),
 			"created_at_source":        nullableString(createdAt),
+			"date_deleted":             nullableString(dateDeleted),
 			"updated_at":               nullableString(updatedAt),
 		})
 	}
@@ -1440,6 +1445,7 @@ func (h *Handler) updateParsedJob(c *gin.Context) {
 		"is_senior":                jsonPatchBoolOrNull,
 		"is_lead":                  jsonPatchBoolOrNull,
 		"created_at_source":        jsonPatchStringOrNull,
+		"date_deleted":             jsonPatchStringOrNull,
 	})
 	if !ok {
 		return

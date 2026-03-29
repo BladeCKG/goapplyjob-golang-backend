@@ -75,6 +75,69 @@ func (s *Service) sendViaBrevo(toEmail, subject, textContent, htmlContent string
 	return fmt.Errorf("Brevo API email send failed")
 }
 
+func (s *Service) sendViaBrevoBatch(toEmails []string, subject, textContent, htmlContent string) error {
+	keys := collectBrevoKeys(s.cfg)
+	if len(keys) == 0 || strings.TrimSpace(s.cfg.BrevoFromEmail) == "" {
+		return fmt.Errorf("Brevo email API is not configured")
+	}
+	apiURL := strings.TrimSpace(s.cfg.BrevoAPIURL)
+	if apiURL == "" {
+		apiURL = defaultBrevoURL
+	}
+	recipients := make([]map[string]any, 0, len(toEmails))
+	for _, toEmail := range toEmails {
+		recipients = append(recipients, map[string]any{"email": toEmail})
+	}
+	body := map[string]any{
+		"sender": map[string]any{
+			"name":  s.cfg.BrevoFromName,
+			"email": s.cfg.BrevoFromEmail,
+		},
+		"subject": subject,
+		"messageVersions": []map[string]any{
+			{
+				"to":          recipients,
+				"htmlContent": htmlContent,
+				"textContent": textContent,
+			},
+		},
+	}
+	rawBody, _ := json.Marshal(body)
+
+	start := brevoKeyRingStart(keys)
+	var lastErr error
+	for attempt := 0; attempt < len(keys); attempt++ {
+		keyIndex := (start + attempt) % len(keys)
+		apiKey := keys[keyIndex]
+		req, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewReader(rawBody))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("accept", "application/json")
+		req.Header.Set("api-key", apiKey)
+		req.Header.Set("content-type", "application/json")
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("Brevo API batch email send failed: %T", err)
+			brevoKeyRingSetNext(keys, keyIndex+1)
+			continue
+		}
+		bodyText, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+		resp.Body.Close()
+		if resp.StatusCode >= http.StatusBadRequest {
+			lastErr = fmt.Errorf("Brevo API batch email send failed: status=%d body=%s", resp.StatusCode, string(bodyText))
+			brevoKeyRingSetNext(keys, keyIndex+1)
+			continue
+		}
+		brevoKeyRingSetNext(keys, keyIndex)
+		return nil
+	}
+	if lastErr != nil {
+		return lastErr
+	}
+	return fmt.Errorf("Brevo API batch email send failed")
+}
+
 func collectBrevoKeys(cfg config.Config) []string {
 	keys := make([]string, 0, 8)
 	seen := map[string]struct{}{}

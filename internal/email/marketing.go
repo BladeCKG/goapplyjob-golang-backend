@@ -22,7 +22,6 @@ type MarketingEmailData struct {
 	SiteName       string
 	SiteURL        string
 	SiteLogoURL    string
-	FirstName      string
 	BrowseJobsURL  string
 	ManagePrefsURL string
 	UnsubscribeURL string
@@ -34,15 +33,10 @@ func (s *Service) BuildMarketingEmailHTML(data MarketingEmailData) string {
 	if err != nil {
 		return "<html><body><h2>" + data.SiteName + "</h2><p>Browse jobs at " + data.BrowseJobsURL + "</p></body></html>"
 	}
-	firstName := strings.TrimSpace(data.FirstName)
-	if firstName == "" {
-		firstName = "there"
-	}
 	jobsBlock := buildJobsBlockHTML(data.Jobs, true)
 	replacer := strings.NewReplacer(
 		"__SITE_LOGO_URL__", html.EscapeString(data.SiteLogoURL),
 		"__SITE_URL__", html.EscapeString(data.SiteURL),
-		"__FIRST_NAME__", html.EscapeString(firstName),
 		"__JOBS_BLOCK__", jobsBlock,
 		"__BROWSE_JOBS_URL__", html.EscapeString(data.BrowseJobsURL),
 		"__MANAGE_PREFERENCES_URL__", html.EscapeString(data.ManagePrefsURL),
@@ -52,12 +46,8 @@ func (s *Service) BuildMarketingEmailHTML(data MarketingEmailData) string {
 }
 
 func (s *Service) BuildMarketingEmailText(data MarketingEmailData) string {
-	firstName := strings.TrimSpace(data.FirstName)
-	if firstName == "" {
-		firstName = "there"
-	}
 	lines := []string{
-		"Hi " + firstName + ",",
+		"Remote jobs picked for you",
 		"",
 		"Here are some new remote jobs for you:",
 		"",
@@ -96,6 +86,16 @@ func (s *Service) SendMarketingEmail(toEmail string, data MarketingEmailData) er
 	htmlContent := s.BuildMarketingEmailHTML(data)
 	textContent := s.BuildMarketingEmailText(data)
 	return s.SendEmail(toEmail, subject, textContent, htmlContent)
+}
+
+func (s *Service) SendMarketingEmails(toEmails []string, data MarketingEmailData) error {
+	subject := data.SiteName + " - new remote jobs for you"
+	if strings.TrimSpace(data.SiteName) == "" {
+		subject = "GoApplyJob - new remote jobs for you"
+	}
+	htmlContent := s.BuildMarketingEmailHTML(data)
+	textContent := s.BuildMarketingEmailText(data)
+	return s.SendEmailBatch(toEmails, subject, textContent, htmlContent)
 }
 
 func buildJobsBlockHTML(jobs []MarketingJob, lightTheme bool) string {

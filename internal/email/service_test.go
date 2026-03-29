@@ -81,3 +81,52 @@ func TestSendViaCyberPanelUsesBearerAuthAndExpectedPayload(t *testing.T) {
 		t.Fatalf("unexpected text %#v", gotBody["text"])
 	}
 }
+
+func TestSendEmailBatchViaBrevoUsesMessageVersions(t *testing.T) {
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(body, &gotBody); err != nil {
+			t.Fatal(err)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"messageIds":["one"]}`))
+	}))
+	defer server.Close()
+
+	svc := NewService(config.Config{
+		EmailProvider:   "brevo",
+		BrevoAPIKey:     "sk_test_123",
+		BrevoFromEmail:  "hello@example.com",
+		BrevoFromName:   "GoApplyJob",
+		BrevoAPIURL:     server.URL,
+	})
+
+	if err := svc.SendEmailBatch([]string{"first@example.com", "second@example.com"}, "Hello", "Plain text", "<p>Hello</p>"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, hasOuterTo := gotBody["to"]; hasOuterTo {
+		t.Fatalf("did not expect outer to field in batch payload")
+	}
+
+	messageVersions, ok := gotBody["messageVersions"].([]any)
+	if !ok || len(messageVersions) != 1 {
+		t.Fatalf("unexpected messageVersions %#v", gotBody["messageVersions"])
+	}
+
+	firstVersion, ok := messageVersions[0].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected first message version %#v", messageVersions[0])
+	}
+
+	recipients, ok := firstVersion["to"].([]any)
+	if !ok || len(recipients) != 2 {
+		t.Fatalf("unexpected recipients %#v", firstVersion["to"])
+	}
+}
