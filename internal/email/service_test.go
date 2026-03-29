@@ -197,3 +197,50 @@ func TestSendEmailBatchDetailedViaMailtrapKeepsPartialRecipientResults(t *testin
 		t.Fatalf("unexpected third item %#v", result.Items[2])
 	}
 }
+
+func TestSendEmailBatchDetailedViaCyberPanelKeepsPartialRecipientResults(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts <= 2 {
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"success":true,"data":{"status":"sent"}}`))
+			return
+		}
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"success":false,"error":{"code":"rate_limit_exceeded"}}`))
+	}))
+	defer server.Close()
+
+	svc := NewService(config.Config{
+		EmailProvider:       "cyberpanel",
+		CyberPanelAPIKey:    "sk_test_123",
+		CyberPanelFromEmail: "hello@example.com",
+		CyberPanelAPIURL:    server.URL,
+	})
+
+	result, err := svc.SendEmailBatchDetailed(
+		[]string{"first@example.com", "second@example.com", "third@example.com"},
+		"Hello",
+		"Plain text",
+		"<p>Hello</p>",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Provider != "cyberpanel" {
+		t.Fatalf("unexpected provider %q", result.Provider)
+	}
+	if result.Status != "partial" {
+		t.Fatalf("unexpected status %q", result.Status)
+	}
+	if len(result.Items) != 3 {
+		t.Fatalf("unexpected items %#v", result.Items)
+	}
+	if result.Items[0].Status != "sent" || result.Items[1].Status != "sent" {
+		t.Fatalf("unexpected sent items %#v", result.Items)
+	}
+	if result.Items[2].Status != "error" {
+		t.Fatalf("unexpected third item %#v", result.Items[2])
+	}
+}

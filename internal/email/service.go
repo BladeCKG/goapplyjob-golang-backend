@@ -132,6 +132,8 @@ func (s *Service) sendBatchWithProviderDetailed(provider string, toEmails []stri
 		return s.sendViaBrevoBatchDetailed(toEmails, subject, textContent, htmlContent)
 	case "cyberpanel", "smtp":
 		items := make([]RecipientDeliveryResult, 0, len(toEmails))
+		sentCount := 0
+		errorCount := 0
 		for _, toEmail := range toEmails {
 			err := s.sendWithProvider(provider, toEmail, subject, textContent, htmlContent)
 			if err != nil {
@@ -140,22 +142,31 @@ func (s *Service) sendBatchWithProviderDetailed(provider string, toEmails []stri
 					Status:  "error",
 					Message: err.Error(),
 				})
-				return BatchDeliveryResult{
-					Provider: provider,
-					Status:   "error",
-					Items:    items,
-				}, err
+				errorCount++
+				continue
 			}
 			items = append(items, RecipientDeliveryResult{
 				Email:  toEmail,
 				Status: "sent",
 			})
+			sentCount++
 		}
-		return BatchDeliveryResult{
+		status := "sent"
+		if sentCount == 0 && errorCount > 0 {
+			status = "error"
+		}
+		if sentCount > 0 && errorCount > 0 {
+			status = "partial"
+		}
+		result := BatchDeliveryResult{
 			Provider: provider,
-			Status:   "sent",
+			Status:   status,
 			Items:    items,
-		}, nil
+		}
+		if errorCount > 0 && sentCount == 0 {
+			return result, fmt.Errorf("%s batch send failed for all recipients", provider)
+		}
+		return result, nil
 	default:
 		return BatchDeliveryResult{}, fmt.Errorf("unsupported provider")
 	}
