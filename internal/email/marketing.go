@@ -88,14 +88,14 @@ func (s *Service) SendMarketingEmail(toEmail string, data MarketingEmailData) er
 	return s.SendEmail(toEmail, subject, textContent, htmlContent)
 }
 
-func (s *Service) SendMarketingEmails(toEmails []string, data MarketingEmailData) error {
+func (s *Service) SendMarketingEmailsDetailed(toEmails []string, data MarketingEmailData) (BatchDeliveryResult, error) {
 	subject := data.SiteName + " - new remote jobs for you"
 	if strings.TrimSpace(data.SiteName) == "" {
 		subject = "GoApplyJob - new remote jobs for you"
 	}
 	htmlContent := s.BuildMarketingEmailHTML(data)
 	textContent := s.BuildMarketingEmailText(data)
-	return s.SendEmailBatch(toEmails, subject, textContent, htmlContent)
+	return s.SendEmailBatchDetailed(toEmails, subject, textContent, htmlContent)
 }
 
 func buildJobsBlockHTML(jobs []MarketingJob, lightTheme bool) string {

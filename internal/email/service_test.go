@@ -82,7 +82,7 @@ func TestSendViaCyberPanelUsesBearerAuthAndExpectedPayload(t *testing.T) {
 	}
 }
 
-func TestSendEmailBatchViaBrevoUsesMessageVersions(t *testing.T) {
+func TestSendEmailBatchViaBrevoUsesPerRecipientMessageVersions(t *testing.T) {
 	var gotBody map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +95,7 @@ func TestSendEmailBatchViaBrevoUsesMessageVersions(t *testing.T) {
 			t.Fatal(err)
 		}
 		w.WriteHeader(http.StatusAccepted)
-		_, _ = w.Write([]byte(`{"messageIds":["one"]}`))
+		_, _ = w.Write([]byte(`{"messageIds":["one","two"]}`))
 	}))
 	defer server.Close()
 
@@ -107,8 +107,15 @@ func TestSendEmailBatchViaBrevoUsesMessageVersions(t *testing.T) {
 		BrevoAPIURL:     server.URL,
 	})
 
-	if err := svc.SendEmailBatch([]string{"first@example.com", "second@example.com"}, "Hello", "Plain text", "<p>Hello</p>"); err != nil {
+	result, err := svc.SendEmailBatchDetailed([]string{"first@example.com", "second@example.com"}, "Hello", "Plain text", "<p>Hello</p>")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if result.Provider != "brevo" {
+		t.Fatalf("unexpected provider %q", result.Provider)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("unexpected result items %#v", result.Items)
 	}
 
 	if _, hasOuterTo := gotBody["to"]; hasOuterTo {
@@ -116,7 +123,7 @@ func TestSendEmailBatchViaBrevoUsesMessageVersions(t *testing.T) {
 	}
 
 	messageVersions, ok := gotBody["messageVersions"].([]any)
-	if !ok || len(messageVersions) != 1 {
+	if !ok || len(messageVersions) != 2 {
 		t.Fatalf("unexpected messageVersions %#v", gotBody["messageVersions"])
 	}
 
@@ -126,7 +133,7 @@ func TestSendEmailBatchViaBrevoUsesMessageVersions(t *testing.T) {
 	}
 
 	recipients, ok := firstVersion["to"].([]any)
-	if !ok || len(recipients) != 2 {
+	if !ok || len(recipients) != 1 {
 		t.Fatalf("unexpected recipients %#v", firstVersion["to"])
 	}
 }

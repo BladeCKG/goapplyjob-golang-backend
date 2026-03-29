@@ -24,6 +24,19 @@ type Service struct {
 	httpClient *http.Client
 }
 
+type RecipientDeliveryResult struct {
+	Email     string
+	Status    string
+	MessageID string
+	Message   string
+}
+
+type BatchDeliveryResult struct {
+	Provider string
+	Status   string
+	Items    []RecipientDeliveryResult
+}
+
 func NewService(cfg config.Config) *Service {
 	return &Service{
 		cfg: cfg,
@@ -77,23 +90,23 @@ func (s *Service) SendEmail(toEmail, subject, textContent, htmlContent string) e
 	return fmt.Errorf("All email providers failed (%s). Errors: %s", strings.Join(providers, ","), strings.Join(errors, " | "))
 }
 
-func (s *Service) SendEmailBatch(toEmails []string, subject, textContent, htmlContent string) error {
+func (s *Service) SendEmailBatchDetailed(toEmails []string, subject, textContent, htmlContent string) (BatchDeliveryResult, error) {
 	if len(toEmails) == 0 {
-		return nil
+		return BatchDeliveryResult{}, nil
 	}
 	providers := s.resolveProviders()
 	if len(providers) == 0 {
-		return fmt.Errorf("No usable email providers configured")
+		return BatchDeliveryResult{}, fmt.Errorf("No usable email providers configured")
 	}
 	errors := []string{}
 	for _, provider := range providers {
-		err := s.sendBatchWithProvider(provider, toEmails, subject, textContent, htmlContent)
+		result, err := s.sendBatchWithProviderDetailed(provider, toEmails, subject, textContent, htmlContent)
 		if err == nil {
-			return nil
+			return result, nil
 		}
 		errors = append(errors, provider+": "+err.Error())
 	}
-	return fmt.Errorf("All email providers failed (%s). Errors: %s", strings.Join(providers, ","), strings.Join(errors, " | "))
+	return BatchDeliveryResult{}, fmt.Errorf("All email providers failed (%s). Errors: %s", strings.Join(providers, ","), strings.Join(errors, " | "))
 }
 
 func (s *Service) sendWithProvider(provider, toEmail, subject, textContent, htmlContent string) error {
@@ -111,21 +124,40 @@ func (s *Service) sendWithProvider(provider, toEmail, subject, textContent, html
 	}
 }
 
-func (s *Service) sendBatchWithProvider(provider string, toEmails []string, subject, textContent, htmlContent string) error {
+func (s *Service) sendBatchWithProviderDetailed(provider string, toEmails []string, subject, textContent, htmlContent string) (BatchDeliveryResult, error) {
 	switch provider {
 	case "mailtrap":
-		return s.sendViaMailtrapBatch(toEmails, subject, textContent, htmlContent)
+		return s.sendViaMailtrapBatchDetailed(toEmails, subject, textContent, htmlContent)
 	case "brevo":
-		return s.sendViaBrevoBatch(toEmails, subject, textContent, htmlContent)
+		return s.sendViaBrevoBatchDetailed(toEmails, subject, textContent, htmlContent)
 	case "cyberpanel", "smtp":
+		items := make([]RecipientDeliveryResult, 0, len(toEmails))
 		for _, toEmail := range toEmails {
-			if err := s.sendWithProvider(provider, toEmail, subject, textContent, htmlContent); err != nil {
-				return err
+			err := s.sendWithProvider(provider, toEmail, subject, textContent, htmlContent)
+			if err != nil {
+				items = append(items, RecipientDeliveryResult{
+					Email:   toEmail,
+					Status:  "error",
+					Message: err.Error(),
+				})
+				return BatchDeliveryResult{
+					Provider: provider,
+					Status:   "error",
+					Items:    items,
+				}, err
 			}
+			items = append(items, RecipientDeliveryResult{
+				Email:  toEmail,
+				Status: "sent",
+			})
 		}
-		return nil
+		return BatchDeliveryResult{
+			Provider: provider,
+			Status:   "sent",
+			Items:    items,
+		}, nil
 	default:
-		return fmt.Errorf("unsupported provider")
+		return BatchDeliveryResult{}, fmt.Errorf("unsupported provider")
 	}
 }
 

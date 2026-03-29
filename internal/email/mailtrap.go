@@ -77,18 +77,36 @@ func (s *Service) sendViaMailtrap(toEmail, subject, textContent, htmlContent str
 	return fmt.Errorf("Mailtrap API email send failed")
 }
 
-func (s *Service) sendViaMailtrapBatch(toEmails []string, subject, textContent, htmlContent string) error {
+func (s *Service) sendViaMailtrapBatchDetailed(toEmails []string, subject, textContent, htmlContent string) (BatchDeliveryResult, error) {
 	keys := collectMailtrapKeys(s.cfg)
 	if len(keys) == 0 || strings.TrimSpace(s.cfg.MailtrapFromEmail) == "" {
-		return fmt.Errorf("Mailtrap API is not configured")
+		return BatchDeliveryResult{}, fmt.Errorf("Mailtrap API is not configured")
 	}
 	if s.cfg.MailtrapUseSandbox {
+		items := make([]RecipientDeliveryResult, 0, len(toEmails))
 		for _, toEmail := range toEmails {
 			if err := s.sendViaMailtrap(toEmail, subject, textContent, htmlContent); err != nil {
-				return err
+				items = append(items, RecipientDeliveryResult{
+					Email:   toEmail,
+					Status:  "error",
+					Message: err.Error(),
+				})
+				return BatchDeliveryResult{
+					Provider: "mailtrap",
+					Status:   "error",
+					Items:    items,
+				}, err
 			}
+			items = append(items, RecipientDeliveryResult{
+				Email:  toEmail,
+				Status: "sent",
+			})
 		}
-		return nil
+		return BatchDeliveryResult{
+			Provider: "mailtrap",
+			Status:   "sent",
+			Items:    items,
+		}, nil
 	}
 	requests := make([]map[string]any, 0, len(toEmails))
 	for _, toEmail := range toEmails {
@@ -117,9 +135,9 @@ func (s *Service) sendViaMailtrapBatch(toEmails []string, subject, textContent, 
 		apiKey := keys[keyIndex]
 		req, err := http.NewRequest(http.MethodPost, defaultMailtrapBatch, bytes.NewReader(rawBody))
 		if err != nil {
-			return err
+			return BatchDeliveryResult{}, err
 		}
-		req.Header.Set("Api-Token", apiKey)
+		req.Header.Set("Authorization", "Bearer "+apiKey)
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := s.httpClient.Do(req)
 		if err != nil {
@@ -127,20 +145,60 @@ func (s *Service) sendViaMailtrapBatch(toEmails []string, subject, textContent, 
 			mailtrapKeyRingSetNext(keys, keyIndex+1)
 			continue
 		}
-		bodyText, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+		bodyText, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
 		if resp.StatusCode >= http.StatusBadRequest {
 			lastErr = fmt.Errorf("Mailtrap API batch email send failed: status=%d body=%s", resp.StatusCode, string(bodyText))
 			mailtrapKeyRingSetNext(keys, keyIndex+1)
 			continue
 		}
+		var responseBody struct {
+			Success   bool `json:"success"`
+			Responses []struct {
+				Success    bool     `json:"success"`
+				MessageIDs []string `json:"message_ids"`
+				Errors     []string `json:"errors"`
+			} `json:"responses"`
+			Errors []string `json:"errors"`
+		}
+		if err := json.Unmarshal(bodyText, &responseBody); err != nil {
+			return BatchDeliveryResult{}, fmt.Errorf("Mailtrap API batch email send failed: invalid response body")
+		}
+		if len(responseBody.Responses) != len(toEmails) {
+			return BatchDeliveryResult{}, fmt.Errorf("Mailtrap API batch email send failed: unexpected responses count")
+		}
+		items := make([]RecipientDeliveryResult, 0, len(toEmails))
+		hasErrors := len(responseBody.Errors) > 0
+		for i, toEmail := range toEmails {
+			item := RecipientDeliveryResult{
+				Email:  toEmail,
+				Status: "accepted",
+			}
+			if len(responseBody.Responses[i].MessageIDs) > 0 {
+				item.MessageID = responseBody.Responses[i].MessageIDs[0]
+			}
+			if !responseBody.Responses[i].Success {
+				item.Status = "error"
+				item.Message = strings.Join(responseBody.Responses[i].Errors, " | ")
+				hasErrors = true
+			}
+			items = append(items, item)
+		}
 		mailtrapKeyRingSetNext(keys, keyIndex)
-		return nil
+		status := "accepted"
+		if hasErrors {
+			status = "partial"
+		}
+		return BatchDeliveryResult{
+			Provider: "mailtrap",
+			Status:   status,
+			Items:    items,
+		}, nil
 	}
 	if lastErr != nil {
-		return lastErr
+		return BatchDeliveryResult{}, lastErr
 	}
-	return fmt.Errorf("Mailtrap API batch email send failed")
+	return BatchDeliveryResult{}, fmt.Errorf("Mailtrap API batch email send failed")
 }
 
 func collectMailtrapKeys(cfg config.Config) []string {

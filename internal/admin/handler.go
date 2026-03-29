@@ -487,23 +487,35 @@ func (h *Handler) sendMarketingEmailForParsedJobs(c *gin.Context) {
 	type resultRow struct {
 		Email   string `json:"email"`
 		Status  string `json:"status"`
+		MessageID string `json:"message_id,omitempty"`
 		Message string `json:"message,omitempty"`
 	}
-	results := make([]resultRow, 0, len(emails))
 	browseJobsURL := buildBrowseJobsURL(strings.TrimRight(h.cfg.SiteURL, "/"), strings.TrimSpace(payload.BrowseJobsQuery))
 	mailData := h.buildMarketingEmailData(jobsList, browseJobsURL)
-	if err := h.emailService.SendMarketingEmails(emails, mailData); err != nil {
-		for _, emailAddr := range emails {
-			results = append(results, resultRow{Email: emailAddr, Status: "error", Message: err.Error()})
-		}
-		c.JSON(http.StatusOK, gin.H{"items": results})
+	deliveryResult, err := h.emailService.SendMarketingEmailsDetailed(emails, mailData)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "error",
+			"message": err.Error(),
+			"items":   []resultRow{},
+		})
 		return
 	}
-	for _, emailAddr := range emails {
-		results = append(results, resultRow{Email: emailAddr, Status: "sent"})
+	results := make([]resultRow, 0, len(deliveryResult.Items))
+	for _, item := range deliveryResult.Items {
+		results = append(results, resultRow{
+			Email:     item.Email,
+			Status:    item.Status,
+			MessageID: item.MessageID,
+			Message:   item.Message,
+		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{"items": results})
+	c.JSON(http.StatusOK, gin.H{
+		"provider": deliveryResult.Provider,
+		"status":   deliveryResult.Status,
+		"items":    results,
+	})
 }
 
 func (h *Handler) buildMarketingEmailData(jobsList []email.MarketingJob, browseJobsURL string) email.MarketingEmailData {

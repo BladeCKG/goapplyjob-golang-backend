@@ -75,32 +75,30 @@ func (s *Service) sendViaBrevo(toEmail, subject, textContent, htmlContent string
 	return fmt.Errorf("Brevo API email send failed")
 }
 
-func (s *Service) sendViaBrevoBatch(toEmails []string, subject, textContent, htmlContent string) error {
+func (s *Service) sendViaBrevoBatchDetailed(toEmails []string, subject, textContent, htmlContent string) (BatchDeliveryResult, error) {
 	keys := collectBrevoKeys(s.cfg)
 	if len(keys) == 0 || strings.TrimSpace(s.cfg.BrevoFromEmail) == "" {
-		return fmt.Errorf("Brevo email API is not configured")
+		return BatchDeliveryResult{}, fmt.Errorf("Brevo email API is not configured")
 	}
 	apiURL := strings.TrimSpace(s.cfg.BrevoAPIURL)
 	if apiURL == "" {
 		apiURL = defaultBrevoURL
 	}
-	recipients := make([]map[string]any, 0, len(toEmails))
+	messageVersions := make([]map[string]any, 0, len(toEmails))
 	for _, toEmail := range toEmails {
-		recipients = append(recipients, map[string]any{"email": toEmail})
+		messageVersions = append(messageVersions, map[string]any{
+			"to":          []map[string]any{{"email": toEmail}},
+			"htmlContent": htmlContent,
+			"textContent": textContent,
+			"subject":     subject,
+		})
 	}
 	body := map[string]any{
 		"sender": map[string]any{
 			"name":  s.cfg.BrevoFromName,
 			"email": s.cfg.BrevoFromEmail,
 		},
-		"subject": subject,
-		"messageVersions": []map[string]any{
-			{
-				"to":          recipients,
-				"htmlContent": htmlContent,
-				"textContent": textContent,
-			},
-		},
+		"messageVersions": messageVersions,
 	}
 	rawBody, _ := json.Marshal(body)
 
@@ -111,7 +109,7 @@ func (s *Service) sendViaBrevoBatch(toEmails []string, subject, textContent, htm
 		apiKey := keys[keyIndex]
 		req, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewReader(rawBody))
 		if err != nil {
-			return err
+			return BatchDeliveryResult{}, err
 		}
 		req.Header.Set("accept", "application/json")
 		req.Header.Set("api-key", apiKey)
@@ -122,20 +120,41 @@ func (s *Service) sendViaBrevoBatch(toEmails []string, subject, textContent, htm
 			brevoKeyRingSetNext(keys, keyIndex+1)
 			continue
 		}
-		bodyText, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+		bodyText, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
 		if resp.StatusCode >= http.StatusBadRequest {
 			lastErr = fmt.Errorf("Brevo API batch email send failed: status=%d body=%s", resp.StatusCode, string(bodyText))
 			brevoKeyRingSetNext(keys, keyIndex+1)
 			continue
 		}
+		var responseBody struct {
+			MessageIDs []string `json:"messageIds"`
+		}
+		if err := json.Unmarshal(bodyText, &responseBody); err != nil {
+			return BatchDeliveryResult{}, fmt.Errorf("Brevo API batch email send failed: invalid response body")
+		}
+		if len(responseBody.MessageIDs) != len(toEmails) {
+			return BatchDeliveryResult{}, fmt.Errorf("Brevo API batch email send failed: unexpected messageIds count")
+		}
+		items := make([]RecipientDeliveryResult, 0, len(toEmails))
+		for i, toEmail := range toEmails {
+			items = append(items, RecipientDeliveryResult{
+				Email:     toEmail,
+				Status:    "accepted",
+				MessageID: responseBody.MessageIDs[i],
+			})
+		}
 		brevoKeyRingSetNext(keys, keyIndex)
-		return nil
+		return BatchDeliveryResult{
+			Provider: "brevo",
+			Status:   "accepted",
+			Items:    items,
+		}, nil
 	}
 	if lastErr != nil {
-		return lastErr
+		return BatchDeliveryResult{}, lastErr
 	}
-	return fmt.Errorf("Brevo API batch email send failed")
+	return BatchDeliveryResult{}, fmt.Errorf("Brevo API batch email send failed")
 }
 
 func collectBrevoKeys(cfg config.Config) []string {
