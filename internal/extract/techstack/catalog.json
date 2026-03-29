@@ -1226,6 +1226,11 @@
     "caseSensitive": false
   },
   {
+    "canonical": "Microsoft Office",
+    "aliases": ["microsoft office", "ms office"],
+    "caseSensitive": false
+  },
+  {
     "canonical": "Microsoft Word",
     "aliases": ["microsoft word"],
     "caseSensitive": false
