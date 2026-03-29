@@ -13,6 +13,7 @@ import (
 	"goapplyjob-golang-backend/internal/parsedaiclassifier"
 	"net/mail"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -518,8 +519,27 @@ func (h *Handler) buildMarketingEmailData(jobsList []email.MarketingJob, browseJ
 		BrowseJobsURL:  browseJobsURL,
 		ManagePrefsURL: siteURL + "/account",
 		UnsubscribeURL: siteURL + "/account",
-		Jobs:           jobsList,
+		Jobs:           sortMarketingJobsByPostedAt(jobsList),
 	}
+}
+
+func sortMarketingJobsByPostedAt(jobsList []email.MarketingJob) []email.MarketingJob {
+	sorted := append([]email.MarketingJob(nil), jobsList...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		left, leftErr := time.Parse(time.RFC3339Nano, sorted[i].PostedAt)
+		right, rightErr := time.Parse(time.RFC3339Nano, sorted[j].PostedAt)
+		if leftErr != nil && rightErr != nil {
+			return false
+		}
+		if leftErr != nil {
+			return false
+		}
+		if rightErr != nil {
+			return true
+		}
+		return left.After(right)
+	})
+	return sorted
 }
 
 func (h *Handler) fetchMarketingJobsByParsedJobIDs(ctx context.Context, jobIDs []int64) ([]email.MarketingJob, error) {
