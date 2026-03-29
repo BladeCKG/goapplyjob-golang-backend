@@ -9,6 +9,12 @@ import (
 	"testing"
 )
 
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
 func TestNormalizeProviderSupportsCyberPanel(t *testing.T) {
 	svc := NewService(config.Config{EmailProvider: "cyberpanel"})
 	if got := svc.normalizeProvider(); got != "cyberpanel" {
@@ -135,5 +141,59 @@ func TestSendEmailBatchViaBrevoUsesPerRecipientMessageVersions(t *testing.T) {
 	recipients, ok := firstVersion["to"].([]any)
 	if !ok || len(recipients) != 1 {
 		t.Fatalf("unexpected recipients %#v", firstVersion["to"])
+	}
+}
+
+func TestSendEmailBatchDetailedViaMailtrapKeepsPartialRecipientResults(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"success": true,
+			"responses": [
+				{"success": true, "message_ids": ["id-1"], "errors": []},
+				{"success": true, "message_ids": ["id-2"], "errors": []}
+			],
+			"errors": ["quota reached"]
+		}`))
+	}))
+	defer server.Close()
+
+	svc := NewService(config.Config{
+		EmailProvider:      "mailtrap",
+		MailtrapAPIToken:   "sk_test_123",
+		MailtrapFromEmail:  "hello@example.com",
+		MailtrapFromName:   "GoApplyJob",
+	})
+	svc.httpClient = &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			req.URL.Scheme = "http"
+			req.URL.Host = server.Listener.Addr().String()
+			return server.Client().Transport.RoundTrip(req)
+		}),
+	}
+
+	result, err := svc.SendEmailBatchDetailed(
+		[]string{"first@example.com", "second@example.com", "third@example.com"},
+		"Hello",
+		"Plain text",
+		"<p>Hello</p>",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Provider != "mailtrap" {
+		t.Fatalf("unexpected provider %q", result.Provider)
+	}
+	if result.Status != "partial" {
+		t.Fatalf("unexpected status %q", result.Status)
+	}
+	if len(result.Items) != 3 {
+		t.Fatalf("unexpected items %#v", result.Items)
+	}
+	if result.Items[0].Status != "sent" || result.Items[1].Status != "sent" {
+		t.Fatalf("unexpected sent items %#v", result.Items)
+	}
+	if result.Items[2].Status != "error" {
+		t.Fatalf("unexpected third item %#v", result.Items[2])
 	}
 }

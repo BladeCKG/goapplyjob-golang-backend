@@ -133,21 +133,32 @@ func (s *Service) sendViaBrevoBatchDetailed(toEmails []string, subject, textCont
 		if err := json.Unmarshal(bodyText, &responseBody); err != nil {
 			return BatchDeliveryResult{}, fmt.Errorf("Brevo API batch email send failed: invalid response body")
 		}
-		if len(responseBody.MessageIDs) != len(toEmails) {
-			return BatchDeliveryResult{}, fmt.Errorf("Brevo API batch email send failed: unexpected messageIds count")
-		}
 		items := make([]RecipientDeliveryResult, 0, len(toEmails))
+		sentCount := 0
 		for i, toEmail := range toEmails {
-			items = append(items, RecipientDeliveryResult{
-				Email:     toEmail,
-				Status:    "accepted",
-				MessageID: responseBody.MessageIDs[i],
-			})
+			item := RecipientDeliveryResult{
+				Email:  toEmail,
+				Status: "error",
+				Message: "missing provider message id",
+			}
+			if i < len(responseBody.MessageIDs) && responseBody.MessageIDs[i] != "" {
+				item.Status = "accepted"
+				item.MessageID = responseBody.MessageIDs[i]
+				item.Message = ""
+				sentCount++
+			}
+			items = append(items, item)
 		}
 		brevoKeyRingSetNext(keys, keyIndex)
+		status := "error"
+		if sentCount == len(toEmails) {
+			status = "accepted"
+		} else if sentCount > 0 {
+			status = "partial"
+		}
 		return BatchDeliveryResult{
 			Provider: "brevo",
-			Status:   "accepted",
+			Status:   status,
 			Items:    items,
 		}, nil
 	}

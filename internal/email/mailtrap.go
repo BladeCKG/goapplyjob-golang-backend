@@ -164,29 +164,40 @@ func (s *Service) sendViaMailtrapBatchDetailed(toEmails []string, subject, textC
 		if err := json.Unmarshal(bodyText, &responseBody); err != nil {
 			return BatchDeliveryResult{}, fmt.Errorf("Mailtrap API batch email send failed: invalid response body")
 		}
-		if len(responseBody.Responses) != len(toEmails) {
-			return BatchDeliveryResult{}, fmt.Errorf("Mailtrap API batch email send failed: unexpected responses count")
-		}
 		items := make([]RecipientDeliveryResult, 0, len(toEmails))
-		hasErrors := len(responseBody.Errors) > 0
+		errorMessage := strings.Join(responseBody.Errors, " | ")
+		sentCount := 0
+		errorCount := 0
 		for i, toEmail := range toEmails {
-			item := RecipientDeliveryResult{
-				Email:  toEmail,
-				Status: "accepted",
-			}
-			if len(responseBody.Responses[i].MessageIDs) > 0 {
-				item.MessageID = responseBody.Responses[i].MessageIDs[0]
-			}
-			if !responseBody.Responses[i].Success {
+			item := RecipientDeliveryResult{Email: toEmail}
+			if i < len(responseBody.Responses) {
+				item.Status = "sent"
+				if len(responseBody.Responses[i].MessageIDs) > 0 {
+					item.MessageID = responseBody.Responses[i].MessageIDs[0]
+				}
+				if !responseBody.Responses[i].Success {
+					item.Status = "error"
+					item.Message = strings.Join(responseBody.Responses[i].Errors, " | ")
+				}
+			} else {
 				item.Status = "error"
-				item.Message = strings.Join(responseBody.Responses[i].Errors, " | ")
-				hasErrors = true
+				item.Message = errorMessage
+				if item.Message == "" {
+					item.Message = "missing provider result"
+				}
+			}
+			if item.Status == "sent" {
+				sentCount++
+			} else {
+				errorCount++
 			}
 			items = append(items, item)
 		}
 		mailtrapKeyRingSetNext(keys, keyIndex)
-		status := "accepted"
-		if hasErrors {
+		status := "error"
+		if sentCount == len(toEmails) {
+			status = "sent"
+		} else if sentCount > 0 && errorCount > 0 {
 			status = "partial"
 		}
 		return BatchDeliveryResult{
