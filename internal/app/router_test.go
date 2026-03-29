@@ -43,6 +43,35 @@ func TestJobsPublicAccess(t *testing.T) {
 	}
 }
 
+func TestClosedJobsAreHiddenFromPublicListAndDetail(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJob(t, db, 8101, "https://example.com/open", "Austin", "Texas", 120, 150, true, time.Date(2026, 2, 11, 0, 0, 0, 0, time.UTC))
+	insertJob(t, db, 8102, "https://example.com/closed", "Seattle", "Washington", 80, 100, false, time.Date(2026, 2, 10, 0, 0, 0, 0, time.UTC))
+	if _, err := db.SQL.ExecContext(context.Background(), `UPDATE parsed_jobs SET date_deleted = ? WHERE raw_us_job_id = ?`, time.Now().UTC().Format(time.RFC3339Nano), 8102); err != nil {
+		t.Fatal(err)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/jobs?per_page=20&page=1", nil)
+	listRec := httptest.NewRecorder()
+	router.ServeHTTP(listRec, listReq)
+	assertStatus(t, listRec.Code, http.StatusOK)
+
+	var listBody map[string]any
+	decodeBody(t, listRec.Body.Bytes(), &listBody)
+	items := listBody["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("expected only open job in listing, got %#v", listBody)
+	}
+
+	closedJobID := int(2)
+	detailReq := httptest.NewRequest(http.MethodGet, "/job/"+strconv.Itoa(closedJobID), nil)
+	detailRec := httptest.NewRecorder()
+	router.ServeHTTP(detailRec, detailReq)
+	assertStatus(t, detailRec.Code, http.StatusGone)
+}
+
 func TestAuthAndJobsFlow(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()

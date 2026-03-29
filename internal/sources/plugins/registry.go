@@ -11,31 +11,33 @@ import (
 )
 
 type SourcePlugin struct {
-	Source               string
-	PayloadType          string
-	ToTargetJobURL       func(string) string
-	ParseRawHTML         func(string, string) map[string]any
-	ParseImportRows      func(string) ([]map[string]any, int)
-	SerializeImportRows  func([]map[string]any) string
-	UseExternalCompanyID bool
-	UseCompanyMatchKeys  bool
-	RunDuplicateCheck    bool
-	InferCategories      bool
+	Source                       string
+	PayloadType                  string
+	ToTargetJobURL               func(string) string
+	ParseRawHTML                 func(string, string) map[string]any
+	IsJobClosed                  func(int, string, string) bool
+	ParseImportRows              func(string) ([]map[string]any, int)
+	SerializeImportRows          func([]map[string]any) string
+	UseExternalCompanyID         bool
+	UseCompanyMatchKeys          bool
+	RunDuplicateCheck            bool
+	InferCategories              bool
 	UseManualTechStackExtraction bool
 }
 
 var registry = map[string]SourcePlugin{
 	remoterocketship.Source: {
-		Source:               remoterocketship.Source,
-		PayloadType:          remoterocketship.PayloadType,
-		ToTargetJobURL:       remoterocketship.ToTargetJobURL,
-		ParseRawHTML:         remoterocketship.ParseRawHTML,
-		ParseImportRows:      remoterocketship.ParseImportRows,
-		SerializeImportRows:  remoterocketship.SerializeImportRows,
-		UseExternalCompanyID: true,
-		UseCompanyMatchKeys:  true,
-		RunDuplicateCheck:    true,
-		InferCategories:      false,
+		Source:                       remoterocketship.Source,
+		PayloadType:                  remoterocketship.PayloadType,
+		ToTargetJobURL:               remoterocketship.ToTargetJobURL,
+		ParseRawHTML:                 remoterocketship.ParseRawHTML,
+		IsJobClosed:                  remoterocketship.IsJobClosed,
+		ParseImportRows:              remoterocketship.ParseImportRows,
+		SerializeImportRows:          remoterocketship.SerializeImportRows,
+		UseExternalCompanyID:         true,
+		UseCompanyMatchKeys:          true,
+		RunDuplicateCheck:            true,
+		InferCategories:              false,
 		UseManualTechStackExtraction: false,
 	},
 	builtin.Source: {
@@ -44,13 +46,14 @@ var registry = map[string]SourcePlugin{
 		ToTargetJobURL: func(rawURL string) string {
 			return rawURL
 		},
-		ParseRawHTML:         builtin.ExtractJobFromHTML,
-		ParseImportRows:      builtin.ParseImportRows,
-		SerializeImportRows:  builtin.SerializeImportRows,
-		UseExternalCompanyID: false,
-		UseCompanyMatchKeys:  true,
-		RunDuplicateCheck:    true,
-		InferCategories:      true,
+		ParseRawHTML:                 builtin.ExtractJobFromHTML,
+		IsJobClosed:                  builtin.IsJobClosed,
+		ParseImportRows:              builtin.ParseImportRows,
+		SerializeImportRows:          builtin.SerializeImportRows,
+		UseExternalCompanyID:         false,
+		UseCompanyMatchKeys:          true,
+		RunDuplicateCheck:            true,
+		InferCategories:              true,
 		UseManualTechStackExtraction: false,
 	},
 	workable.Source: {
@@ -62,12 +65,13 @@ var registry = map[string]SourcePlugin{
 		ParseRawHTML: func(_ string, _ string) map[string]any {
 			return map[string]any{}
 		},
-		ParseImportRows:      nil,
-		SerializeImportRows:  nil,
-		UseExternalCompanyID: false,
-		UseCompanyMatchKeys:  true,
-		RunDuplicateCheck:    true,
-		InferCategories:      true,
+		IsJobClosed:                  workable.IsJobClosed,
+		ParseImportRows:              nil,
+		SerializeImportRows:          nil,
+		UseExternalCompanyID:         false,
+		UseCompanyMatchKeys:          true,
+		RunDuplicateCheck:            true,
+		InferCategories:              true,
 		UseManualTechStackExtraction: true,
 	},
 	hiringcafe.Source: {
@@ -79,25 +83,27 @@ var registry = map[string]SourcePlugin{
 		ParseRawHTML: func(_ string, _ string) map[string]any {
 			return map[string]any{}
 		},
-		ParseImportRows:      nil,
-		SerializeImportRows:  nil,
-		UseExternalCompanyID: false,
-		UseCompanyMatchKeys:  true,
-		RunDuplicateCheck:    true,
-		InferCategories:      true,
+		IsJobClosed:                  hiringcafe.IsJobClosed,
+		ParseImportRows:              nil,
+		SerializeImportRows:          nil,
+		UseExternalCompanyID:         false,
+		UseCompanyMatchKeys:          true,
+		RunDuplicateCheck:            true,
+		InferCategories:              true,
 		UseManualTechStackExtraction: true,
 	},
 	remotive.Source: {
-		Source:               remotive.Source,
-		PayloadType:          remotive.PayloadType,
-		ToTargetJobURL:       remotive.ToTargetJobURL,
-		ParseRawHTML:         remotive.ParseRawHTML,
-		ParseImportRows:      remotive.ParseImportRows,
-		SerializeImportRows:  remotive.SerializeImportRows,
-		UseExternalCompanyID: false,
-		UseCompanyMatchKeys:  true,
-		RunDuplicateCheck:    true,
-		InferCategories:      true,
+		Source:                       remotive.Source,
+		PayloadType:                  remotive.PayloadType,
+		ToTargetJobURL:               remotive.ToTargetJobURL,
+		ParseRawHTML:                 remotive.ParseRawHTML,
+		IsJobClosed:                  remotive.IsJobClosed,
+		ParseImportRows:              remotive.ParseImportRows,
+		SerializeImportRows:          remotive.SerializeImportRows,
+		UseExternalCompanyID:         false,
+		UseCompanyMatchKeys:          true,
+		RunDuplicateCheck:            true,
+		InferCategories:              true,
 		UseManualTechStackExtraction: true,
 	},
 	dailyremote.Source: {
@@ -106,26 +112,28 @@ var registry = map[string]SourcePlugin{
 		ToTargetJobURL: func(rawURL string) string {
 			return rawURL
 		},
-		ParseRawHTML:         dailyremote.ParseRawHTML,
-		ParseImportRows:      dailyremote.ParseImportRows,
-		SerializeImportRows:  dailyremote.SerializeImportRows,
-		UseExternalCompanyID: false,
-		UseCompanyMatchKeys:  true,
-		RunDuplicateCheck:    true,
-		InferCategories:      true,
+		ParseRawHTML:                 dailyremote.ParseRawHTML,
+		IsJobClosed:                  dailyremote.IsJobClosed,
+		ParseImportRows:              dailyremote.ParseImportRows,
+		SerializeImportRows:          dailyremote.SerializeImportRows,
+		UseExternalCompanyID:         false,
+		UseCompanyMatchKeys:          true,
+		RunDuplicateCheck:            true,
+		InferCategories:              true,
 		UseManualTechStackExtraction: true,
 	},
 	remotedotco.Source: {
-		Source:               remotedotco.Source,
-		PayloadType:          remotedotco.PayloadType,
-		ToTargetJobURL:       remotedotco.ToTargetJobURL,
-		ParseRawHTML:         remotedotco.ParseRawHTML,
-		ParseImportRows:      remotedotco.ParseImportRows,
-		SerializeImportRows:  remotedotco.SerializeImportRows,
-		UseExternalCompanyID: true,
-		UseCompanyMatchKeys:  true,
-		RunDuplicateCheck:    true,
-		InferCategories:      true,
+		Source:                       remotedotco.Source,
+		PayloadType:                  remotedotco.PayloadType,
+		ToTargetJobURL:               remotedotco.ToTargetJobURL,
+		ParseRawHTML:                 remotedotco.ParseRawHTML,
+		IsJobClosed:                  remotedotco.IsJobClosed,
+		ParseImportRows:              remotedotco.ParseImportRows,
+		SerializeImportRows:          remotedotco.SerializeImportRows,
+		UseExternalCompanyID:         true,
+		UseCompanyMatchKeys:          true,
+		RunDuplicateCheck:            true,
+		InferCategories:              true,
 		UseManualTechStackExtraction: true,
 	},
 }
@@ -141,9 +149,4 @@ func List() []string {
 		out = append(out, key)
 	}
 	return out
-}
-
-func valueString(value any) string {
-	text, _ := value.(string)
-	return text
 }

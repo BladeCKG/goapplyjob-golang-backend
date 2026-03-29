@@ -10,6 +10,7 @@ import (
 	"goapplyjob-golang-backend/internal/importer"
 	"goapplyjob-golang-backend/internal/parsed"
 	"goapplyjob-golang-backend/internal/parsedaiclassifier"
+	"goapplyjob-golang-backend/internal/parsedjobavailability"
 	"goapplyjob-golang-backend/internal/raw"
 	"goapplyjob-golang-backend/internal/scraper"
 	"goapplyjob-golang-backend/internal/sources/remotedotco"
@@ -164,9 +165,21 @@ func main() {
 					ErrorBackoffSeconds: errorBackoffSeconds,
 				}, db)
 				parsedAIClassifierSvc.EnabledSources = enabledSources
+				parsedAvailabilitySvc := parsedjobavailability.New(parsedjobavailability.Config{
+					BatchSize:           config.GetenvInt("PARSED_JOB_AVAILABILITY_BATCH_SIZE", 500),
+					PollSeconds:         config.GetenvFloat("PARSED_JOB_AVAILABILITY_POLL_SECONDS", 5),
+					RunOnce:             true,
+					ErrorBackoffSeconds: errorBackoffSeconds,
+					WorkerCount:         config.GetenvInt("PARSED_JOB_AVAILABILITY_WORKER_COUNT", 4),
+				}, db)
+				parsedAvailabilitySvc.EnabledSources = enabledSources
+				readHTMLForSource := makeReadHTMLForSourceWith429Retry(retries429, time.Duration(retryDelaySeconds)*time.Second)
+				parsedAvailabilitySvc.ReadHTMLForSource = func(ctx context.Context, source, targetURL string) (string, int, error) {
+					return readHTMLForSource(ctx, source, targetURL)
+				}
 
 				hadError := false
-				errorDetails := make([]string, 0, 5)
+				errorDetails := make([]string, 0, 6)
 				log.Printf("worker-chain cycle_start")
 				stepTimeout := time.Duration(stepTimeoutSeconds) * time.Second
 				type stepResult struct {
@@ -174,7 +187,7 @@ func main() {
 					count int
 					err   error
 				}
-				results := make(chan stepResult, 5)
+				results := make(chan stepResult, 6)
 				go func() {
 					err := runStepWithTimeout(constants.WorkerNameWatcher, stepTimeout, func(ctx context.Context) error {
 						return watcherSvc.RunOnceWithContext(ctx)
@@ -205,7 +218,13 @@ func main() {
 					})
 					results <- stepResult{name: constants.WorkerNameParsedAIClassifier, count: count, err: err}
 				}()
-				for i := 0; i < 5; i++ {
+				go func() {
+					count, err := runCountStepWithTimeout(stepTimeout, func(ctx context.Context) (int, error) {
+						return parsedAvailabilitySvc.RunOnce(ctx)
+					})
+					results <- stepResult{name: constants.WorkerNameParsedAvailability, count: count, err: err}
+				}()
+				for i := 0; i < 6; i++ {
 					res := <-results
 					switch res.name {
 					case constants.WorkerNameWatcher:
@@ -247,6 +266,14 @@ func main() {
 							errorDetails = append(errorDetails, "parsed_ai_classifier="+res.err.Error())
 						} else {
 							log.Printf("worker-chain parsed_ai_classifier_done processed=%d", res.count)
+						}
+					case constants.WorkerNameParsedAvailability:
+						if res.err != nil {
+							log.Printf("worker-chain parsed_job_availability_failed error=%v", res.err)
+							hadError = true
+							errorDetails = append(errorDetails, "parsed_job_availability="+res.err.Error())
+						} else {
+							log.Printf("worker-chain parsed_job_availability_done processed=%d", res.count)
 						}
 					}
 				}

@@ -812,6 +812,21 @@ func (h *Handler) jobDetail(c *gin.Context) {
 	}
 	row, err := h.q.GetJobDetailByID(c.Request.Context(), int32(jobID))
 	if err != nil {
+		var closed bool
+		closedErr := h.db.SQL.QueryRowContext(
+			c.Request.Context(),
+			`SELECT EXISTS (
+				SELECT 1
+				FROM parsed_jobs
+				WHERE id = ?
+				  AND date_deleted IS NOT NULL
+			)`,
+			jobID,
+		).Scan(&closed)
+		if closedErr == nil && closed {
+			c.JSON(http.StatusGone, gin.H{"detail": "Job is closed"})
+			return
+		}
 		c.JSON(http.StatusNotFound, gin.H{"detail": "Job not found"})
 		return
 	}
@@ -1019,6 +1034,7 @@ func (b *sqlArgsBuilder) add(value any) string {
 func buildJobsWhereSQL(input listingFilterInput) (string, []any) {
 	b := sqlArgsBuilder{args: []any{}}
 	clauses := make([]string, 0, 16)
+	clauses = append(clauses, "p.date_deleted IS NULL")
 
 	titleOr := make([]string, 0, 8)
 	if len(input.JobCategories) > 0 {
@@ -1224,6 +1240,7 @@ SELECT p.id, p.raw_us_job_id, p.role_title, p.job_description_summary,
 FROM parsed_jobs p
 LEFT JOIN parsed_companies c ON c.id = p.company_id
 WHERE p.id = ANY($1::bigint[])
+  AND p.date_deleted IS NULL
 ORDER BY array_position($1::bigint[], p.id)
 `
 	rows, err := pool.Query(ctx, sqlText, ids)
@@ -1443,6 +1460,7 @@ func (h *Handler) topCategories(c *gin.Context) {
 
 	args := []any{cutoff}
 	clauses := []string{
+		"p.date_deleted IS NULL",
 		"p.categorized_job_title IS NOT NULL",
 		"p.categorized_job_title != ''",
 		"p.created_at_source IS NOT NULL",
@@ -1546,6 +1564,7 @@ func (h *Handler) topFunctions(c *gin.Context) {
 
 	args := []any{cutoff}
 	clauses := []string{
+		"p.date_deleted IS NULL",
 		"p.categorized_job_function IS NOT NULL",
 		"p.categorized_job_function != ''",
 		"p.created_at_source IS NOT NULL",

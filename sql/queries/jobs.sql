@@ -28,6 +28,7 @@ SELECT p.id, p.raw_us_job_id, c.name, c.slug, c.tagline, c.profile_pic_url, c.ho
 FROM parsed_jobs p
 LEFT JOIN parsed_companies c ON c.id = p.company_id
 WHERE p.id = $1
+  AND p.date_deleted IS NULL
 LIMIT 1;
 
 -- name: GetActiveSubscriptionIDForUser :one
@@ -40,12 +41,14 @@ LIMIT 1;
 
 -- name: CountParsedJobs :one
 SELECT COUNT(id)::bigint AS count
-FROM parsed_jobs;
+FROM parsed_jobs
+WHERE date_deleted IS NULL;
 
 -- name: ListJobSitemapPage :many
 SELECT p.id, p.role_title, p.categorized_job_title, c.name, p.created_at_source
 FROM parsed_jobs p
 LEFT JOIN parsed_companies c ON c.id = p.company_id
+WHERE p.date_deleted IS NULL
 ORDER BY p.created_at_source DESC, p.id DESC
 LIMIT $1 OFFSET $2;
 
@@ -53,13 +56,15 @@ LIMIT $1 OFFSET $2;
 SELECT COUNT(DISTINCT c.id)::bigint AS count
 FROM parsed_companies c
 JOIN parsed_jobs p ON p.company_id = c.id
-WHERE c.slug IS NOT NULL AND trim(c.slug) != '';
+WHERE c.slug IS NOT NULL AND trim(c.slug) != ''
+  AND p.date_deleted IS NULL;
 
 -- name: ListCompanySitemapPage :many
 SELECT c.slug, c.name, MAX(p.created_at_source)::timestamptz AS latest_job_posted_at
 FROM parsed_companies c
 JOIN parsed_jobs p ON p.company_id = c.id
 WHERE c.slug IS NOT NULL AND trim(c.slug) != ''
+  AND p.date_deleted IS NULL
 GROUP BY c.id, c.slug, c.name
 ORDER BY latest_job_posted_at DESC, c.id DESC
 LIMIT $1 OFFSET $2;
@@ -79,6 +84,7 @@ WHERE company_id = $1;
 SELECT categorized_job_function
 FROM parsed_jobs
 WHERE categorized_job_title = $1
+  AND date_deleted IS NULL
   AND categorized_job_function IS NOT NULL
   AND categorized_job_function != ''
 GROUP BY categorized_job_function
@@ -89,6 +95,7 @@ LIMIT 1;
 SELECT categorized_job_title, COUNT(id)::bigint AS score
 FROM parsed_jobs
 WHERE categorized_job_title IS NOT NULL
+  AND date_deleted IS NULL
   AND categorized_job_title != ''
   AND categorized_job_function = $1
 GROUP BY categorized_job_title
@@ -101,6 +108,7 @@ LIMIT $3;
 SELECT categorized_job_title, COUNT(id)::bigint AS score
 FROM parsed_jobs
 WHERE categorized_job_title IS NOT NULL
+  AND date_deleted IS NULL
   AND categorized_job_title != ''
   AND created_at_source IS NOT NULL
   AND created_at_source >= $1
@@ -127,6 +135,8 @@ SELECT
 	END AS company_count
 FROM parsed_jobs p
 WHERE
+	p.date_deleted IS NULL
+AND
 (
 	NOT sqlc.arg(has_title_filters)::boolean
 	OR p.categorized_job_title = ANY(sqlc.arg(job_categories)::text[])
@@ -274,6 +284,8 @@ AND (
 SELECT p.id
 FROM parsed_jobs p
 WHERE
+	p.date_deleted IS NULL
+AND
 (
 	NOT sqlc.arg(has_title_filters)::boolean
 	OR p.categorized_job_title = ANY(sqlc.arg(job_categories)::text[])
@@ -454,6 +466,7 @@ SELECT p.id, p.raw_us_job_id, p.role_title, p.job_description_summary, c.name, c
 FROM parsed_jobs p
 LEFT JOIN parsed_companies c ON c.id = p.company_id
 WHERE p.id = ANY(sqlc.arg(ids)::bigint[])
+  AND p.date_deleted IS NULL
 ORDER BY array_position(sqlc.arg(ids)::bigint[], p.id);
 
 -- name: GetJobsMetricsFiltered :one
@@ -461,6 +474,8 @@ WITH filtered AS (
 	SELECT p.id, p.company_id, p.created_at_source
 	FROM parsed_jobs p
 	WHERE
+	p.date_deleted IS NULL
+	AND
 	(
 		NOT sqlc.arg(has_title_filters)::boolean
 		OR p.categorized_job_title = ANY(sqlc.arg(job_categories)::text[])
