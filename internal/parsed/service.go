@@ -5,6 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/extract/techstack"
+	"goapplyjob-golang-backend/internal/normalize/techstacknorm"
+	"goapplyjob-golang-backend/internal/sources/plugins"
 	"log"
 	"net/mail"
 	"net/url"
@@ -16,11 +20,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"goapplyjob-golang-backend/internal/database"
-	"goapplyjob-golang-backend/internal/extract/techstack"
-	"goapplyjob-golang-backend/internal/normalize/techstacknorm"
-	"goapplyjob-golang-backend/internal/sources/plugins"
 
 	"golang.org/x/net/publicsuffix"
 )
@@ -98,10 +97,6 @@ var normalizationReplacements = []struct {
 	pattern     *regexp.Regexp
 	replacement string
 }{
-	{pattern: regexp.MustCompile(`\bai\b`), replacement: "artificial intelligence"},
-	{pattern: regexp.MustCompile(`\bml\b`), replacement: "machine learning"},
-	{pattern: regexp.MustCompile(`\bnlp\b`), replacement: "natural language processing"},
-	{pattern: regexp.MustCompile(`\bllm\b`), replacement: "large language model"},
 	{pattern: regexp.MustCompile(`\bgai\b`), replacement: "generative artificial intelligence"},
 	{pattern: regexp.MustCompile(`\bdev[\s\-]*ops\b`), replacement: "devops"},
 	{pattern: regexp.MustCompile(`\brev[\s\-]*ops\b`), replacement: "revenue operations"},
