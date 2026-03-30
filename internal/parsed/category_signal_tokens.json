@@ -2069,8 +2069,44 @@
         "weight": 1.9166666666666665
       },
       {
+        "token": "facilitator",
+        "weight": 1.75
+      },
+      {
+        "token": "facilitators",
+        "weight": 1.75
+      },
+      {
+        "token": "instructor",
+        "weight": 2.0
+      },
+      {
+        "token": "instructors",
+        "weight": 2.0
+      },
+      {
         "token": "learning",
         "weight": 1.6666666666666665
+      },
+      {
+        "token": "teacher",
+        "weight": 1.25
+      },
+      {
+        "token": "teachers",
+        "weight": 1.25
+      },
+      {
+        "token": "trainer",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "trainers",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "training",
+        "weight": 1.8333333333333335
       }
     ]
   },
