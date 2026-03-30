@@ -600,6 +600,7 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 
 	type matchRank struct {
 		exactNormalizedTitleMatch     int
+		categorySignalWeight          float64
 		nonGenericCategoryPreference  int
 		weightedSpecificTokenHits     float64
 		weightedCategoryOverlap       float64
@@ -621,6 +622,12 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 		switch {
 		case left.exactNormalizedTitleMatch != right.exactNormalizedTitleMatch:
 			return left.exactNormalizedTitleMatch > right.exactNormalizedTitleMatch
+		case left.nonGenericCategoryPreference != right.nonGenericCategoryPreference:
+			return left.nonGenericCategoryPreference > right.nonGenericCategoryPreference
+		case left.genericOneWordCategoryPenalty != right.genericOneWordCategoryPenalty:
+			return left.genericOneWordCategoryPenalty < right.genericOneWordCategoryPenalty
+		case left.categorySignalWeight != right.categorySignalWeight:
+			return left.categorySignalWeight > right.categorySignalWeight
 		case left.weightedSpecificTokenHits != right.weightedSpecificTokenHits:
 			return left.weightedSpecificTokenHits > right.weightedSpecificTokenHits
 		case left.combinedSpecificTokenHits != right.combinedSpecificTokenHits:
@@ -645,10 +652,6 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 			return left.overlapRatio > right.overlapRatio
 		case left.functionOverlapCount != right.functionOverlapCount:
 			return left.functionOverlapCount > right.functionOverlapCount
-		case left.nonGenericCategoryPreference != right.nonGenericCategoryPreference:
-			return left.nonGenericCategoryPreference > right.nonGenericCategoryPreference
-		case left.genericOneWordCategoryPenalty != right.genericOneWordCategoryPenalty:
-			return left.genericOneWordCategoryPenalty < right.genericOneWordCategoryPenalty
 		default:
 			return left.roleJaccard > right.roleJaccard
 		}
@@ -684,8 +687,11 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 		hasWeightedOverlapSignal := sourceHasSpecificTokens &&
 			(rank.weightedCategoryOverlap+rank.weightedRoleOverlap) >= 0.5
 
+		hasCategorySignalWeight := rank.categorySignalWeight > 0
+
 		if len(sourceTokens) <= 1 {
 			return rank.exactNormalizedTitleMatch == 1 ||
+				hasCategorySignalWeight ||
 				hasTechSignal ||
 				(hasSequenceSignal && rank.categoryOverlapCount >= 1)
 		}
@@ -693,6 +699,7 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 		hasOverlapSignal := rank.overlapCount >= requiredOverlap && rank.overlapRatio >= 0.35
 
 		return rank.exactNormalizedTitleMatch == 1 ||
+			hasCategorySignalWeight ||
 			hasTechSignal ||
 			hasCategorySignal ||
 			hasSequenceSignal ||
@@ -703,6 +710,7 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 
 	hasAnySignal := func(rank matchRank) bool {
 		return rank.exactNormalizedTitleMatch == 1 ||
+			rank.categorySignalWeight > 0 ||
 			rank.skillOverlapCount > 0 ||
 			rank.categoryOverlapCount > 0 ||
 			rank.functionOverlapCount > 0 ||
@@ -922,8 +930,11 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 					genericOneWordCategoryPenalty = 1
 				}
 
+				categorySignalScore := categorySignalWeight(sourceNormalizedTitle, candidateTitle.String, candidateFunction.String)
+
 				rank := matchRank{
 					exactNormalizedTitleMatch:     exactNormalizedTitleMatch,
+					categorySignalWeight:          categorySignalScore,
 					nonGenericCategoryPreference:  nonGenericCategoryPreference,
 					weightedSpecificTokenHits:     weightedSpecificTokenHits,
 					weightedCategoryOverlap:       weightedCategoryOverlap,

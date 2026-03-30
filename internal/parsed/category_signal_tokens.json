@@ -1,0 +1,3137 @@
+[
+  {
+    "category": "2D Artist",
+    "tokens": [
+      {
+        "token": "2d",
+        "weight": 1.1666666666666667
+      },
+      {
+        "token": "artist",
+        "weight": 1.5
+      }
+    ]
+  },
+  {
+    "category": "3D Artist",
+    "tokens": [
+      {
+        "token": "3d",
+        "weight": 1.1666666666666667
+      },
+      {
+        "token": "artist",
+        "weight": 1.5
+      }
+    ]
+  },
+  {
+    "category": "Account Executive",
+    "tokens": [
+      {
+        "token": "account",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "accountexecutive",
+        "weight": 3.0
+      },
+      {
+        "token": "closer",
+        "weight": 3.0
+      },
+      {
+        "token": "closing",
+        "weight": 3.0
+      },
+      {
+        "token": "executive",
+        "weight": 1.75
+      }
+    ]
+  },
+  {
+    "category": "Account Manager",
+    "tokens": [
+      {
+        "token": "account",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "manager",
+        "weight": 0.01
+      }
+    ]
+  },
+  {
+    "category": "Accountant",
+    "tokens": [
+      {
+        "token": "accountant",
+        "weight": 3.0
+      },
+      {
+        "token": "accountspayable",
+        "weight": 3.0
+      },
+      {
+        "token": "accountsreceivable",
+        "weight": 3.0
+      },
+      {
+        "token": "bookkeeper",
+        "weight": 3.0
+      },
+      {
+        "token": "bookkeeping",
+        "weight": 3.0
+      },
+      {
+        "token": "cpa",
+        "weight": 3.0
+      },
+      {
+        "token": "payroll",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Accounting Manager",
+    "tokens": [
+      {
+        "token": "accounting",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "manager",
+        "weight": 0.01
+      }
+    ]
+  },
+  {
+    "category": "Accounts Payable",
+    "tokens": [
+      {
+        "token": "accounts",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "payable",
+        "weight": 1.5833333333333335
+      }
+    ]
+  },
+  {
+    "category": "Accounts Receivable",
+    "tokens": [
+      {
+        "token": "accounts",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "receivable",
+        "weight": 1.8333333333333335
+      }
+    ]
+  },
+  {
+    "category": "Actuary",
+    "tokens": [
+      {
+        "token": "actuary",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Administration",
+    "tokens": [
+      {
+        "token": "administration",
+        "weight": 2.0
+      }
+    ]
+  },
+  {
+    "category": "Administrative Assistant",
+    "tokens": [
+      {
+        "token": "administrative",
+        "weight": 2.0
+      },
+      {
+        "token": "assistant",
+        "weight": 1.75
+      }
+    ]
+  },
+  {
+    "category": "Affiliate Manager",
+    "tokens": [
+      {
+        "token": "affiliate",
+        "weight": 1.75
+      },
+      {
+        "token": "manager",
+        "weight": 0.01
+      }
+    ]
+  },
+  {
+    "category": "AI Engineer",
+    "tokens": [
+      {
+        "token": "ai",
+        "weight": 1.1666666666666667
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      }
+    ]
+  },
+  {
+    "category": "AI Research Scientist",
+    "tokens": [
+      {
+        "token": "ai",
+        "weight": 1.1666666666666667
+      },
+      {
+        "token": "research",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "scientist",
+        "weight": 1.75
+      }
+    ]
+  },
+  {
+    "category": "Analyst",
+    "tokens": [
+      {
+        "token": "analyst",
+        "weight": 0.03
+      }
+    ]
+  },
+  {
+    "category": "Analytics Engineer",
+    "tokens": [
+      {
+        "token": "analytics",
+        "weight": 1.75
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      }
+    ]
+  },
+  {
+    "category": "Android Engineer",
+    "tokens": [
+      {
+        "token": "android",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "developer",
+        "weight": 0.3
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "mobile",
+        "weight": 0.55
+      }
+    ]
+  },
+  {
+    "category": "Any",
+    "tokens": [
+      {
+        "token": "any",
+        "weight": 0.0
+      }
+    ]
+  },
+  {
+    "category": "Application Engineer",
+    "tokens": [
+      {
+        "token": "application",
+        "weight": 1.9166666666666665
+      },
+      {
+        "token": "developer",
+        "weight": 0.2
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      }
+    ]
+  },
+  {
+    "category": "Appointment Setter",
+    "tokens": [
+      {
+        "token": "appointment",
+        "weight": 1.9166666666666665
+      },
+      {
+        "token": "setter",
+        "weight": 1.5
+      }
+    ]
+  },
+  {
+    "category": "Architect",
+    "tokens": [
+      {
+        "token": "architect",
+        "weight": 0.03
+      }
+    ]
+  },
+  {
+    "category": "Art Director",
+    "tokens": [
+      {
+        "token": "art",
+        "weight": 1.25
+      },
+      {
+        "token": "director",
+        "weight": 0.01
+      }
+    ]
+  },
+  {
+    "category": "Artificial Intelligence",
+    "tokens": [
+      {
+        "token": "artificial",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "intelligence",
+        "weight": 2.0
+      }
+    ]
+  },
+  {
+    "category": "Attorney",
+    "tokens": [
+      {
+        "token": "attorney",
+        "weight": 3.0
+      },
+      {
+        "token": "counsel",
+        "weight": 3.0
+      },
+      {
+        "token": "lawyer",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Auditor",
+    "tokens": [
+      {
+        "token": "auditor",
+        "weight": 1.5833333333333335
+      }
+    ]
+  },
+  {
+    "category": "Backend Engineer",
+    "tokens": [
+      {
+        "token": "api",
+        "weight": 0.5
+      },
+      {
+        "token": "backend",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "developer",
+        "weight": 0.35
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "programmer",
+        "weight": 0.2
+      },
+      {
+        "token": "server",
+        "weight": 0.45
+      },
+      {
+        "token": "services",
+        "weight": 0.25
+      }
+    ]
+  },
+  {
+    "category": "Bilingual",
+    "tokens": [
+      {
+        "token": "bilingual",
+        "weight": 1.75
+      }
+    ]
+  },
+  {
+    "category": "Billing Specialist",
+    "tokens": [
+      {
+        "token": "billing",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "specialist",
+        "weight": 0.1
+      }
+    ]
+  },
+  {
+    "category": "Blockchain Engineer",
+    "tokens": [
+      {
+        "token": "blockchain",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      }
+    ]
+  },
+  {
+    "category": "Bookkeeper",
+    "tokens": [
+      {
+        "token": "bookkeeper",
+        "weight": 1.8333333333333335
+      }
+    ]
+  },
+  {
+    "category": "Brand Ambassador",
+    "tokens": [
+      {
+        "token": "ambassador",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "brand",
+        "weight": 1.4166666666666667
+      }
+    ]
+  },
+  {
+    "category": "Brand Designer",
+    "tokens": [
+      {
+        "token": "brand",
+        "weight": 1.4166666666666667
+      },
+      {
+        "token": "design",
+        "weight": 0.2
+      },
+      {
+        "token": "designer",
+        "weight": 0.01
+      }
+    ]
+  },
+  {
+    "category": "Brand Manager",
+    "tokens": [
+      {
+        "token": "brand",
+        "weight": 1.4166666666666667
+      },
+      {
+        "token": "manager",
+        "weight": 0.01
+      }
+    ]
+  },
+  {
+    "category": "Business Analyst",
+    "tokens": [
+      {
+        "token": "analyst",
+        "weight": 0.01
+      },
+      {
+        "token": "business",
+        "weight": 1.6666666666666665
+      }
+    ]
+  },
+  {
+    "category": "Business Development Rep",
+    "tokens": [
+      {
+        "token": "business",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "development",
+        "weight": 1.9166666666666665
+      },
+      {
+        "token": "rep",
+        "weight": 1.25
+      }
+    ]
+  },
+  {
+    "category": "Business Intelligence Analyst",
+    "tokens": [
+      {
+        "token": "analyst",
+        "weight": 0.01
+      },
+      {
+        "token": "business",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "intelligence",
+        "weight": 2.0
+      }
+    ]
+  },
+  {
+    "category": "Business Intelligence Developer",
+    "tokens": [
+      {
+        "token": "business",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "developer",
+        "weight": 0.2
+      },
+      {
+        "token": "intelligence",
+        "weight": 2.0
+      }
+    ]
+  },
+  {
+    "category": "Business Operations",
+    "tokens": [
+      {
+        "token": "business",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "operations",
+        "weight": 1.8333333333333335
+      }
+    ]
+  },
+  {
+    "category": "Call Center Representative",
+    "tokens": [
+      {
+        "token": "call",
+        "weight": 1.3333333333333333
+      },
+      {
+        "token": "center",
+        "weight": 1.5
+      },
+      {
+        "token": "representative",
+        "weight": 0.1
+      }
+    ]
+  },
+  {
+    "category": "Capture Manager",
+    "tokens": [
+      {
+        "token": "capture",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "manager",
+        "weight": 0.01
+      }
+    ]
+  },
+  {
+    "category": "Chief Marketing Officer",
+    "tokens": [
+      {
+        "token": "chief",
+        "weight": 1.4166666666666667
+      },
+      {
+        "token": "marketing",
+        "weight": 1.75
+      },
+      {
+        "token": "officer",
+        "weight": 1.5833333333333335
+      }
+    ]
+  },
+  {
+    "category": "Chief of Staff",
+    "tokens": [
+      {
+        "token": "chief",
+        "weight": 1.4166666666666667
+      },
+      {
+        "token": "of",
+        "weight": 1.1666666666666667
+      },
+      {
+        "token": "staff",
+        "weight": 1.4166666666666667
+      }
+    ]
+  },
+  {
+    "category": "Chief Operating Officer",
+    "tokens": [
+      {
+        "token": "chief",
+        "weight": 1.4166666666666667
+      },
+      {
+        "token": "officer",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "operating",
+        "weight": 1.75
+      }
+    ]
+  },
+  {
+    "category": "Chief Technology Officer",
+    "tokens": [
+      {
+        "token": "chief",
+        "weight": 1.4166666666666667
+      },
+      {
+        "token": "officer",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "technology",
+        "weight": 1.8333333333333335
+      }
+    ]
+  },
+  {
+    "category": "Civil Engineer",
+    "tokens": [
+      {
+        "token": "civil",
+        "weight": 1.4166666666666667
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      }
+    ]
+  },
+  {
+    "category": "Claims Specialist",
+    "tokens": [
+      {
+        "token": "claims",
+        "weight": 1.5
+      },
+      {
+        "token": "specialist",
+        "weight": 0.1
+      }
+    ]
+  },
+  {
+    "category": "Client Partner",
+    "tokens": [
+      {
+        "token": "client",
+        "weight": 1.5
+      },
+      {
+        "token": "partner",
+        "weight": 1.5833333333333335
+      }
+    ]
+  },
+  {
+    "category": "Client Services Representative",
+    "tokens": [
+      {
+        "token": "client",
+        "weight": 1.5
+      },
+      {
+        "token": "representative",
+        "weight": 0.1
+      },
+      {
+        "token": "services",
+        "weight": 1.6666666666666665
+      }
+    ]
+  },
+  {
+    "category": "Clinical Operations",
+    "tokens": [
+      {
+        "token": "clinical",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "operations",
+        "weight": 1.8333333333333335
+      }
+    ]
+  },
+  {
+    "category": "Clinical Research",
+    "tokens": [
+      {
+        "token": "clinical",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "research",
+        "weight": 1.6666666666666665
+      }
+    ]
+  },
+  {
+    "category": "Cloud Engineer",
+    "tokens": [
+      {
+        "token": "cloud",
+        "weight": 1.4166666666666667
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      }
+    ]
+  },
+  {
+    "category": "Collections",
+    "tokens": [
+      {
+        "token": "collections",
+        "weight": 1.9166666666666665
+      }
+    ]
+  },
+  {
+    "category": "Communications",
+    "tokens": [
+      {
+        "token": "communications",
+        "weight": 2.0
+      }
+    ]
+  },
+  {
+    "category": "Community Manager",
+    "tokens": [
+      {
+        "token": "community",
+        "weight": 1.75
+      },
+      {
+        "token": "manager",
+        "weight": 0.01
+      }
+    ]
+  },
+  {
+    "category": "Compliance",
+    "tokens": [
+      {
+        "token": "compliance",
+        "weight": 1.8333333333333335
+      }
+    ]
+  },
+  {
+    "category": "Computer Vision Engineer",
+    "tokens": [
+      {
+        "token": "computer",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "vision",
+        "weight": 1.5
+      }
+    ]
+  },
+  {
+    "category": "Consultant",
+    "tokens": [
+      {
+        "token": "consultant",
+        "weight": 0.03
+      }
+    ]
+  },
+  {
+    "category": "Content Creator",
+    "tokens": [
+      {
+        "token": "content",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "creator",
+        "weight": 1.5833333333333335
+      }
+    ]
+  },
+  {
+    "category": "Content Manager",
+    "tokens": [
+      {
+        "token": "content",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "manager",
+        "weight": 0.01
+      }
+    ]
+  },
+  {
+    "category": "Content Marketing Manager",
+    "tokens": [
+      {
+        "token": "content",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "manager",
+        "weight": 0.01
+      },
+      {
+        "token": "marketing",
+        "weight": 1.75
+      }
+    ]
+  },
+  {
+    "category": "Content Writer",
+    "tokens": [
+      {
+        "token": "content",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "writer",
+        "weight": 0.1
+      }
+    ]
+  },
+  {
+    "category": "Controller",
+    "tokens": [
+      {
+        "token": "controller",
+        "weight": 1.8333333333333335
+      }
+    ]
+  },
+  {
+    "category": "Conversion Rate Optimizer",
+    "tokens": [
+      {
+        "token": "conversion",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "optimizer",
+        "weight": 1.75
+      },
+      {
+        "token": "rate",
+        "weight": 1.3333333333333333
+      }
+    ]
+  },
+  {
+    "category": "Copywriter",
+    "tokens": [
+      {
+        "token": "copywriter",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Counselor",
+    "tokens": [
+      {
+        "token": "counselor",
+        "weight": 1.75
+      }
+    ]
+  },
+  {
+    "category": "Creative Strategist",
+    "tokens": [
+      {
+        "token": "creative",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "strategist",
+        "weight": 1.8333333333333335
+      }
+    ]
+  },
+  {
+    "category": "Crypto",
+    "tokens": [
+      {
+        "token": "crypto",
+        "weight": 1.5
+      }
+    ]
+  },
+  {
+    "category": "Customer Advocate",
+    "tokens": [
+      {
+        "token": "advocate",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "customer",
+        "weight": 1.6666666666666665
+      }
+    ]
+  },
+  {
+    "category": "Customer Retention Specialist",
+    "tokens": [
+      {
+        "token": "customer",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "retention",
+        "weight": 1.75
+      },
+      {
+        "token": "specialist",
+        "weight": 0.1
+      }
+    ]
+  },
+  {
+    "category": "Customer Success Manager",
+    "tokens": [
+      {
+        "token": "customer",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "manager",
+        "weight": 0.01
+      },
+      {
+        "token": "success",
+        "weight": 1.5833333333333335
+      }
+    ]
+  },
+  {
+    "category": "Customer Support",
+    "tokens": [
+      {
+        "token": "customer",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "support",
+        "weight": 0.1
+      }
+    ]
+  },
+  {
+    "category": "Data Analyst",
+    "tokens": [
+      {
+        "token": "analyst",
+        "weight": 0.01
+      },
+      {
+        "token": "data",
+        "weight": 1.3333333333333333
+      },
+      {
+        "token": "looker",
+        "weight": 3.0
+      },
+      {
+        "token": "powerbi",
+        "weight": 3.0
+      },
+      {
+        "token": "tableau",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Data Engineer",
+    "tokens": [
+      {
+        "token": "data",
+        "weight": 1.3333333333333333
+      },
+      {
+        "token": "developer",
+        "weight": 0.15
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "etl",
+        "weight": 0.7
+      },
+      {
+        "token": "pipeline",
+        "weight": 0.45
+      }
+    ]
+  },
+  {
+    "category": "Data Entry",
+    "tokens": [
+      {
+        "token": "data",
+        "weight": 1.3333333333333333
+      },
+      {
+        "token": "entry",
+        "weight": 1.4166666666666667
+      }
+    ]
+  },
+  {
+    "category": "Data Scientist",
+    "tokens": [
+      {
+        "token": "data",
+        "weight": 1.3333333333333333
+      },
+      {
+        "token": "predictivemodeling",
+        "weight": 3.0
+      },
+      {
+        "token": "scientist",
+        "weight": 1.75
+      },
+      {
+        "token": "statistician",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Database Administrator",
+    "tokens": [
+      {
+        "token": "administrator",
+        "weight": 0.2
+      },
+      {
+        "token": "database",
+        "weight": 1.6666666666666665
+      }
+    ]
+  },
+  {
+    "category": "DeFi",
+    "tokens": [
+      {
+        "token": "defi",
+        "weight": 1.3333333333333333
+      }
+    ]
+  },
+  {
+    "category": "Designer",
+    "tokens": [
+      {
+        "token": "designer",
+        "weight": 0.03
+      }
+    ]
+  },
+  {
+    "category": "Developer Relations",
+    "tokens": [
+      {
+        "token": "advocate",
+        "weight": 0.6
+      },
+      {
+        "token": "developer",
+        "weight": 0.2
+      },
+      {
+        "token": "evangelist",
+        "weight": 0.8
+      },
+      {
+        "token": "relations",
+        "weight": 1.75
+      }
+    ]
+  },
+  {
+    "category": "DevOps Engineer",
+    "tokens": [
+      {
+        "token": "developer",
+        "weight": 0.1
+      },
+      {
+        "token": "devops",
+        "weight": 1.5
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "ops",
+        "weight": 0.25
+      },
+      {
+        "token": "sre",
+        "weight": 1.3
+      }
+    ]
+  },
+  {
+    "category": "Digital Marketing",
+    "tokens": [
+      {
+        "token": "digital",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "marketing",
+        "weight": 1.75
+      }
+    ]
+  },
+  {
+    "category": "Director",
+    "tokens": [
+      {
+        "token": "director",
+        "weight": 0.03
+      }
+    ]
+  },
+  {
+    "category": "Ecommerce",
+    "tokens": [
+      {
+        "token": "ecommerce",
+        "weight": 1.75
+      }
+    ]
+  },
+  {
+    "category": "Electrical Engineer",
+    "tokens": [
+      {
+        "token": "electrical",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      }
+    ]
+  },
+  {
+    "category": "Email Marketing Manager",
+    "tokens": [
+      {
+        "token": "braze",
+        "weight": 3.0
+      },
+      {
+        "token": "email",
+        "weight": 1.4166666666666667
+      },
+      {
+        "token": "emailmarketing",
+        "weight": 3.0
+      },
+      {
+        "token": "klaviyo",
+        "weight": 3.0
+      },
+      {
+        "token": "mailchimp",
+        "weight": 3.0
+      },
+      {
+        "token": "manager",
+        "weight": 0.01
+      },
+      {
+        "token": "marketing",
+        "weight": 1.75
+      },
+      {
+        "token": "marketo",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Engineer",
+    "tokens": [
+      {
+        "token": "engineer",
+        "weight": 0.03
+      }
+    ]
+  },
+  {
+    "category": "Engineering Manager",
+    "tokens": [
+      {
+        "token": "engineering",
+        "weight": 1.9166666666666665
+      },
+      {
+        "token": "manager",
+        "weight": 0.01
+      }
+    ]
+  },
+  {
+    "category": "Events",
+    "tokens": [
+      {
+        "token": "events",
+        "weight": 1.5
+      }
+    ]
+  },
+  {
+    "category": "Executive Assistant",
+    "tokens": [
+      {
+        "token": "assistant",
+        "weight": 1.75
+      },
+      {
+        "token": "executive",
+        "weight": 1.75
+      }
+    ]
+  },
+  {
+    "category": "Field Engineer",
+    "tokens": [
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "field",
+        "weight": 1.4166666666666667
+      }
+    ]
+  },
+  {
+    "category": "Financial Crime",
+    "tokens": [
+      {
+        "token": "crime",
+        "weight": 1.4166666666666667
+      },
+      {
+        "token": "financial",
+        "weight": 1.75
+      }
+    ]
+  },
+  {
+    "category": "Financial Planning and Analysis",
+    "tokens": [
+      {
+        "token": "analysis",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "and",
+        "weight": 0.0
+      },
+      {
+        "token": "financial",
+        "weight": 1.75
+      },
+      {
+        "token": "planning",
+        "weight": 1.6666666666666665
+      }
+    ]
+  },
+  {
+    "category": "Frontend Engineer",
+    "tokens": [
+      {
+        "token": "client",
+        "weight": 0.15
+      },
+      {
+        "token": "developer",
+        "weight": 0.35
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "frontend",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "programmer",
+        "weight": 0.2
+      },
+      {
+        "token": "ui",
+        "weight": 0.55
+      },
+      {
+        "token": "web",
+        "weight": 0.3
+      }
+    ]
+  },
+  {
+    "category": "Full-stack Engineer",
+    "tokens": [
+      {
+        "token": "developer",
+        "weight": 0.35
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "full",
+        "weight": 1.3333333333333333
+      },
+      {
+        "token": "fullstack",
+        "weight": 2.5
+      },
+      {
+        "token": "programmer",
+        "weight": 0.2
+      },
+      {
+        "token": "stack",
+        "weight": 1.4166666666666667
+      }
+    ]
+  },
+  {
+    "category": "Game Engineer",
+    "tokens": [
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "game",
+        "weight": 1.3333333333333333
+      }
+    ]
+  },
+  {
+    "category": "General Counsel",
+    "tokens": [
+      {
+        "token": "counsel",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "general",
+        "weight": 1.5833333333333335
+      }
+    ]
+  },
+  {
+    "category": "Graphics Designer",
+    "tokens": [
+      {
+        "token": "aftereffects",
+        "weight": 3.0
+      },
+      {
+        "token": "design",
+        "weight": 0.2
+      },
+      {
+        "token": "designer",
+        "weight": 0.01
+      },
+      {
+        "token": "graphic",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "graphics",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "illustrator",
+        "weight": 3.0
+      },
+      {
+        "token": "indesign",
+        "weight": 3.0
+      },
+      {
+        "token": "photoshop",
+        "weight": 3.0
+      },
+      {
+        "token": "visual",
+        "weight": 0.55
+      }
+    ]
+  },
+  {
+    "category": "Growth Marketing",
+    "tokens": [
+      {
+        "token": "growth",
+        "weight": 1.5
+      },
+      {
+        "token": "marketing",
+        "weight": 1.75
+      }
+    ]
+  },
+  {
+    "category": "Hardware Engineer",
+    "tokens": [
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "hardware",
+        "weight": 1.6666666666666665
+      }
+    ]
+  },
+  {
+    "category": "Human Resources",
+    "tokens": [
+      {
+        "token": "human",
+        "weight": 1.4166666666666667
+      },
+      {
+        "token": "resources",
+        "weight": 1.75
+      }
+    ]
+  },
+  {
+    "category": "Implementation Specialist",
+    "tokens": [
+      {
+        "token": "implementation",
+        "weight": 2.0
+      },
+      {
+        "token": "specialist",
+        "weight": 0.1
+      }
+    ]
+  },
+  {
+    "category": "Incident Response Analyst",
+    "tokens": [
+      {
+        "token": "analyst",
+        "weight": 0.01
+      },
+      {
+        "token": "incident",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "response",
+        "weight": 1.6666666666666665
+      }
+    ]
+  },
+  {
+    "category": "Influencer Marketing",
+    "tokens": [
+      {
+        "token": "influencer",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "marketing",
+        "weight": 1.75
+      }
+    ]
+  },
+  {
+    "category": "Infrastructure Engineer",
+    "tokens": [
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "infrastructure",
+        "weight": 2.0
+      }
+    ]
+  },
+  {
+    "category": "Inside Sales",
+    "tokens": [
+      {
+        "token": "inside",
+        "weight": 1.5
+      },
+      {
+        "token": "sales",
+        "weight": 1.4166666666666667
+      }
+    ]
+  },
+  {
+    "category": "Insurance",
+    "tokens": [
+      {
+        "token": "insurance",
+        "weight": 1.75
+      }
+    ]
+  },
+  {
+    "category": "iOS Engineer",
+    "tokens": [
+      {
+        "token": "developer",
+        "weight": 0.3
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "ios",
+        "weight": 1.25
+      },
+      {
+        "token": "mobile",
+        "weight": 0.55
+      }
+    ]
+  },
+  {
+    "category": "IT Support",
+    "tokens": [
+      {
+        "token": "it",
+        "weight": 1.1666666666666667
+      },
+      {
+        "token": "support",
+        "weight": 0.1
+      }
+    ]
+  },
+  {
+    "category": "Journalist",
+    "tokens": [
+      {
+        "token": "journalist",
+        "weight": 1.8333333333333335
+      }
+    ]
+  },
+  {
+    "category": "Lead Generation",
+    "tokens": [
+      {
+        "token": "generation",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "lead",
+        "weight": 1.3333333333333333
+      }
+    ]
+  },
+  {
+    "category": "Learning and Development",
+    "tokens": [
+      {
+        "token": "and",
+        "weight": 0.0
+      },
+      {
+        "token": "development",
+        "weight": 1.9166666666666665
+      },
+      {
+        "token": "learning",
+        "weight": 1.6666666666666665
+      }
+    ]
+  },
+  {
+    "category": "Legal Assistant",
+    "tokens": [
+      {
+        "token": "assistant",
+        "weight": 1.75
+      },
+      {
+        "token": "legal",
+        "weight": 1.4166666666666667
+      }
+    ]
+  },
+  {
+    "category": "LLM Engineer",
+    "tokens": [
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "llm",
+        "weight": 1.25
+      }
+    ]
+  },
+  {
+    "category": "Machine Learning Engineer",
+    "tokens": [
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "learning",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "machine",
+        "weight": 1.5833333333333335
+      }
+    ]
+  },
+  {
+    "category": "Manager",
+    "tokens": [
+      {
+        "token": "manager",
+        "weight": 0.03
+      }
+    ]
+  },
+  {
+    "category": "Marketing",
+    "tokens": [
+      {
+        "token": "demandgen",
+        "weight": 3.0
+      },
+      {
+        "token": "lifecyclemarketing",
+        "weight": 3.0
+      },
+      {
+        "token": "marketer",
+        "weight": 3.0
+      },
+      {
+        "token": "marketing",
+        "weight": 1.75
+      },
+      {
+        "token": "sem",
+        "weight": 3.0
+      },
+      {
+        "token": "seo",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Marketing Analyst",
+    "tokens": [
+      {
+        "token": "analyst",
+        "weight": 0.01
+      },
+      {
+        "token": "marketing",
+        "weight": 1.75
+      }
+    ]
+  },
+  {
+    "category": "Marketing Operations",
+    "tokens": [
+      {
+        "token": "marketing",
+        "weight": 1.75
+      },
+      {
+        "token": "operations",
+        "weight": 1.8333333333333335
+      }
+    ]
+  },
+  {
+    "category": "Mechanical Engineer",
+    "tokens": [
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "mechanical",
+        "weight": 1.8333333333333335
+      }
+    ]
+  },
+  {
+    "category": "Medical Billing and Coding",
+    "tokens": [
+      {
+        "token": "and",
+        "weight": 0.0
+      },
+      {
+        "token": "billing",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "coding",
+        "weight": 1.5
+      },
+      {
+        "token": "medical",
+        "weight": 1.5833333333333335
+      }
+    ]
+  },
+  {
+    "category": "Medical Director",
+    "tokens": [
+      {
+        "token": "director",
+        "weight": 0.01
+      },
+      {
+        "token": "medical",
+        "weight": 1.5833333333333335
+      }
+    ]
+  },
+  {
+    "category": "Medical Reviewer",
+    "tokens": [
+      {
+        "token": "medical",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "reviewer",
+        "weight": 1.6666666666666665
+      }
+    ]
+  },
+  {
+    "category": "Medical writer",
+    "tokens": [
+      {
+        "token": "medical",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "medicalwriter",
+        "weight": 3.0
+      },
+      {
+        "token": "writer",
+        "weight": 0.1
+      }
+    ]
+  },
+  {
+    "category": "Network Engineer",
+    "tokens": [
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "network",
+        "weight": 1.5833333333333335
+      }
+    ]
+  },
+  {
+    "category": "Network Operations",
+    "tokens": [
+      {
+        "token": "network",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "operations",
+        "weight": 1.8333333333333335
+      }
+    ]
+  },
+  {
+    "category": "NLP Engineer",
+    "tokens": [
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "nlp",
+        "weight": 1.25
+      }
+    ]
+  },
+  {
+    "category": "Notary",
+    "tokens": [
+      {
+        "token": "notary",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Onboarding Specialist",
+    "tokens": [
+      {
+        "token": "onboarding",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "specialist",
+        "weight": 0.1
+      }
+    ]
+  },
+  {
+    "category": "Operations",
+    "tokens": [
+      {
+        "token": "operations",
+        "weight": 1.8333333333333335
+      }
+    ]
+  },
+  {
+    "category": "Outside Sales",
+    "tokens": [
+      {
+        "token": "outside",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "sales",
+        "weight": 1.4166666666666667
+      }
+    ]
+  },
+  {
+    "category": "Paralegal",
+    "tokens": [
+      {
+        "token": "paralegal",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Payroll",
+    "tokens": [
+      {
+        "token": "payroll",
+        "weight": 1.5833333333333335
+      }
+    ]
+  },
+  {
+    "category": "People Operations",
+    "tokens": [
+      {
+        "token": "operations",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "people",
+        "weight": 1.5
+      }
+    ]
+  },
+  {
+    "category": "Performance Marketing",
+    "tokens": [
+      {
+        "token": "marketing",
+        "weight": 1.75
+      },
+      {
+        "token": "performance",
+        "weight": 1.9166666666666665
+      }
+    ]
+  },
+  {
+    "category": "Platform Engineer",
+    "tokens": [
+      {
+        "token": "developer",
+        "weight": 0.15
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "infrastructure",
+        "weight": 0.45
+      },
+      {
+        "token": "platform",
+        "weight": 1.6666666666666665
+      }
+    ]
+  },
+  {
+    "category": "Pre-sales Engineer",
+    "tokens": [
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "pre",
+        "weight": 1.25
+      },
+      {
+        "token": "sales",
+        "weight": 1.4166666666666667
+      }
+    ]
+  },
+  {
+    "category": "Pricing Analyst",
+    "tokens": [
+      {
+        "token": "analyst",
+        "weight": 0.01
+      },
+      {
+        "token": "pricing",
+        "weight": 1.5833333333333335
+      }
+    ]
+  },
+  {
+    "category": "Procurement",
+    "tokens": [
+      {
+        "token": "procurement",
+        "weight": 1.9166666666666665
+      }
+    ]
+  },
+  {
+    "category": "Producer",
+    "tokens": [
+      {
+        "token": "producer",
+        "weight": 0.03
+      }
+    ]
+  },
+  {
+    "category": "Product Adoption Specialist",
+    "tokens": [
+      {
+        "token": "adoption",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "product",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "specialist",
+        "weight": 0.1
+      }
+    ]
+  },
+  {
+    "category": "Product Analyst",
+    "tokens": [
+      {
+        "token": "analyst",
+        "weight": 0.01
+      },
+      {
+        "token": "product",
+        "weight": 1.5833333333333335
+      }
+    ]
+  },
+  {
+    "category": "Product Designer",
+    "tokens": [
+      {
+        "token": "design",
+        "weight": 0.2
+      },
+      {
+        "token": "designer",
+        "weight": 0.01
+      },
+      {
+        "token": "product",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "ui",
+        "weight": 1.25
+      },
+      {
+        "token": "ux",
+        "weight": 1.25
+      }
+    ]
+  },
+  {
+    "category": "Product Manager",
+    "tokens": [
+      {
+        "token": "manager",
+        "weight": 0.01
+      },
+      {
+        "token": "product",
+        "weight": 1.5833333333333335
+      }
+    ]
+  },
+  {
+    "category": "Product Marketing",
+    "tokens": [
+      {
+        "token": "marketing",
+        "weight": 1.75
+      },
+      {
+        "token": "product",
+        "weight": 1.5833333333333335
+      }
+    ]
+  },
+  {
+    "category": "Product Operations",
+    "tokens": [
+      {
+        "token": "operations",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "product",
+        "weight": 1.5833333333333335
+      }
+    ]
+  },
+  {
+    "category": "Product Specialist",
+    "tokens": [
+      {
+        "token": "product",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "specialist",
+        "weight": 0.1
+      }
+    ]
+  },
+  {
+    "category": "Production Engineer",
+    "tokens": [
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "production",
+        "weight": 1.8333333333333335
+      }
+    ]
+  },
+  {
+    "category": "Program Manager",
+    "tokens": [
+      {
+        "token": "manager",
+        "weight": 0.01
+      },
+      {
+        "token": "program",
+        "weight": 1.5833333333333335
+      }
+    ]
+  },
+  {
+    "category": "Project Manager",
+    "tokens": [
+      {
+        "token": "manager",
+        "weight": 0.01
+      },
+      {
+        "token": "pmo",
+        "weight": 3.0
+      },
+      {
+        "token": "pmp",
+        "weight": 3.0
+      },
+      {
+        "token": "project",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "scrummaster",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Proposal Manager",
+    "tokens": [
+      {
+        "token": "manager",
+        "weight": 0.01
+      },
+      {
+        "token": "proposal",
+        "weight": 1.6666666666666665
+      }
+    ]
+  },
+  {
+    "category": "Public Relations",
+    "tokens": [
+      {
+        "token": "public",
+        "weight": 1.5
+      },
+      {
+        "token": "relations",
+        "weight": 1.75
+      }
+    ]
+  },
+  {
+    "category": "QA Automation Engineer",
+    "tokens": [
+      {
+        "token": "assurance",
+        "weight": 1.75
+      },
+      {
+        "token": "automation",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "cypress",
+        "weight": 3.0
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "playwright",
+        "weight": 3.0
+      },
+      {
+        "token": "qa",
+        "weight": 1.1666666666666667
+      },
+      {
+        "token": "quality",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "selenium",
+        "weight": 3.0
+      },
+      {
+        "token": "test",
+        "weight": 0.25
+      },
+      {
+        "token": "tester",
+        "weight": 0.6
+      },
+      {
+        "token": "testing",
+        "weight": 0.35
+      },
+      {
+        "token": "webdriverio",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "QA Engineer",
+    "tokens": [
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "qa",
+        "weight": 1.1666666666666667
+      },
+      {
+        "token": "quality",
+        "weight": 0.45
+      },
+      {
+        "token": "test",
+        "weight": 0.25
+      },
+      {
+        "token": "tester",
+        "weight": 0.6
+      },
+      {
+        "token": "testing",
+        "weight": 0.35
+      }
+    ]
+  },
+  {
+    "category": "Recruitment",
+    "tokens": [
+      {
+        "token": "recruitment",
+        "weight": 1.9166666666666665
+      }
+    ]
+  },
+  {
+    "category": "Research Analyst",
+    "tokens": [
+      {
+        "token": "analyst",
+        "weight": 0.01
+      },
+      {
+        "token": "research",
+        "weight": 1.6666666666666665
+      }
+    ]
+  },
+  {
+    "category": "Research Engineer",
+    "tokens": [
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "research",
+        "weight": 1.6666666666666665
+      }
+    ]
+  },
+  {
+    "category": "Research Scientist",
+    "tokens": [
+      {
+        "token": "research",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "scientist",
+        "weight": 1.75
+      }
+    ]
+  },
+  {
+    "category": "Revenue Operations",
+    "tokens": [
+      {
+        "token": "operations",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "revenue",
+        "weight": 1.5833333333333335
+      }
+    ]
+  },
+  {
+    "category": "Risk",
+    "tokens": [
+      {
+        "token": "risk",
+        "weight": 1.3333333333333333
+      }
+    ]
+  },
+  {
+    "category": "Robotics",
+    "tokens": [
+      {
+        "token": "robotics",
+        "weight": 1.6666666666666665
+      }
+    ]
+  },
+  {
+    "category": "Sales",
+    "tokens": [
+      {
+        "token": "prospecting",
+        "weight": 3.0
+      },
+      {
+        "token": "quota",
+        "weight": 3.0
+      },
+      {
+        "token": "sales",
+        "weight": 1.4166666666666667
+      },
+      {
+        "token": "salespeople",
+        "weight": 3.0
+      },
+      {
+        "token": "salesperson",
+        "weight": 3.0
+      },
+      {
+        "token": "seller",
+        "weight": 3.0
+      },
+      {
+        "token": "selling",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Sales Development Rep",
+    "tokens": [
+      {
+        "token": "bdr",
+        "weight": 3.0
+      },
+      {
+        "token": "development",
+        "weight": 1.9166666666666665
+      },
+      {
+        "token": "rep",
+        "weight": 1.25
+      },
+      {
+        "token": "sales",
+        "weight": 1.4166666666666667
+      },
+      {
+        "token": "salesdevelopment",
+        "weight": 3.0
+      },
+      {
+        "token": "sdr",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Sales Engineer",
+    "tokens": [
+      {
+        "token": "developer",
+        "weight": 0.1
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "pre-sales",
+        "weight": 3.0
+      },
+      {
+        "token": "presales",
+        "weight": 3.0
+      },
+      {
+        "token": "sales",
+        "weight": 1.4166666666666667
+      },
+      {
+        "token": "solutions",
+        "weight": 0.2
+      }
+    ]
+  },
+  {
+    "category": "Sales Operations Manager",
+    "tokens": [
+      {
+        "token": "manager",
+        "weight": 0.01
+      },
+      {
+        "token": "operations",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "sales",
+        "weight": 1.4166666666666667
+      }
+    ]
+  },
+  {
+    "category": "Salesforce Administrator",
+    "tokens": [
+      {
+        "token": "administrator",
+        "weight": 0.2
+      },
+      {
+        "token": "salesforce",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "salesforceadmin",
+        "weight": 3.0
+      },
+      {
+        "token": "sfadmin",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Salesforce Analyst",
+    "tokens": [
+      {
+        "token": "analyst",
+        "weight": 0.01
+      },
+      {
+        "token": "salesforce",
+        "weight": 1.8333333333333335
+      }
+    ]
+  },
+  {
+    "category": "Salesforce Consultant",
+    "tokens": [
+      {
+        "token": "consultant",
+        "weight": 0.01
+      },
+      {
+        "token": "salesforce",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "salesforceconsultant",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Salesforce Developer",
+    "tokens": [
+      {
+        "token": "apex",
+        "weight": 3.0
+      },
+      {
+        "token": "developer",
+        "weight": 0.2
+      },
+      {
+        "token": "salesforce",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "salesforcedeveloper",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "SAP",
+    "tokens": [
+      {
+        "token": "sap",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Scrum Master",
+    "tokens": [
+      {
+        "token": "master",
+        "weight": 1.5
+      },
+      {
+        "token": "scrum",
+        "weight": 1.4166666666666667
+      }
+    ]
+  },
+  {
+    "category": "SDET",
+    "tokens": [
+      {
+        "token": "developer",
+        "weight": 0.25
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "sdet",
+        "weight": 3.0
+      },
+      {
+        "token": "software",
+        "weight": 0.5
+      },
+      {
+        "token": "test",
+        "weight": 0.85
+      },
+      {
+        "token": "testing",
+        "weight": 0.7
+      }
+    ]
+  },
+  {
+    "category": "Security Analyst",
+    "tokens": [
+      {
+        "token": "analyst",
+        "weight": 0.01
+      },
+      {
+        "token": "forensics",
+        "weight": 3.0
+      },
+      {
+        "token": "security",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "soc",
+        "weight": 3.0
+      },
+      {
+        "token": "threatintel",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Security Engineer",
+    "tokens": [
+      {
+        "token": "appsec",
+        "weight": 3.0
+      },
+      {
+        "token": "devsecops",
+        "weight": 3.0
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "iam",
+        "weight": 3.0
+      },
+      {
+        "token": "infosec",
+        "weight": 3.0
+      },
+      {
+        "token": "security",
+        "weight": 1.6666666666666665
+      }
+    ]
+  },
+  {
+    "category": "Security Operations",
+    "tokens": [
+      {
+        "token": "operations",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "security",
+        "weight": 1.6666666666666665
+      }
+    ]
+  },
+  {
+    "category": "SEO Marketing",
+    "tokens": [
+      {
+        "token": "marketing",
+        "weight": 1.75
+      },
+      {
+        "token": "seo",
+        "weight": 1.25
+      }
+    ]
+  },
+  {
+    "category": "ServiceNow",
+    "tokens": [
+      {
+        "token": "servicenow",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Smart Contract Engineer",
+    "tokens": [
+      {
+        "token": "contract",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "smart",
+        "weight": 1.4166666666666667
+      }
+    ]
+  },
+  {
+    "category": "Social Media Manager",
+    "tokens": [
+      {
+        "token": "manager",
+        "weight": 0.01
+      },
+      {
+        "token": "media",
+        "weight": 1.4166666666666667
+      },
+      {
+        "token": "social",
+        "weight": 1.5
+      }
+    ]
+  },
+  {
+    "category": "Software Engineer",
+    "tokens": [
+      {
+        "token": "coder",
+        "weight": 0.15
+      },
+      {
+        "token": "developer",
+        "weight": 0.45
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "programmer",
+        "weight": 0.35
+      },
+      {
+        "token": "software",
+        "weight": 1.6666666666666665
+      }
+    ]
+  },
+  {
+    "category": "Solutions Engineer",
+    "tokens": [
+      {
+        "token": "architect",
+        "weight": 0.01
+      },
+      {
+        "token": "developer",
+        "weight": 0.1
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "solutions",
+        "weight": 0.1
+      }
+    ]
+  },
+  {
+    "category": "Strategy",
+    "tokens": [
+      {
+        "token": "strategy",
+        "weight": 1.6666666666666665
+      }
+    ]
+  },
+  {
+    "category": "Supply Chain",
+    "tokens": [
+      {
+        "token": "chain",
+        "weight": 1.4166666666666667
+      },
+      {
+        "token": "supply",
+        "weight": 1.5
+      }
+    ]
+  },
+  {
+    "category": "Support Engineer",
+    "tokens": [
+      {
+        "token": "developer",
+        "weight": 0.1
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "support",
+        "weight": 0.1
+      },
+      {
+        "token": "troubleshooting",
+        "weight": 0.45
+      }
+    ]
+  },
+  {
+    "category": "System Administrator",
+    "tokens": [
+      {
+        "token": "administrator",
+        "weight": 0.2
+      },
+      {
+        "token": "system",
+        "weight": 1.5
+      }
+    ]
+  },
+  {
+    "category": "Systems Engineer",
+    "tokens": [
+      {
+        "token": "administrator",
+        "weight": 0.15
+      },
+      {
+        "token": "developer",
+        "weight": 0.1
+      },
+      {
+        "token": "engineer",
+        "weight": 0.01
+      },
+      {
+        "token": "systems",
+        "weight": 1.5833333333333335
+      }
+    ]
+  },
+  {
+    "category": "Tax",
+    "tokens": [
+      {
+        "token": "tax",
+        "weight": 1.25
+      }
+    ]
+  },
+  {
+    "category": "Technical Account Manager",
+    "tokens": [
+      {
+        "token": "account",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "manager",
+        "weight": 0.01
+      },
+      {
+        "token": "technical",
+        "weight": 0.1
+      }
+    ]
+  },
+  {
+    "category": "Technical Customer Success",
+    "tokens": [
+      {
+        "token": "customer",
+        "weight": 1.6666666666666665
+      },
+      {
+        "token": "success",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "technical",
+        "weight": 0.1
+      }
+    ]
+  },
+  {
+    "category": "Technical Product Manager",
+    "tokens": [
+      {
+        "token": "manager",
+        "weight": 0.01
+      },
+      {
+        "token": "product",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "technical",
+        "weight": 0.1
+      }
+    ]
+  },
+  {
+    "category": "Technical Program Manager",
+    "tokens": [
+      {
+        "token": "manager",
+        "weight": 0.01
+      },
+      {
+        "token": "program",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "technical",
+        "weight": 0.1
+      }
+    ]
+  },
+  {
+    "category": "Technical Project Manager",
+    "tokens": [
+      {
+        "token": "manager",
+        "weight": 0.01
+      },
+      {
+        "token": "project",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "technical",
+        "weight": 0.1
+      },
+      {
+        "token": "technicalprogrammanager",
+        "weight": 3.0
+      },
+      {
+        "token": "technicalprojectmanager",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Technical Recruiter",
+    "tokens": [
+      {
+        "token": "headhunter",
+        "weight": 3.0
+      },
+      {
+        "token": "recruiter",
+        "weight": 3.0
+      },
+      {
+        "token": "sourcer",
+        "weight": 3.0
+      },
+      {
+        "token": "talentacquisition",
+        "weight": 3.0
+      },
+      {
+        "token": "technical",
+        "weight": 0.1
+      }
+    ]
+  },
+  {
+    "category": "Technical Writer",
+    "tokens": [
+      {
+        "token": "technical",
+        "weight": 0.1
+      },
+      {
+        "token": "writer",
+        "weight": 0.1
+      }
+    ]
+  },
+  {
+    "category": "Therapist",
+    "tokens": [
+      {
+        "token": "counselor",
+        "weight": 3.0
+      },
+      {
+        "token": "therapist",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Threat Intelligence Specialist",
+    "tokens": [
+      {
+        "token": "intelligence",
+        "weight": 2.0
+      },
+      {
+        "token": "specialist",
+        "weight": 0.1
+      },
+      {
+        "token": "threat",
+        "weight": 1.5
+      }
+    ]
+  },
+  {
+    "category": "Translator",
+    "tokens": [
+      {
+        "token": "localizer",
+        "weight": 3.0
+      },
+      {
+        "token": "translator",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Underwriter",
+    "tokens": [
+      {
+        "token": "underwriter",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "User Researcher",
+    "tokens": [
+      {
+        "token": "researcher",
+        "weight": 1.8333333333333335
+      },
+      {
+        "token": "user",
+        "weight": 1.3333333333333333
+      }
+    ]
+  },
+  {
+    "category": "Veterinarian",
+    "tokens": [
+      {
+        "token": "veterinarian",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Vice President",
+    "tokens": [
+      {
+        "token": "president",
+        "weight": 1.75
+      },
+      {
+        "token": "vice",
+        "weight": 1.3333333333333333
+      }
+    ]
+  },
+  {
+    "category": "Video Editor",
+    "tokens": [
+      {
+        "token": "editor",
+        "weight": 1.5
+      },
+      {
+        "token": "video",
+        "weight": 1.4166666666666667
+      }
+    ]
+  },
+  {
+    "category": "Web Designer",
+    "tokens": [
+      {
+        "token": "design",
+        "weight": 0.2
+      },
+      {
+        "token": "designer",
+        "weight": 0.01
+      },
+      {
+        "token": "shopify",
+        "weight": 3.0
+      },
+      {
+        "token": "ui",
+        "weight": 0.45
+      },
+      {
+        "token": "uiux",
+        "weight": 0.7
+      },
+      {
+        "token": "ux",
+        "weight": 0.45
+      },
+      {
+        "token": "web",
+        "weight": 1.25
+      },
+      {
+        "token": "webflow",
+        "weight": 3.0
+      },
+      {
+        "token": "wordpress",
+        "weight": 3.0
+      }
+    ]
+  },
+  {
+    "category": "Web3",
+    "tokens": [
+      {
+        "token": "web3",
+        "weight": 1.3333333333333333
+      }
+    ]
+  }
+]

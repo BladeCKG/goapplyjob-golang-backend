@@ -238,6 +238,58 @@ func TestNormalizeRoleTitleForExactMatchHandlesCommonAbbreviations(t *testing.T)
 	}
 }
 
+func TestCategorySignalWeightBoostsSalesForSalespersonTitles(t *testing.T) {
+	score := categorySignalWeight("salesperson tech services", "Sales Representative", "Sales")
+	if score <= 0 {
+		t.Fatalf("expected positive category signal score, got %v", score)
+	}
+}
+
+func TestCategorySignalWeightUsesConfiguredCategoryTokens(t *testing.T) {
+	score := categorySignalWeight("sales software project managing engineer", "Any", "Sales")
+	if score <= 0 {
+		t.Fatalf("expected positive category signal score from configured category tokens, got %v", score)
+	}
+}
+
+func TestCategorySignalWeightGivesGenericEngineerLowPositiveWeight(t *testing.T) {
+	score := categorySignalWeight("principal engineer", "Engineer", "Engineering")
+	if score <= 0 {
+		t.Fatalf("expected low positive category signal score for generic engineer, got %v", score)
+	}
+}
+
+func TestCategorySignalWeightPrefersGenericEngineerOverSpecificEngineerWhenOnlyEngineerMatches(t *testing.T) {
+	engineerScore := categorySignalWeight("washingmachine engineer", "Engineer", "Engineering")
+	backendScore := categorySignalWeight("washingmachine engineer", "Backend Engineer", "Engineering")
+	if engineerScore <= backendScore {
+		t.Fatalf("expected generic engineer score %v to exceed backend engineer score %v", engineerScore, backendScore)
+	}
+}
+
+func TestCategorySignalWeightPrefersGenericDesignerOverSpecificDesignerWhenOnlyDesignerMatches(t *testing.T) {
+	designerScore := categorySignalWeight("washingmachine designer", "Designer", "Design")
+	webDesignerScore := categorySignalWeight("washingmachine designer", "Web Designer", "Design")
+	if designerScore <= webDesignerScore {
+		t.Fatalf("expected generic designer score %v to exceed web designer score %v", designerScore, webDesignerScore)
+	}
+}
+
+func TestCategorySignalWeightUsesDeveloperForSoftwareEngineer(t *testing.T) {
+	softwareScore := categorySignalWeight("react web software developer", "Software Engineer", "Engineering")
+	webDesignerScore := categorySignalWeight("react web software developer", "Web Designer", "Design")
+	if softwareScore <= webDesignerScore {
+		t.Fatalf("expected software engineer score %v to exceed web designer score %v", softwareScore, webDesignerScore)
+	}
+}
+
+func TestCategorySignalWeightUsesDeveloperForBackendEngineer(t *testing.T) {
+	score := categorySignalWeight("senior backend developer", "Backend Engineer", "Engineering")
+	if score <= 0 {
+		t.Fatalf("expected positive category signal score for backend developer, got %v", score)
+	}
+}
+
 func TestFindSimilarRemoteCategoriesPrefersExactNormalizedRoleTitle(t *testing.T) {
 	db, err := database.Open(testDatabaseURL(t, "test_parsed_exact_normalized"))
 	if err != nil {
@@ -265,6 +317,38 @@ func TestFindSimilarRemoteCategoriesPrefersExactNormalizedRoleTitle(t *testing.T
 	}
 	if title != "DevOps Engineer" || function != "Engineering" {
 		t.Fatalf("expected exact normalized match, got %q / %q", title, function)
+	}
+}
+
+func TestFindSimilarRemoteCategoriesPrefersSalesCandidateWhenSalespersonSignalExists(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_salesperson_signal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES
+		(1, 'remoterocketship', 'https://remote.example/jobs/software', ?, true, false, true, 0, '{}'),
+		(2, 'remoterocketship', 'https://remote.example/jobs/sales', ?, true, false, true, 0, '{}')`,
+		time.Now().UTC().Format(time.RFC3339), time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, role_title, categorized_job_title, categorized_job_function, updated_at) VALUES
+		(1, 'Tech Services Software Engineer', 'Software Engineer', 'Engineering', ?),
+		(2, 'Wholesale Parts Salesperson', 'Sales Representative', 'Sales', ?)`,
+		time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(Config{}, db)
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Salesperson - Tech Services (Remote)", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if title != "Sales Representative" || function != "Sales" {
+		t.Fatalf("expected Sales Representative/Sales, got %q / %q", title, function)
 	}
 }
 
