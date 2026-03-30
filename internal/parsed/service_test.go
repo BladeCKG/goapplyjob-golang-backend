@@ -256,52 +256,52 @@ func TestNormalizeRoleTitleForExactMatchHandlesCommonAbbreviations(t *testing.T)
 }
 
 func TestCategorySignalWeightBoostsSalesForSalespersonTitles(t *testing.T) {
-	score := categorySignalWeight("salesperson tech services", "Sales Representative", "Sales")
+	score := categorySignalWeightFromCatalog(getCategorySignalCatalog(""), "salesperson tech services", "Sales Representative", "Sales")
 	if score <= 0 {
 		t.Fatalf("expected positive category signal score, got %v", score)
 	}
 }
 
 func TestCategorySignalWeightUsesConfiguredCategoryTokens(t *testing.T) {
-	score := categorySignalWeight("sales software project managing engineer", "Any", "Sales")
+	score := categorySignalWeightFromCatalog(getCategorySignalCatalog(""), "sales software project managing engineer", "Any", "Sales")
 	if score <= 0 {
 		t.Fatalf("expected positive category signal score from configured category tokens, got %v", score)
 	}
 }
 
 func TestCategorySignalWeightGivesGenericEngineerLowPositiveWeight(t *testing.T) {
-	score := categorySignalWeight("principal engineer", "Engineer", "Engineering")
+	score := categorySignalWeightFromCatalog(getCategorySignalCatalog(""), "principal engineer", "Engineer", "Engineering")
 	if score <= 0 {
 		t.Fatalf("expected low positive category signal score for generic engineer, got %v", score)
 	}
 }
 
 func TestCategorySignalWeightPrefersGenericEngineerOverSpecificEngineerWhenOnlyEngineerMatches(t *testing.T) {
-	engineerScore := categorySignalWeight("washingmachine engineer", "Engineer", "Engineering")
-	backendScore := categorySignalWeight("washingmachine engineer", "Backend Engineer", "Engineering")
+	engineerScore := categorySignalWeightFromCatalog(getCategorySignalCatalog(""), "washingmachine engineer", "Engineer", "Engineering")
+	backendScore := categorySignalWeightFromCatalog(getCategorySignalCatalog(""), "washingmachine engineer", "Backend Engineer", "Engineering")
 	if engineerScore <= backendScore {
 		t.Fatalf("expected generic engineer score %v to exceed backend engineer score %v", engineerScore, backendScore)
 	}
 }
 
 func TestCategorySignalWeightPrefersGenericDesignerOverSpecificDesignerWhenOnlyDesignerMatches(t *testing.T) {
-	designerScore := categorySignalWeight("washingmachine designer", "Designer", "Design")
-	webDesignerScore := categorySignalWeight("washingmachine designer", "Web Designer", "Design")
+	designerScore := categorySignalWeightFromCatalog(getCategorySignalCatalog(""), "washingmachine designer", "Designer", "Design")
+	webDesignerScore := categorySignalWeightFromCatalog(getCategorySignalCatalog(""), "washingmachine designer", "Web Designer", "Design")
 	if designerScore <= webDesignerScore {
 		t.Fatalf("expected generic designer score %v to exceed web designer score %v", designerScore, webDesignerScore)
 	}
 }
 
 func TestCategorySignalWeightUsesDeveloperForSoftwareEngineer(t *testing.T) {
-	softwareScore := categorySignalWeight("react web software developer", "Software Engineer", "Engineering")
-	webDesignerScore := categorySignalWeight("react web software developer", "Web Designer", "Design")
+	softwareScore := categorySignalWeightFromCatalog(getCategorySignalCatalog(""), "react web software developer", "Software Engineer", "Engineering")
+	webDesignerScore := categorySignalWeightFromCatalog(getCategorySignalCatalog(""), "react web software developer", "Web Designer", "Design")
 	if softwareScore <= webDesignerScore {
 		t.Fatalf("expected software engineer score %v to exceed web designer score %v", softwareScore, webDesignerScore)
 	}
 }
 
 func TestCategorySignalWeightUsesDeveloperForBackendEngineer(t *testing.T) {
-	score := categorySignalWeight("senior backend developer", "Backend Engineer", "Engineering")
+	score := categorySignalWeightFromCatalog(getCategorySignalCatalog(""), "senior backend developer", "Backend Engineer", "Engineering")
 	if score <= 0 {
 		t.Fatalf("expected positive category signal score for backend developer, got %v", score)
 	}

@@ -9,8 +9,6 @@ import (
 func resetCategorySignalCatalogForTest() {
 	categorySignalCatalogMu.Lock()
 	categorySignalCatalogDefault = nil
-	categorySignalCatalogByURL = map[string]map[string]categorySignalTerms{}
-	categorySignalCatalogETagByURL = map[string]string{}
 	categorySignalCatalogMu.Unlock()
 }
 
@@ -56,16 +54,16 @@ func TestCategorySignalCatalogReloadsFromExternalURL(t *testing.T) {
 
 	resetCategorySignalCatalogForTest()
 
-	if score := categorySignalWeightWithURL(server.URL, "alpha", "Engineer", "Engineering"); score != 0.5 {
+	if score := categorySignalWeightFromCatalog(getCategorySignalCatalog(server.URL), "alpha", "Engineer", "Engineering"); score != 0.5 {
 		t.Fatalf("expected initial external score 0.5, got %v", score)
 	}
 
 	version = "v2"
 
-	if score := categorySignalWeightWithURL(server.URL, "alpha", "Engineer", "Engineering"); score != 0 {
+	if score := categorySignalWeightFromCatalog(getCategorySignalCatalog(server.URL), "alpha", "Engineer", "Engineering"); score != 0 {
 		t.Fatalf("expected old external token to stop matching after reload, got %v", score)
 	}
-	if score := categorySignalWeightWithURL(server.URL, "beta", "Engineer", "Engineering"); score != 0.8 {
+	if score := categorySignalWeightFromCatalog(getCategorySignalCatalog(server.URL), "beta", "Engineer", "Engineering"); score != 0.8 {
 		t.Fatalf("expected reloaded external score 0.8, got %v", score)
 	}
 }

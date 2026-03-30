@@ -167,9 +167,11 @@ var normalizationReplacements = []struct {
 }
 
 type Service struct {
-	DB             *database.DB
-	EnabledSources map[string]struct{}
-	Config         Config
+	DB                    *database.DB
+	EnabledSources        map[string]struct{}
+	Config                Config
+	categorySignalCatalog map[string]categorySignalTerms
+	techStackExtractor    techstack.Extractor
 }
 
 type Config struct {
@@ -182,7 +184,14 @@ type Config struct {
 	TechStackCatalogURL     string
 }
 
-func New(cfg Config, db *database.DB) *Service { return &Service{DB: db, Config: cfg} }
+func New(cfg Config, db *database.DB) *Service {
+	return &Service{
+		DB:                    db,
+		Config:                cfg,
+		categorySignalCatalog: getCategorySignalCatalog(cfg.CategorySignalTokensURL),
+		techStackExtractor:    techstack.NewExtractor(cfg.TechStackCatalogURL),
+	}
+}
 
 func (s *Service) RunOnce(ctx context.Context) (int, error) {
 	batchSize := s.Config.BatchSize
@@ -538,6 +547,7 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 	for token := range sourceSpecificTokens {
 		sourceSpecificWeights[token] = tokenSpecificityWeight(token)
 	}
+	categorySignalCatalog := s.categorySignalCatalog
 
 	// Fast exact-title path.
 	normalizedInputTitle := strings.ToLower(strings.TrimSpace(roleTitle))
@@ -984,7 +994,7 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 					genericOneWordCategoryPenalty = 1
 				}
 
-				categorySignalScore := categorySignalWeightWithURL(s.Config.CategorySignalTokensURL, sourceNormalizedTitle, candidateTitle.String, candidateFunction.String)
+				categorySignalScore := categorySignalWeightFromCatalog(categorySignalCatalog, sourceNormalizedTitle, candidateTitle.String, candidateFunction.String)
 
 				rank := matchRank{
 					exactNormalizedTitleMatch:     exactNormalizedTitleMatch,
@@ -1549,7 +1559,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			}
 		}
 		normalizedTechStack = extractManualTechStackIfNeeded(
-			techstack.NewExtractor(s.Config.TechStackCatalogURL),
+			s.techStackExtractor,
 			stringValue(payload["roleDescription"]),
 			stringValue(payload["roleRequirements"]),
 			normalizedTechStack,

@@ -11,9 +11,6 @@ func resetMatchersForTest() {
 	catalogMu.Lock()
 	defaultMatchers = nil
 	defaultCanonicals = nil
-	matchersByURL = map[string][]matcherEntry{}
-	canonicalsByURL = map[string]map[string]string{}
-	catalogETagByURL = map[string]string{}
 	catalogMu.Unlock()
 }
 
@@ -146,6 +143,7 @@ func TestExtractReloadsFromExternalCatalog(t *testing.T) {
 	}
 
 	version = "v2"
+	extractor = NewExtractor(server.URL)
 
 	if got := extractor.Extract("alpha"); len(got) != 0 {
 		t.Fatalf("expected alpha to disappear after reload, got=%#v", got)

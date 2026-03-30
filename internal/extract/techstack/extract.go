@@ -36,26 +36,27 @@ var (
 	catalogMu         sync.RWMutex
 	defaultMatchers   []matcherEntry
 	defaultCanonicals map[string]string
-	matchersByURL     = map[string][]matcherEntry{}
-	canonicalsByURL   = map[string]map[string]string{}
-	catalogETagByURL  = map[string]string{}
 )
 
 type Extractor struct {
-	catalogURL string
+	matchers   []matcherEntry
+	canonicals map[string]string
 }
 
 func NewExtractor(catalogURL string) Extractor {
-	return Extractor{catalogURL: strings.TrimSpace(catalogURL)}
+	matchers, canonicals := loadCatalog(catalogURL)
+	return Extractor{
+		matchers:   matchers,
+		canonicals: canonicals,
+	}
 }
 
 func (e Extractor) Extract(text string) []string {
-	matchers := getMatchers(e.catalogURL)
 	if strings.TrimSpace(text) == "" {
 		return []string{}
 	}
-	candidates := make([]matchCandidate, 0, len(matchers))
-	for _, entry := range matchers {
+	candidates := make([]matchCandidate, 0, len(e.matchers))
+	for _, entry := range e.matchers {
 		var best *matchCandidate
 		for _, pattern := range entry.patterns {
 			match := pattern.FindStringIndex(text)
@@ -120,94 +121,56 @@ func (e Extractor) ExactCanonical(value string) (string, bool) {
 	if normalized == "" {
 		return "", false
 	}
-	canonicals := getCanonicals(e.catalogURL)
-	canonical, ok := canonicals[normalized]
+	canonical, ok := e.canonicals[normalized]
 	return canonical, ok
 }
 
-func getMatchers(catalogURL string) []matcherEntry {
+func loadCatalog(catalogURL string) ([]matcherEntry, map[string]string) {
 	if catalogURL == "" {
 		catalogMu.RLock()
 		if defaultMatchers != nil && defaultCanonicals != nil {
 			matchers := defaultMatchers
+			canonicals := defaultCanonicals
 			catalogMu.RUnlock()
-			return matchers
+			return matchers, canonicals
 		}
 		catalogMu.RUnlock()
 
 		loaded, canonicals, err := buildCatalog(catalogJSON)
 		if err != nil {
-			return []matcherEntry{}
+			return []matcherEntry{}, map[string]string{}
 		}
 
 		catalogMu.Lock()
 		defaultMatchers = loaded
 		defaultCanonicals = canonicals
 		catalogMu.Unlock()
-		return loaded
+		return loaded, canonicals
 	}
-
-	catalogMu.RLock()
-	prevETag := catalogETagByURL[catalogURL]
-	catalogMu.RUnlock()
 
 	req, err := http.NewRequest(http.MethodGet, catalogURL, nil)
 	if err != nil {
-		return []matcherEntry{}
-	}
-	if prevETag != "" {
-		req.Header.Set("If-None-Match", prevETag)
+		return []matcherEntry{}, map[string]string{}
 	}
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return []matcherEntry{}
+		return []matcherEntry{}, map[string]string{}
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotModified {
-		catalogMu.RLock()
-		matchers := matchersByURL[catalogURL]
-		catalogMu.RUnlock()
-		if matchers == nil {
-			return []matcherEntry{}
-		}
-		return matchers
-	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return []matcherEntry{}
+		return []matcherEntry{}, map[string]string{}
 	}
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return []matcherEntry{}
+		return []matcherEntry{}, map[string]string{}
 	}
 	loaded, canonicals, err := buildCatalog(raw)
 	if err != nil {
-		return []matcherEntry{}
+		return []matcherEntry{}, map[string]string{}
 	}
-
-	catalogMu.Lock()
-	matchersByURL[catalogURL] = loaded
-	canonicalsByURL[catalogURL] = canonicals
-	catalogETagByURL[catalogURL] = resp.Header.Get("ETag")
-	catalogMu.Unlock()
-	return loaded
-}
-
-func getCanonicals(catalogURL string) map[string]string {
-	_ = getMatchers(catalogURL)
-	catalogMu.RLock()
-	defer catalogMu.RUnlock()
-	if catalogURL == "" {
-		if defaultCanonicals == nil {
-			return map[string]string{}
-		}
-		return defaultCanonicals
-	}
-	if canonicals := canonicalsByURL[catalogURL]; canonicals != nil {
-		return canonicals
-	}
-	return map[string]string{}
+	return loaded, canonicals
 }
 
 func buildCatalog(raw []byte) ([]matcherEntry, map[string]string, error) {
