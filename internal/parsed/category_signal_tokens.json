@@ -1623,12 +1623,16 @@
         "token": "engineer",
         "weight": 0.03
       },
-      {
-        "token": "engineers",
-        "weight": 0.03
-      }
-    ]
-  },
+        {
+          "token": "engineers",
+          "weight": 0.03
+        },
+        {
+          "token": "engineering",
+          "weight": 0.2
+        }
+      ]
+    },
   {
     "category": "Engineering Manager",
     "tokens": [
@@ -1790,10 +1794,6 @@
       {
         "token": "engineers",
         "weight": 0.01
-      },
-      {
-        "token": "full",
-        "weight": 1.3333333333333333
       },
       {
         "token": "fullstack",
