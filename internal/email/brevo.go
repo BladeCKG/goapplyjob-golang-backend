@@ -87,10 +87,7 @@ func (s *Service) sendViaBrevoBatchDetailed(toEmails []string, subject, textCont
 	messageVersions := make([]map[string]any, 0, len(toEmails))
 	for _, toEmail := range toEmails {
 		messageVersions = append(messageVersions, map[string]any{
-			"to":          []map[string]any{{"email": toEmail}},
-			"htmlContent": htmlContent,
-			"textContent": textContent,
-			"subject":     subject,
+			"to": []map[string]any{{"email": toEmail}},
 		})
 	}
 	body := map[string]any{
@@ -98,6 +95,9 @@ func (s *Service) sendViaBrevoBatchDetailed(toEmails []string, subject, textCont
 			"name":  s.cfg.BrevoFromName,
 			"email": s.cfg.BrevoFromEmail,
 		},
+		"subject":         subject,
+		"htmlContent":     htmlContent,
+		"textContent":     textContent,
 		"messageVersions": messageVersions,
 	}
 	rawBody, _ := json.Marshal(body)
@@ -129,9 +129,14 @@ func (s *Service) sendViaBrevoBatchDetailed(toEmails []string, subject, textCont
 		}
 		var responseBody struct {
 			MessageIDs []string `json:"messageIds"`
+			MessageID  string   `json:"messageId"`
 		}
 		if err := json.Unmarshal(bodyText, &responseBody); err != nil {
 			return BatchDeliveryResult{}, fmt.Errorf("Brevo API batch email send failed: invalid response body")
+		}
+		messageIDs := responseBody.MessageIDs
+		if len(messageIDs) == 0 && responseBody.MessageID != "" {
+			messageIDs = []string{responseBody.MessageID}
 		}
 		items := make([]RecipientDeliveryResult, 0, len(toEmails))
 		sentCount := 0
@@ -141,9 +146,9 @@ func (s *Service) sendViaBrevoBatchDetailed(toEmails []string, subject, textCont
 				Status: "error",
 				Message: "missing provider message id",
 			}
-			if i < len(responseBody.MessageIDs) && responseBody.MessageIDs[i] != "" {
+			if i < len(messageIDs) && messageIDs[i] != "" {
 				item.Status = "accepted"
-				item.MessageID = responseBody.MessageIDs[i]
+				item.MessageID = messageIDs[i]
 				item.Message = ""
 				sentCount++
 			}

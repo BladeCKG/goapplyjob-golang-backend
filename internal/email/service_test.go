@@ -127,6 +127,15 @@ func TestSendEmailBatchViaBrevoUsesPerRecipientMessageVersions(t *testing.T) {
 	if _, hasOuterTo := gotBody["to"]; hasOuterTo {
 		t.Fatalf("did not expect outer to field in batch payload")
 	}
+	if gotBody["subject"] != "Hello" {
+		t.Fatalf("unexpected outer subject %#v", gotBody["subject"])
+	}
+	if gotBody["htmlContent"] != "<p>Hello</p>" {
+		t.Fatalf("unexpected outer htmlContent %#v", gotBody["htmlContent"])
+	}
+	if gotBody["textContent"] != "Plain text" {
+		t.Fatalf("unexpected outer textContent %#v", gotBody["textContent"])
+	}
 
 	messageVersions, ok := gotBody["messageVersions"].([]any)
 	if !ok || len(messageVersions) != 2 {
@@ -141,6 +150,45 @@ func TestSendEmailBatchViaBrevoUsesPerRecipientMessageVersions(t *testing.T) {
 	recipients, ok := firstVersion["to"].([]any)
 	if !ok || len(recipients) != 1 {
 		t.Fatalf("unexpected recipients %#v", firstVersion["to"])
+	}
+	if _, ok := firstVersion["subject"]; ok {
+		t.Fatalf("did not expect per-version subject %#v", firstVersion["subject"])
+	}
+	if _, ok := firstVersion["htmlContent"]; ok {
+		t.Fatalf("did not expect per-version htmlContent %#v", firstVersion["htmlContent"])
+	}
+}
+
+func TestSendEmailBatchViaBrevoAcceptsSingularMessageIDForSingleVersion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"messageId":"one"}`))
+	}))
+	defer server.Close()
+
+	svc := NewService(config.Config{
+		EmailProvider:  "brevo",
+		BrevoAPIKey:    "sk_test_123",
+		BrevoFromEmail: "hello@example.com",
+		BrevoFromName:  "GoApplyJob",
+		BrevoAPIURL:    server.URL,
+	})
+
+	result, err := svc.SendEmailBatchDetailed([]string{"first@example.com"}, "Hello", "Plain text", "<p>Hello</p>")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Provider != "brevo" {
+		t.Fatalf("unexpected provider %q", result.Provider)
+	}
+	if result.Status != "accepted" {
+		t.Fatalf("unexpected status %q", result.Status)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("unexpected result items %#v", result.Items)
+	}
+	if result.Items[0].Status != "accepted" || result.Items[0].MessageID != "one" {
+		t.Fatalf("unexpected item %#v", result.Items[0])
 	}
 }
 
