@@ -923,12 +923,40 @@
     "category": "Clinical Operations",
     "tokens": [
       {
+        "token": "behavioral",
+        "weight": 0.85
+      },
+      {
+        "token": "case",
+        "weight": 0.55
+      },
+      {
+        "token": "care",
+        "weight": 0.9
+      },
+      {
+        "token": "caseload",
+        "weight": 0.75
+      },
+      {
         "token": "clinical",
         "weight": 1.6666666666666665
       },
       {
+        "token": "coordination",
+        "weight": 0.85
+      },
+      {
         "token": "operations",
         "weight": 1.8333333333333335
+      },
+      {
+        "token": "patient",
+        "weight": 0.95
+      },
+      {
+        "token": "patients",
+        "weight": 0.95
       }
     ]
   },
@@ -936,8 +964,20 @@
     "category": "Clinical Research",
     "tokens": [
       {
+        "token": "care",
+        "weight": 0.75
+      },
+      {
         "token": "clinical",
         "weight": 1.6666666666666665
+      },
+      {
+        "token": "patient",
+        "weight": 0.55
+      },
+      {
+        "token": "patients",
+        "weight": 0.55
       },
       {
         "token": "research",
@@ -3764,12 +3804,40 @@
     "category": "Therapist",
     "tokens": [
       {
+        "token": "behavioral",
+        "weight": 1.5
+      },
+      {
+        "token": "care",
+        "weight": 1.25
+      },
+      {
+        "token": "counseling",
+        "weight": 1.6666666666666665
+      },
+      {
         "token": "counselor",
         "weight": 3.0
       },
       {
         "token": "counselors",
         "weight": 3.0
+      },
+      {
+        "token": "patient",
+        "weight": 1.1666666666666667
+      },
+      {
+        "token": "patients",
+        "weight": 1.1666666666666667
+      },
+      {
+        "token": "therapeutic",
+        "weight": 1.5833333333333335
+      },
+      {
+        "token": "therapy",
+        "weight": 1.5833333333333335
       },
       {
         "token": "therapist",
