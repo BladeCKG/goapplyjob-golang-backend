@@ -5,10 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"goapplyjob-golang-backend/internal/database"
-	"goapplyjob-golang-backend/internal/extract/techstack"
-	"goapplyjob-golang-backend/internal/normalize/techstacknorm"
-	"goapplyjob-golang-backend/internal/sources/plugins"
 	"log"
 	"net/mail"
 	"net/url"
@@ -20,6 +16,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/extract/techstack"
+	"goapplyjob-golang-backend/internal/normalize/techstacknorm"
+	"goapplyjob-golang-backend/internal/sources/plugins"
 
 	"golang.org/x/net/publicsuffix"
 )
@@ -99,18 +100,69 @@ var normalizationReplacements = []struct {
 }{
 	{pattern: regexp.MustCompile(`\bai\b`), replacement: "artificial intelligence"},
 	{pattern: regexp.MustCompile(`\bml\b`), replacement: "machine learning"},
+	{pattern: regexp.MustCompile(`\bnlp\b`), replacement: "natural language processing"},
+	{pattern: regexp.MustCompile(`\bllm\b`), replacement: "large language model"},
+	{pattern: regexp.MustCompile(`\bgai\b`), replacement: "generative artificial intelligence"},
 	{pattern: regexp.MustCompile(`\bdev[\s\-]*ops\b`), replacement: "devops"},
+	{pattern: regexp.MustCompile(`\brev[\s\-]*ops\b`), replacement: "revenue operations"},
+	{pattern: regexp.MustCompile(`\bfin[\s\-]*ops\b`), replacement: "finance operations"},
+	{pattern: regexp.MustCompile(`\bsec[\s\-]*ops\b`), replacement: "security operations"},
+	{pattern: regexp.MustCompile(`\bit[\s\-]*ops\b`), replacement: "information technology operations"},
 	{pattern: regexp.MustCompile(`\bdev\b`), replacement: "developer"},
+	{pattern: regexp.MustCompile(`\beng\b`), replacement: "engineer"},
+	{pattern: regexp.MustCompile(`\bmgr\b`), replacement: "manager"},
+	{pattern: regexp.MustCompile(`\bdir\b`), replacement: "director"},
+	{pattern: regexp.MustCompile(`\brep\b`), replacement: "representative"},
+	{pattern: regexp.MustCompile(`\bspec\b`), replacement: "specialist"},
+	{pattern: regexp.MustCompile(`\bassoc\b`), replacement: "associate"},
+	{pattern: regexp.MustCompile(`\basst\b`), replacement: "assistant"},
 	{pattern: regexp.MustCompile(`\bbdr\b`), replacement: "business development representative"},
 	{pattern: regexp.MustCompile(`\bsdr\b`), replacement: "sales development representative"},
 	{pattern: regexp.MustCompile(`\bae\b`), replacement: "account executive"},
+	{pattern: regexp.MustCompile(`\bam\b`), replacement: "account manager"},
 	{pattern: regexp.MustCompile(`\bcsm\b`), replacement: "customer success manager"},
+	{pattern: regexp.MustCompile(`\bcs\b`), replacement: "customer success"},
+	{pattern: regexp.MustCompile(`\bse\b`), replacement: "sales engineer"},
+	{pattern: regexp.MustCompile(`\bsa\b`), replacement: "solutions architect"},
+	{pattern: regexp.MustCompile(`\bba\b`), replacement: "business analyst"},
+	{pattern: regexp.MustCompile(`\bbi\b`), replacement: "business intelligence"},
+	{pattern: regexp.MustCompile(`\bda\b`), replacement: "data analyst"},
+	{pattern: regexp.MustCompile(`\bds\b`), replacement: "data scientist"},
 	{pattern: regexp.MustCompile(`\bqa\b`), replacement: "quality assurance"},
+	{pattern: regexp.MustCompile(`\bqe\b`), replacement: "quality engineer"},
+	{pattern: regexp.MustCompile(`\bsdet\b`), replacement: "software development engineer in test"},
 	{pattern: regexp.MustCompile(`\bswe\b`), replacement: "software engineer"},
+	{pattern: regexp.MustCompile(`\bsre\b`), replacement: "site reliability engineer"},
+	{pattern: regexp.MustCompile(`\bpmm\b`), replacement: "product marketing manager"},
+	{pattern: regexp.MustCompile(`\bpm\b`), replacement: "product manager"},
+	{pattern: regexp.MustCompile(`\bgm\b`), replacement: "general manager"},
 	{pattern: regexp.MustCompile(`\bvp\b`), replacement: "vice president"},
+	{pattern: regexp.MustCompile(`\bavp\b`), replacement: "assistant vice president"},
+	{pattern: regexp.MustCompile(`\bsvp\b`), replacement: "senior vice president"},
+	{pattern: regexp.MustCompile(`\bevp\b`), replacement: "executive vice president"},
+	{pattern: regexp.MustCompile(`\bceo\b`), replacement: "chief executive officer"},
+	{pattern: regexp.MustCompile(`\bcoo\b`), replacement: "chief operating officer"},
+	{pattern: regexp.MustCompile(`\bcfo\b`), replacement: "chief financial officer"},
+	{pattern: regexp.MustCompile(`\bcio\b`), replacement: "chief information officer"},
+	{pattern: regexp.MustCompile(`\bcto\b`), replacement: "chief technology officer"},
+	{pattern: regexp.MustCompile(`\bcmo\b`), replacement: "chief marketing officer"},
+	{pattern: regexp.MustCompile(`\bcro\b`), replacement: "chief revenue officer"},
+	{pattern: regexp.MustCompile(`\bcpo\b`), replacement: "chief product officer"},
+	{pattern: regexp.MustCompile(`\bchro\b`), replacement: "chief human resources officer"},
+	{pattern: regexp.MustCompile(`\bcso\b`), replacement: "chief strategy officer"},
+	{pattern: regexp.MustCompile(`\bciso\b`), replacement: "chief information security officer"},
 	{pattern: regexp.MustCompile(`\bta\b`), replacement: "talent acquisition"},
 	{pattern: regexp.MustCompile(`\bhr\b`), replacement: "human resources"},
-	{pattern: regexp.MustCompile(`\btalent acquisition\b`), replacement: "recruitment human resources"},
+	{pattern: regexp.MustCompile(`\bhrbp\b`), replacement: "human resources business partner"},
+	{pattern: regexp.MustCompile(`\bl&d\b`), replacement: "learning and development"},
+	{pattern: regexp.MustCompile(`\br&d\b`), replacement: "research and development"},
+	{pattern: regexp.MustCompile(`\bm&a\b`), replacement: "mergers and acquisitions"},
+	{pattern: regexp.MustCompile(`\bfp&a\b`), replacement: "financial planning and analysis"},
+	{pattern: regexp.MustCompile(`\bseo\b`), replacement: "search engine optimization"},
+	{pattern: regexp.MustCompile(`\bsem\b`), replacement: "search engine marketing"},
+	{pattern: regexp.MustCompile(`\bpmo\b`), replacement: "project management office"},
+	{pattern: regexp.MustCompile(`\bcrm\b`), replacement: "customer relationship management"},
+	{pattern: regexp.MustCompile(`\berp\b`), replacement: "enterprise resource planning"},
 	{pattern: regexp.MustCompile(`\bcpg\b`), replacement: "consumer packaged goods"},
 }
 
@@ -2103,7 +2155,12 @@ func (s *Service) upsertCompanyFromPayload(ctx context.Context, payload map[stri
 	foundedYearVal := strField("foundedYear")
 	homePageURLVal := strField("homePageURL")
 	linkedInURLVal := strField("linkedInURL")
+	careersPageURLVal := strField("careersPageURL")
 	employeeRangeVal := strField("employeeRange")
+	numberOfEmployeesOnLinkedInVal := _normalizeNullStringToNone(companyPayload["numberOfEmployeesOnLinkedIn"])
+	totalFundingAmountVal := _normalizeNullStringToNone(companyPayload["totalFundingAmount"])
+	industriesVal := jsonField("industries")
+	hqLocationVal := strField("hqLocation")
 	profilePicURLVal := strField("profilePicURL")
 	sponsorsH1BVal := _normalizeNullStringToNone(companyPayload["sponsorsH1B"])
 	sponsorsUKVal := _normalizeNullStringToNone(companyPayload["sponsorsUKSkilledWorkerVisa"])
@@ -2127,27 +2184,28 @@ func (s *Service) upsertCompanyFromPayload(ctx context.Context, payload map[stri
 
 	updatedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	if companyID.Valid {
-		var curExternalID, curName, curSlug, curTagline, curFoundedYear, curHomePageURL, curLinkedInURL, curEmployeeRange, curProfilePicURL sql.NullString
+		var curExternalID, curName, curSlug, curTagline, curFoundedYear, curHomePageURL, curLinkedInURL, curCareersPageURL, curEmployeeRange, curHQLocation, curProfilePicURL sql.NullString
+		var curNumberOfEmployeesOnLinkedIn, curTotalFundingAmount sql.NullInt64
 		var curSponsorsH1B, curSponsorsUK sql.NullBool
 		var curTaglineBrazil, curTaglineFrance, curTaglineGermany, curChatGPTDescription, curLinkedInDescription sql.NullString
 		var curChatGPTDescriptionBrazil, curChatGPTDescriptionFrance, curChatGPTDescriptionGermany sql.NullString
 		var curLinkedInDescriptionBrazil, curLinkedInDescriptionFrance, curLinkedInDescriptionGermany sql.NullString
-		var curFundingData, curChatGPTIndustries, curIndustrySpecialities, curIndustrySpecialitiesBrazil, curIndustrySpecialitiesFrance, curIndustrySpecialitiesGermany sql.NullString
+		var curFundingData, curChatGPTIndustries, curIndustries, curIndustrySpecialities, curIndustrySpecialitiesBrazil, curIndustrySpecialitiesFrance, curIndustrySpecialitiesGermany sql.NullString
 		if err := s.DB.SQL.QueryRowContext(
 			ctx,
-			`SELECT external_company_id, name, slug, tagline, founded_year, home_page_url, linkedin_url, sponsors_h1b, sponsors_uk_skilled_worker_visa, employee_range, profile_pic_url,
+			`SELECT external_company_id, name, slug, tagline, founded_year, home_page_url, linkedin_url, careers_page_url, sponsors_h1b, sponsors_uk_skilled_worker_visa, employee_range, number_of_employees_on_linkedin, total_funding_amount, hq_location, profile_pic_url,
 			        tagline_brazil, tagline_france, tagline_germany, chatgpt_description, linkedin_description,
 			        chatgpt_description_brazil, chatgpt_description_france, chatgpt_description_germany,
 			        linkedin_description_brazil, linkedin_description_france, linkedin_description_germany,
-			        funding_data::text, chatgpt_industries::text, industry_specialities::text, industry_specialities_brazil::text, industry_specialities_france::text, industry_specialities_germany::text
+			        funding_data::text, chatgpt_industries::text, industries::text, industry_specialities::text, industry_specialities_brazil::text, industry_specialities_france::text, industry_specialities_germany::text
 			   FROM parsed_companies WHERE id = ? LIMIT 1`,
 			companyID.Int64,
 		).Scan(
-			&curExternalID, &curName, &curSlug, &curTagline, &curFoundedYear, &curHomePageURL, &curLinkedInURL, &curSponsorsH1B, &curSponsorsUK, &curEmployeeRange, &curProfilePicURL,
+			&curExternalID, &curName, &curSlug, &curTagline, &curFoundedYear, &curHomePageURL, &curLinkedInURL, &curCareersPageURL, &curSponsorsH1B, &curSponsorsUK, &curEmployeeRange, &curNumberOfEmployeesOnLinkedIn, &curTotalFundingAmount, &curHQLocation, &curProfilePicURL,
 			&curTaglineBrazil, &curTaglineFrance, &curTaglineGermany, &curChatGPTDescription, &curLinkedInDescription,
 			&curChatGPTDescriptionBrazil, &curChatGPTDescriptionFrance, &curChatGPTDescriptionGermany,
 			&curLinkedInDescriptionBrazil, &curLinkedInDescriptionFrance, &curLinkedInDescriptionGermany,
-			&curFundingData, &curChatGPTIndustries, &curIndustrySpecialities, &curIndustrySpecialitiesBrazil, &curIndustrySpecialitiesFrance, &curIndustrySpecialitiesGermany,
+			&curFundingData, &curChatGPTIndustries, &curIndustries, &curIndustrySpecialities, &curIndustrySpecialitiesBrazil, &curIndustrySpecialitiesFrance, &curIndustrySpecialitiesGermany,
 		); err != nil {
 			return nil, err
 		}
@@ -2184,6 +2242,15 @@ func (s *Service) upsertCompanyFromPayload(ctx context.Context, payload map[stri
 			}
 			return current.Bool
 		}
+		chooseInt := func(current sql.NullInt64, incoming any) any {
+			if useExternalID {
+				return incoming
+			}
+			if !current.Valid {
+				return incoming
+			}
+			return current.Int64
+		}
 		externalCompanyIDUpdate := appendExternalCompanyIDs(curExternalID, externalCompanyIDVal)
 		_, err := s.DB.SQL.ExecContext(
 			ctx,
@@ -2195,9 +2262,14 @@ func (s *Service) upsertCompanyFromPayload(ctx context.Context, payload map[stri
 			        founded_year = ?,
 			        home_page_url = ?,
 			        linkedin_url = ?,
+			        careers_page_url = ?,
 			        sponsors_h1b = ?,
 			        sponsors_uk_skilled_worker_visa = ?,
 			        employee_range = ?,
+			        number_of_employees_on_linkedin = ?,
+			        total_funding_amount = ?,
+			        industries = ?,
+			        hq_location = ?,
 			        profile_pic_url = ?,
 			        tagline_brazil = ?,
 			        tagline_france = ?,
@@ -2225,9 +2297,14 @@ func (s *Service) upsertCompanyFromPayload(ctx context.Context, payload map[stri
 			chooseStr(curFoundedYear, foundedYearVal),
 			chooseStr(curHomePageURL, homePageURLVal),
 			chooseStr(curLinkedInURL, linkedInURLVal),
+			chooseStr(curCareersPageURL, careersPageURLVal),
 			chooseBool(curSponsorsH1B, sponsorsH1BVal),
 			chooseBool(curSponsorsUK, sponsorsUKVal),
 			chooseStr(curEmployeeRange, employeeRangeVal),
+			chooseInt(curNumberOfEmployeesOnLinkedIn, numberOfEmployeesOnLinkedInVal),
+			chooseInt(curTotalFundingAmount, totalFundingAmountVal),
+			chooseJSON(curIndustries, industriesVal),
+			chooseStr(curHQLocation, hqLocationVal),
 			chooseStr(curProfilePicURL, profilePicURLVal),
 			chooseStr(curTaglineBrazil, taglineBrazilVal),
 			chooseStr(curTaglineFrance, taglineFranceVal),
@@ -2259,12 +2336,12 @@ func (s *Service) upsertCompanyFromPayload(ctx context.Context, payload map[stri
 	err := s.DB.SQL.QueryRowContext(
 		ctx,
 		`INSERT INTO parsed_companies (
-		    external_company_id, name, slug, tagline, founded_year, home_page_url, linkedin_url, sponsors_h1b, sponsors_uk_skilled_worker_visa,
-		    employee_range, profile_pic_url, tagline_brazil, tagline_france, tagline_germany, chatgpt_description, linkedin_description,
+		    external_company_id, name, slug, tagline, founded_year, home_page_url, linkedin_url, careers_page_url, sponsors_h1b, sponsors_uk_skilled_worker_visa,
+		    employee_range, number_of_employees_on_linkedin, total_funding_amount, industries, hq_location, profile_pic_url, tagline_brazil, tagline_france, tagline_germany, chatgpt_description, linkedin_description,
 		    chatgpt_description_brazil, chatgpt_description_france, chatgpt_description_germany, linkedin_description_brazil, linkedin_description_france, linkedin_description_germany,
 		    funding_data, chatgpt_industries, industry_specialities, industry_specialities_brazil, industry_specialities_france, industry_specialities_germany, updated_at
 		  )
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 RETURNING id`,
 		nilIfEmpty(externalCompanyIDToken(externalCompanyIDVal)),
 		nilIfEmpty(nameVal),
@@ -2273,9 +2350,14 @@ func (s *Service) upsertCompanyFromPayload(ctx context.Context, payload map[stri
 		nilIfEmpty(foundedYearVal),
 		nilIfEmpty(homePageURLVal),
 		nilIfEmpty(linkedInURLVal),
+		nilIfEmpty(careersPageURLVal),
 		sponsorsH1BVal,
 		sponsorsUKVal,
 		nilIfEmpty(employeeRangeVal),
+		numberOfEmployeesOnLinkedInVal,
+		totalFundingAmountVal,
+		industriesVal,
+		nilIfEmpty(hqLocationVal),
 		nilIfEmpty(profilePicURLVal),
 		nilIfEmpty(taglineBrazilVal),
 		nilIfEmpty(taglineFranceVal),

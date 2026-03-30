@@ -158,8 +158,8 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 	if employeeRange := stringValue(companyEnrichment["employeeRange"]); employeeRange != "" {
 		company["employeeRange"] = employeeRange
 	}
-	if industry, ok := companyEnrichment["industrySpecialities"]; ok {
-		company["industrySpecialities"] = industry
+	if industries, ok := companyEnrichment["industries"]; ok {
+		company["industries"] = industries
 	}
 	targetURL := resolveRedirectURLDailyRemoteFunc(ToTargetJobURL(sourceURL))
 	salaryPayload := parseSalaryRangeFromText(headSalaryText)
@@ -487,7 +487,7 @@ func extractCompanyEnrichmentFromHTML(htmlText string) map[string]any {
 		payload["employeeRange"] = employeeRange
 	}
 	if len(industries) > 0 {
-		payload["industrySpecialities"] = industries
+		payload["industries"] = industries
 	}
 	return payload
 }

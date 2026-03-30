@@ -2858,6 +2858,22 @@
       {
         "token": "recruitment",
         "weight": 1.9166666666666665
+      },
+      {
+        "token": "acquisition",
+        "weight": 1.5
+      },
+      {
+        "token": "acquisitions",
+        "weight": 1.5
+      },
+      {
+        "token": "sourcer",
+        "weight": 1.75
+      },
+      {
+        "token": "sourcing",
+        "weight": 1.5
       }
     ]
   },

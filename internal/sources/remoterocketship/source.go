@@ -79,6 +79,13 @@ func ParseRawHTML(htmlText, sourceUrl string) map[string]any {
 	}
 	if company, ok := jobData["company"].(map[string]any); ok {
 		company["id"] = namespacedCompanyID(company["id"])
+		industry := stringValue(company["industry"])
+		if industry != "" {
+			company["industries"] = []string{industry}
+		} else {
+			company["industries"] = nil
+		}
+		delete(company, "industry")
 	}
 	normalizeSalaryRange(jobData)
 	jobData["locationCountries"] = []string{}

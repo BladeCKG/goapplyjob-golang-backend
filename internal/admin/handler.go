@@ -1598,10 +1598,32 @@ func (h *Handler) listParsedCompanies(c *gin.Context) {
 		"founded_year":          "founded_year",
 		"home_page_url":         "home_page_url",
 		"linkedin_url":          "linkedin_url",
+		"careers_page_url":      "careers_page_url",
 		"profile_pic_url":       "profile_pic_url",
 		"sponsors_h1b":          "sponsors_h1b",
+		"sponsors_uk_skilled_worker_visa": "sponsors_uk_skilled_worker_visa",
 		"employee_range":        "employee_range",
+		"number_of_employees_on_linkedin": "number_of_employees_on_linkedin",
+		"total_funding_amount":  "total_funding_amount",
+		"industries":            "industries",
+		"hq_location":           "hq_location",
+		"tagline_brazil":        "tagline_brazil",
+		"tagline_france":        "tagline_france",
+		"tagline_germany":       "tagline_germany",
+		"chatgpt_description":   "chatgpt_description",
+		"linkedin_description":  "linkedin_description",
+		"chatgpt_description_brazil":  "chatgpt_description_brazil",
+		"chatgpt_description_france":  "chatgpt_description_france",
+		"chatgpt_description_germany": "chatgpt_description_germany",
+		"linkedin_description_brazil":  "linkedin_description_brazil",
+		"linkedin_description_france":  "linkedin_description_france",
+		"linkedin_description_germany": "linkedin_description_germany",
+		"funding_data":          "funding_data",
+		"chatgpt_industries":    "chatgpt_industries",
 		"industry_specialities": "industry_specialities",
+		"industry_specialities_brazil":  "industry_specialities_brazil",
+		"industry_specialities_france":  "industry_specialities_france",
+		"industry_specialities_germany": "industry_specialities_germany",
 		"updated_at":            "updated_at",
 	}, "id")
 	if err != nil {
@@ -1626,10 +1648,32 @@ func (h *Handler) listParsedCompanies(c *gin.Context) {
 		"founded_year":        {columnExpr: "founded_year", valueType: "text"},
 		"home_page_url":       {columnExpr: "home_page_url", valueType: "text"},
 		"linkedin_url":        {columnExpr: "linkedin_url", valueType: "text"},
+		"careers_page_url":    {columnExpr: "careers_page_url", valueType: "text"},
 		"profile_pic_url":     {columnExpr: "profile_pic_url", valueType: "text"},
 		"sponsors_h1b":        {columnExpr: "sponsors_h1b", valueType: "bool"},
+		"sponsors_uk_skilled_worker_visa": {columnExpr: "sponsors_uk_skilled_worker_visa", valueType: "bool"},
 		"employee_range":      {columnExpr: "employee_range", valueType: "text"},
+		"number_of_employees_on_linkedin": {columnExpr: "number_of_employees_on_linkedin", valueType: "int"},
+		"total_funding_amount": {columnExpr: "total_funding_amount", valueType: "int"},
+		"industries":          {columnExpr: "industries::text", valueType: "text"},
+		"hq_location":         {columnExpr: "hq_location", valueType: "text"},
+		"tagline_brazil":      {columnExpr: "tagline_brazil", valueType: "text"},
+		"tagline_france":      {columnExpr: "tagline_france", valueType: "text"},
+		"tagline_germany":     {columnExpr: "tagline_germany", valueType: "text"},
+		"chatgpt_description": {columnExpr: "chatgpt_description", valueType: "text"},
+		"linkedin_description": {columnExpr: "linkedin_description", valueType: "text"},
+		"chatgpt_description_brazil":  {columnExpr: "chatgpt_description_brazil", valueType: "text"},
+		"chatgpt_description_france":  {columnExpr: "chatgpt_description_france", valueType: "text"},
+		"chatgpt_description_germany": {columnExpr: "chatgpt_description_germany", valueType: "text"},
+		"linkedin_description_brazil":  {columnExpr: "linkedin_description_brazil", valueType: "text"},
+		"linkedin_description_france":  {columnExpr: "linkedin_description_france", valueType: "text"},
+		"linkedin_description_germany": {columnExpr: "linkedin_description_germany", valueType: "text"},
+		"funding_data":        {columnExpr: "funding_data::text", valueType: "text"},
+		"chatgpt_industries":  {columnExpr: "chatgpt_industries::text", valueType: "text"},
 		"industry_specialities": {columnExpr: "industry_specialities::text", valueType: "text"},
+		"industry_specialities_brazil":  {columnExpr: "industry_specialities_brazil::text", valueType: "text"},
+		"industry_specialities_france":  {columnExpr: "industry_specialities_france::text", valueType: "text"},
+		"industry_specialities_germany": {columnExpr: "industry_specialities_germany::text", valueType: "text"},
 	}
 	for _, item := range parsedFilters {
 		def, ok := filterDefinitions[item.Column]
@@ -1654,7 +1698,7 @@ func (h *Handler) listParsedCompanies(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list parsed companies"})
 		return
 	}
-	query := `SELECT id, external_company_id, name, slug, tagline, founded_year, home_page_url, linkedin_url, profile_pic_url, sponsors_h1b, employee_range, industry_specialities::text FROM parsed_companies` + where + orderClause + ` LIMIT ? OFFSET ?`
+	query := `SELECT id, external_company_id, name, slug, tagline, founded_year, home_page_url, linkedin_url, careers_page_url, profile_pic_url, sponsors_h1b, sponsors_uk_skilled_worker_visa, employee_range, number_of_employees_on_linkedin, total_funding_amount, industries::text, hq_location, tagline_brazil, tagline_france, tagline_germany, chatgpt_description, linkedin_description, chatgpt_description_brazil, chatgpt_description_france, chatgpt_description_germany, linkedin_description_brazil, linkedin_description_france, linkedin_description_germany, funding_data::text, chatgpt_industries::text, industry_specialities::text, industry_specialities_brazil::text, industry_specialities_france::text, industry_specialities_germany::text, updated_at FROM parsed_companies` + where + orderClause + ` LIMIT ? OFFSET ?`
 	queryArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, queryArgs...)
 	if err != nil {
@@ -1667,13 +1711,35 @@ func (h *Handler) listParsedCompanies(c *gin.Context) {
 		var (
 			id                              int64
 			externalID, name, slug, tagline sql.NullString
-			foundedYear, homePage, linkedin sql.NullString
+			foundedYear, homePage, linkedin, careersPage sql.NullString
 			profilePicURL                   sql.NullString
 			sponsors                        sql.NullBool
+			sponsorsUK                      sql.NullBool
 			employeeRange                   sql.NullString
+			numberOfEmployeesOnLinkedIn     sql.NullInt64
+			totalFundingAmount              sql.NullInt64
+			industries                      sql.NullString
+			hqLocation                      sql.NullString
+			taglineBrazil                   sql.NullString
+			taglineFrance                   sql.NullString
+			taglineGermany                  sql.NullString
+			chatgptDescription              sql.NullString
+			linkedinDescription             sql.NullString
+			chatgptDescriptionBrazil        sql.NullString
+			chatgptDescriptionFrance        sql.NullString
+			chatgptDescriptionGermany       sql.NullString
+			linkedinDescriptionBrazil       sql.NullString
+			linkedinDescriptionFrance       sql.NullString
+			linkedinDescriptionGermany      sql.NullString
+			fundingData                     sql.NullString
+			chatgptIndustries               sql.NullString
 			industrySpecialities            sql.NullString
+			industrySpecialitiesBrazil      sql.NullString
+			industrySpecialitiesFrance      sql.NullString
+			industrySpecialitiesGermany     sql.NullString
+			updatedAt                       string
 		)
-		if err := rows.Scan(&id, &externalID, &name, &slug, &tagline, &foundedYear, &homePage, &linkedin, &profilePicURL, &sponsors, &employeeRange, &industrySpecialities); err != nil {
+		if err := rows.Scan(&id, &externalID, &name, &slug, &tagline, &foundedYear, &homePage, &linkedin, &careersPage, &profilePicURL, &sponsors, &sponsorsUK, &employeeRange, &numberOfEmployeesOnLinkedIn, &totalFundingAmount, &industries, &hqLocation, &taglineBrazil, &taglineFrance, &taglineGermany, &chatgptDescription, &linkedinDescription, &chatgptDescriptionBrazil, &chatgptDescriptionFrance, &chatgptDescriptionGermany, &linkedinDescriptionBrazil, &linkedinDescriptionFrance, &linkedinDescriptionGermany, &fundingData, &chatgptIndustries, &industrySpecialities, &industrySpecialitiesBrazil, &industrySpecialitiesFrance, &industrySpecialitiesGermany, &updatedAt); err != nil {
 			continue
 		}
 		items = append(items, gin.H{
@@ -1685,10 +1751,33 @@ func (h *Handler) listParsedCompanies(c *gin.Context) {
 			"founded_year":        nullableString(foundedYear),
 			"home_page_url":       nullableString(homePage),
 			"linkedin_url":        nullableString(linkedin),
+			"careers_page_url":    nullableString(careersPage),
 			"profile_pic_url":     nullableString(profilePicURL),
 			"sponsors_h1b":        nullableBool(sponsors),
+			"sponsors_uk_skilled_worker_visa": nullableBool(sponsorsUK),
 			"employee_range":      nullableString(employeeRange),
+			"number_of_employees_on_linkedin": nullableInt(numberOfEmployeesOnLinkedIn),
+			"total_funding_amount": nullableInt(totalFundingAmount),
+			"industries":          parseJSONStringArray(industries),
+			"hq_location":         nullableString(hqLocation),
+			"tagline_brazil":      nullableString(taglineBrazil),
+			"tagline_france":      nullableString(taglineFrance),
+			"tagline_germany":     nullableString(taglineGermany),
+			"chatgpt_description": nullableString(chatgptDescription),
+			"linkedin_description": nullableString(linkedinDescription),
+			"chatgpt_description_brazil":  nullableString(chatgptDescriptionBrazil),
+			"chatgpt_description_france":  nullableString(chatgptDescriptionFrance),
+			"chatgpt_description_germany": nullableString(chatgptDescriptionGermany),
+			"linkedin_description_brazil":  nullableString(linkedinDescriptionBrazil),
+			"linkedin_description_france":  nullableString(linkedinDescriptionFrance),
+			"linkedin_description_germany": nullableString(linkedinDescriptionGermany),
+			"funding_data":        parseJSONValue(fundingData),
+			"chatgpt_industries":  parseJSONStringArray(chatgptIndustries),
 			"industry_specialities": parseJSONStringArray(industrySpecialities),
+			"industry_specialities_brazil":  parseJSONStringArray(industrySpecialitiesBrazil),
+			"industry_specialities_france":  parseJSONStringArray(industrySpecialitiesFrance),
+			"industry_specialities_germany": parseJSONStringArray(industrySpecialitiesGermany),
+			"updated_at": updatedAt,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"total": total, "items": items})
@@ -1716,10 +1805,32 @@ func (h *Handler) updateParsedCompany(c *gin.Context) {
 		"founded_year":        jsonPatchStringOrNull,
 		"home_page_url":       jsonPatchStringOrNull,
 		"linkedin_url":        jsonPatchStringOrNull,
+		"careers_page_url":    jsonPatchStringOrNull,
 		"profile_pic_url":     jsonPatchStringOrNull,
 		"sponsors_h1b":        jsonPatchBoolOrNull,
+		"sponsors_uk_skilled_worker_visa": jsonPatchBoolOrNull,
 		"employee_range":      jsonPatchStringOrNull,
+		"number_of_employees_on_linkedin": jsonPatchIntOrNull,
+		"total_funding_amount": jsonPatchIntOrNull,
+		"industries":          jsonPatchStringArrayOrNull,
+		"hq_location":         jsonPatchStringOrNull,
+		"tagline_brazil":      jsonPatchStringOrNull,
+		"tagline_france":      jsonPatchStringOrNull,
+		"tagline_germany":     jsonPatchStringOrNull,
+		"chatgpt_description": jsonPatchStringOrNull,
+		"linkedin_description": jsonPatchStringOrNull,
+		"chatgpt_description_brazil":  jsonPatchStringOrNull,
+		"chatgpt_description_france":  jsonPatchStringOrNull,
+		"chatgpt_description_germany": jsonPatchStringOrNull,
+		"linkedin_description_brazil":  jsonPatchStringOrNull,
+		"linkedin_description_france":  jsonPatchStringOrNull,
+		"linkedin_description_germany": jsonPatchStringOrNull,
+		"funding_data":        jsonPatchJSONOrNull,
+		"chatgpt_industries":  jsonPatchStringArrayOrNull,
 		"industry_specialities": jsonPatchStringArrayOrNull,
+		"industry_specialities_brazil":  jsonPatchStringArrayOrNull,
+		"industry_specialities_france":  jsonPatchStringArrayOrNull,
+		"industry_specialities_germany": jsonPatchStringArrayOrNull,
 	})
 	if !ok {
 		return
@@ -2391,6 +2502,17 @@ func parseJSONStringArray(value sql.NullString) any {
 			}
 		}
 		return out
+	}
+	return nil
+}
+
+func parseJSONValue(value sql.NullString) any {
+	if !value.Valid || strings.TrimSpace(value.String) == "" {
+		return nil
+	}
+	var parsed any
+	if err := json.Unmarshal([]byte(value.String), &parsed); err == nil {
+		return parsed
 	}
 	return nil
 }

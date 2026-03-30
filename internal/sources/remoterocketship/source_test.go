@@ -50,6 +50,26 @@ func TestParseRawHTMLNormalizesNumericCompanyIDToString(t *testing.T) {
 	}
 }
 
+func TestParseRawHTMLMapsCompanyIndustryToIndustries(t *testing.T) {
+	htmlText := `
+<html>
+<body>
+<script type="application/json">
+{"props":{"pageProps":{"jobOpening":{"title":"Engineer","company":{"id":227383,"name":"CUSG","industry":"Wellness and Fitness Services"}}}}}
+</script>
+</body>
+</html>`
+	payload := ParseRawHTML(htmlText, "")
+	company, _ := payload["company"].(map[string]any)
+	industries, _ := company["industries"].([]string)
+	if len(industries) != 1 || industries[0] != "Wellness and Fitness Services" {
+		t.Fatalf("expected company.industries, got %#v", company["industries"])
+	}
+	if _, exists := company["industry"]; exists {
+		t.Fatalf("expected company.industry to be removed, got %#v", company["industry"])
+	}
+}
+
 func TestParseRawHTMLInfersCurrencySymbolFromCode(t *testing.T) {
 	htmlText := `
 <html>

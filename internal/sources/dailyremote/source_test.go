@@ -139,17 +139,17 @@ func TestParseRawHTMLExtractsSalarySummaryAndCompanyEnrichment(t *testing.T) {
 	if company["employeeRange"] != "10001+" {
 		t.Fatalf("expected employeeRange 10001+, got %#v", company["employeeRange"])
 	}
-	switch industries := company["industrySpecialities"].(type) {
+	switch industries := company["industries"].(type) {
 	case []string:
 		if len(industries) == 0 || industries[0] != "IT Services and IT Consulting" {
-			t.Fatalf("unexpected company industries %#v", company["industrySpecialities"])
+			t.Fatalf("unexpected company industries %#v", company["industries"])
 		}
 	case []any:
 		if len(industries) == 0 || industries[0] != "IT Services and IT Consulting" {
-			t.Fatalf("unexpected company industries %#v", company["industrySpecialities"])
+			t.Fatalf("unexpected company industries %#v", company["industries"])
 		}
 	default:
-		t.Fatalf("unexpected company industries type %#T", company["industrySpecialities"])
+		t.Fatalf("unexpected company industries type %#T", company["industries"])
 	}
 }
 

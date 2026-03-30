@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/sources/plugins"
+	"strings"
 	"testing"
 	"time"
 )
@@ -117,6 +118,22 @@ func TestTokenizeRoleTitleRemovesSeniorityTokens(t *testing.T) {
 	}
 	if _, ok := tokens["backend"]; !ok {
 		t.Fatal("expected backend token")
+	}
+}
+
+func TestNormalizeTextForMatchingExpandsCommonAbbreviations(t *testing.T) {
+	normalized := normalizeTextForMatching("AVP PMM SRE HRBP SEO")
+	expectedParts := []string{
+		"assistant vice president",
+		"product marketing manager",
+		"site reliability engineer",
+		"human resources business partner",
+		"search engine optimization",
+	}
+	for _, expected := range expectedParts {
+		if !strings.Contains(normalized, expected) {
+			t.Fatalf("expected %q in normalized text %q", expected, normalized)
+		}
 	}
 }
 

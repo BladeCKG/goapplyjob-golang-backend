@@ -115,9 +115,14 @@ type ParsedCompany struct {
 	FoundedYear                 pgtype.Text        `json:"founded_year"`
 	HomePageUrl                 pgtype.Text        `json:"home_page_url"`
 	LinkedinUrl                 pgtype.Text        `json:"linkedin_url"`
+	CareersPageUrl              pgtype.Text        `json:"careers_page_url"`
 	SponsorsH1b                 pgtype.Bool        `json:"sponsors_h1b"`
 	SponsorsUkSkilledWorkerVisa pgtype.Bool        `json:"sponsors_uk_skilled_worker_visa"`
 	EmployeeRange               pgtype.Text        `json:"employee_range"`
+	NumberOfEmployeesOnLinkedin pgtype.Int4        `json:"number_of_employees_on_linkedin"`
+	TotalFundingAmount          pgtype.Int8        `json:"total_funding_amount"`
+	Industries                  []byte             `json:"industries"`
+	HqLocation                  pgtype.Text        `json:"hq_location"`
 	ProfilePicUrl               pgtype.Text        `json:"profile_pic_url"`
 	TaglineBrazil               pgtype.Text        `json:"tagline_brazil"`
 	TaglineFrance               pgtype.Text        `json:"tagline_france"`
