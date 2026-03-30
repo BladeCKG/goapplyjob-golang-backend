@@ -19,6 +19,7 @@ const (
 	workerStateLastCheckedParsedJobIDKey = "last_checked_parsed_job_id"
 	defaultBatchSize                     = 500
 	defaultWorkerCount                   = 4
+	WorkerLogPrefix                      = "job-availability-worker"
 )
 
 type ReadHTMLForSourceFunc func(context.Context, string, string) (string, int, error)
@@ -69,7 +70,7 @@ func (s *Service) RunForever() error {
 	for {
 		processed, err := s.RunOnce(context.Background())
 		if err != nil {
-			log.Printf("parsed-job-availability-worker cycle_failed error=%v", err)
+			log.Printf(WorkerLogPrefix+" cycle_failed error=%v", err)
 			if s.Config.RunOnce {
 				return err
 			}
@@ -77,7 +78,7 @@ func (s *Service) RunForever() error {
 			continue
 		}
 		if s.Config.RunOnce {
-			log.Printf("parsed-job-availability-worker run-once completed processed=%d", processed)
+			log.Printf(WorkerLogPrefix+" run-once completed processed=%d", processed)
 			return nil
 		}
 		time.Sleep(time.Duration(pollSeconds * float64(time.Second)))
@@ -163,7 +164,7 @@ func buildSourceInClause(sources map[string]struct{}) (string, []any) {
 
 func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error) {
 	if len(s.EnabledSources) == 0 {
-		log.Printf("parsed-job-availability-worker batch_done rows=0 processed=0")
+		log.Printf(WorkerLogPrefix + " batch_done rows=0 processed=0")
 		return 0, nil
 	}
 	if s.ReadHTMLForSource == nil {
@@ -212,7 +213,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				return 0, err
 			}
 		}
-		log.Printf("parsed-job-availability-worker batch_done rows=0 processed=0")
+		log.Printf(WorkerLogPrefix + " batch_done rows=0 processed=0")
 		return 0, nil
 	}
 
@@ -253,7 +254,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		}
 		processed++
 	}
-	log.Printf("parsed-job-availability-worker batch_done rows=%d processed=%d", len(jobs), processed)
+	log.Printf(WorkerLogPrefix+" batch_done rows=%d processed=%d", len(jobs), processed)
 	return processed, nil
 }
 
@@ -265,15 +266,15 @@ func (s *Service) processRow(ctx context.Context, row parsedJobRow) processResul
 	if !ok || plugin.IsJobClosed == nil || row.url == "" {
 		return processResult{id: row.id}
 	}
-	log.Printf("parsed-job-availability-worker check_start parsed_job_id=%d source=%s url=%q", row.id, row.source, row.url)
+	log.Printf(WorkerLogPrefix+" check_start parsed_job_id=%d source=%s url=%q", row.id, row.source, row.url)
 	bodyText, statusCode, err := s.ReadHTMLForSource(ctx, row.source, row.url)
 	if err != nil {
-		log.Printf("parsed-job-availability-worker check_failed parsed_job_id=%d source=%s error=%v", row.id, row.source, err)
+		log.Printf(WorkerLogPrefix+" check_failed parsed_job_id=%d source=%s error=%v", row.id, row.source, err)
 		return processResult{id: row.id, err: err}
 	}
 	closed := plugin.IsJobClosed(statusCode, bodyText, row.url)
 	if !closed {
-		log.Printf("parsed-job-availability-worker check_open parsed_job_id=%d source=%s status=%d", row.id, row.source, statusCode)
+		log.Printf(WorkerLogPrefix+" check_open parsed_job_id=%d source=%s status=%d", row.id, row.source, statusCode)
 		return processResult{id: row.id}
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -290,6 +291,6 @@ func (s *Service) processRow(ctx context.Context, row parsedJobRow) processResul
 	if err != nil {
 		return processResult{id: row.id, err: err}
 	}
-	log.Printf("parsed-job-availability-worker check_closed parsed_job_id=%d source=%s status=%d", row.id, row.source, statusCode)
+	log.Printf(WorkerLogPrefix+" check_closed parsed_job_id=%d source=%s status=%d", row.id, row.source, statusCode)
 	return processResult{id: row.id, closed: true}
 }

@@ -17,6 +17,7 @@ import (
 const (
 	workerStateLastClassifiedParsedJobIDKey = "last_classified_parsed_job_id"
 	defaultBatchSizeParsedJobAIClassifier   = 200
+	WorkerLogPrefix                         = "ai-classifier-worker"
 )
 
 type ClassifyFunc func(context.Context, string, string, string) (string, string, []string, error)
@@ -69,7 +70,7 @@ func (s *Service) RunForever() error {
 	for {
 		processed, err := s.RunOnce(context.Background())
 		if err != nil {
-			log.Printf("parsed-job-ai-classifier-worker cycle_failed error=%v", err)
+			log.Printf(WorkerLogPrefix+" cycle_failed error=%v", err)
 			if s.Config.RunOnce {
 				return err
 			}
@@ -77,7 +78,7 @@ func (s *Service) RunForever() error {
 			continue
 		}
 		if s.Config.RunOnce {
-			log.Printf("parsed-job-ai-classifier-worker run-once completed processed=%d", processed)
+			log.Printf(WorkerLogPrefix+" run-once completed processed=%d", processed)
 			return nil
 		}
 		time.Sleep(time.Duration(pollSeconds * float64(time.Second)))
@@ -114,7 +115,7 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, roleRequirem
 				categorizedTitle = groqCategory
 				categorizedFunction = categoryFunctions[groqCategory]
 				log.Printf(
-					"parsed-job-ai-classifier-worker groq_inferred role_title=%q category=%q function=%q required_skills_len=%d",
+					WorkerLogPrefix+" groq_inferred role_title=%q category=%q function=%q required_skills_len=%d",
 					roleTitle,
 					categorizedTitle,
 					categorizedFunction,
@@ -131,7 +132,7 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, roleRequirem
 				categorizedTitle = groqCategory
 				categorizedFunction = categoryFunctions[groqCategory]
 				log.Printf(
-					"parsed-job-ai-classifier-worker groq_inferred role_title=%q category=%q function=%q",
+					WorkerLogPrefix+" groq_inferred role_title=%q category=%q function=%q",
 					roleTitle,
 					categorizedTitle,
 					categorizedFunction,
@@ -229,7 +230,7 @@ func buildSourceInClause(sources map[string]struct{}) (string, []any) {
 
 func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error) {
 	if len(s.EnabledSources) == 0 {
-		log.Printf("parsed-job-ai-classifier-worker batch_done rows=0 processed=0")
+		log.Printf(WorkerLogPrefix + " batch_done rows=0 processed=0")
 		return 0, nil
 	}
 	lastParsedJobID, err := s.loadLastParsedJobID(ctx)
@@ -290,7 +291,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		return 0, err
 	}
 	if len(jobs) == 0 {
-		log.Printf("parsed-job-ai-classifier-worker batch_done rows=0 processed=0")
+		log.Printf(WorkerLogPrefix + " batch_done rows=0 processed=0")
 		return 0, nil
 	}
 
@@ -312,7 +313,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			continue
 		}
 
-		log.Printf("parsed-job-ai-classifier-worker classify_start parsed_job_id=%d source=%s role_title=%q", row.id, row.source, nullStringValue(row.roleTitle))
+		log.Printf(WorkerLogPrefix+" classify_start parsed_job_id=%d source=%s role_title=%q", row.id, row.source, nullStringValue(row.roleTitle))
 		categorizedTitle, categorizedFunction, normalizedTechStack, err := s.classify(
 			ctx,
 			nullStringValue(row.roleRequirements),
@@ -320,14 +321,14 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			nullStringValue(row.roleDescription),
 		)
 		if err != nil {
-			log.Printf("parsed-job-ai-classifier-worker classify_failed parsed_job_id=%d source=%s error=%v", row.id, row.source, err)
+			log.Printf(WorkerLogPrefix+" classify_failed parsed_job_id=%d source=%s error=%v", row.id, row.source, err)
 			return processed, err
 		}
 		if categorizedTitle == "" {
 			if err := s.saveLastParsedJobID(ctx, row.id); err != nil {
 				return processed, err
 			}
-			log.Printf("parsed-job-ai-classifier-worker classify_skipped_empty parsed_job_id=%d source=%s", row.id, row.source)
+			log.Printf(WorkerLogPrefix+" classify_skipped_empty parsed_job_id=%d source=%s", row.id, row.source)
 			processed++
 			continue
 		}
@@ -357,7 +358,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			return processed, err
 		}
 		log.Printf(
-			"parsed-job-ai-classifier-worker classify_done parsed_job_id=%d source=%s category=%q function=%q tech_stack_len=%d",
+			WorkerLogPrefix+" classify_done parsed_job_id=%d source=%s category=%q function=%q tech_stack_len=%d",
 			row.id,
 			row.source,
 			categorizedTitle,
@@ -367,7 +368,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		processed++
 	}
 
-	log.Printf("parsed-job-ai-classifier-worker batch_done rows=%d processed=%d", len(jobs), processed)
+	log.Printf(WorkerLogPrefix+" batch_done rows=%d processed=%d", len(jobs), processed)
 	return processed, nil
 }
 
