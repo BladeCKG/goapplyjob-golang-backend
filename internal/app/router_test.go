@@ -1252,7 +1252,7 @@ func TestCompanyProfileEndpointReturnsCompanyAndStats(t *testing.T) {
 
 	industries, _ := json.Marshal([]string{"SaaS", "AI"})
 	var companyID int64
-	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO parsed_companies (name, slug, tagline, industry_specialities) VALUES ('Acme', 'acme', 'Builds tools', ?) RETURNING id`, string(industries)).Scan(&companyID); err != nil {
+	if err := db.SQL.QueryRowContext(context.Background(), `INSERT INTO parsed_companies (name, slug, tagline, industries) VALUES ('Acme', 'acme', 'Builds tools', ?) RETURNING id`, string(industries)).Scan(&companyID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES (92001, 'https://example.com/company-profile-job', ?, true, false, true, 0, '{}')`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
@@ -1274,9 +1274,9 @@ func TestCompanyProfileEndpointReturnsCompanyAndStats(t *testing.T) {
 	if body["total_jobs"] != float64(1) {
 		t.Fatalf("unexpected company profile stats %#v", body)
 	}
-	industryValues := body["industry_specialities"].([]any)
+	industryValues := body["industries"].([]any)
 	if len(industryValues) != 2 || industryValues[0] != "SaaS" || industryValues[1] != "AI" {
-		t.Fatalf("unexpected industry specialities %#v", body["industry_specialities"])
+		t.Fatalf("unexpected industries %#v", body["industries"])
 	}
 }
 
@@ -1319,7 +1319,7 @@ func TestCompaniesListFiltersAndPagination(t *testing.T) {
 
 	var acmeID int64
 	if err := db.SQL.QueryRowContext(context.Background(),
-		`INSERT INTO parsed_companies (name, slug, employee_range, industry_specialities, home_page_url, linkedin_url, founded_year, tagline, chatgpt_description)
+		`INSERT INTO parsed_companies (name, slug, employee_range, industries, home_page_url, linkedin_url, founded_year, tagline, chatgpt_description)
 		 VALUES ('Acme', 'acme', '11-50', ?, 'https://acme.com', 'https://linkedin.com/acme', '2019', 'Builds tools', 'Acme builds tools') RETURNING id`,
 		string(industriesAcme),
 	).Scan(&acmeID); err != nil {
@@ -1327,7 +1327,7 @@ func TestCompaniesListFiltersAndPagination(t *testing.T) {
 	}
 	var globexID int64
 	if err := db.SQL.QueryRowContext(context.Background(),
-		`INSERT INTO parsed_companies (name, slug, employee_range, industry_specialities)
+		`INSERT INTO parsed_companies (name, slug, employee_range, industries)
 		 VALUES ('Globex', 'globex', '51-200', ?) RETURNING id`,
 		string(industriesGlobex),
 	).Scan(&globexID); err != nil {
@@ -1384,13 +1384,13 @@ func TestCompaniesListFiltersAndPagination(t *testing.T) {
 	}
 }
 
-func TestCompaniesListHandlesScalarIndustrySpecialities(t *testing.T) {
+func TestCompaniesListHandlesScalarIndustries(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
 
 	var companyID int64
 	if err := db.SQL.QueryRowContext(context.Background(),
-		`INSERT INTO parsed_companies (name, slug, industry_specialities)
+		`INSERT INTO parsed_companies (name, slug, industries)
 		 VALUES ('ScalarCo', 'scalar-co', '"Finance"') RETURNING id`,
 	).Scan(&companyID); err != nil {
 		t.Fatal(err)

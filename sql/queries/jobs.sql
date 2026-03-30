@@ -70,7 +70,7 @@ ORDER BY latest_job_posted_at DESC, c.id DESC
 LIMIT $1 OFFSET $2;
 
 -- name: GetCompanyProfileBySlug :one
-SELECT id, slug, name, tagline, profile_pic_url, home_page_url, linkedin_url, employee_range, founded_year, sponsors_h1b, industry_specialities
+SELECT id, slug, name, tagline, profile_pic_url, home_page_url, linkedin_url, employee_range, founded_year, sponsors_h1b, industries
 FROM parsed_companies
 WHERE lower(trim(COALESCE(slug, ''))) = $1
 LIMIT 1;

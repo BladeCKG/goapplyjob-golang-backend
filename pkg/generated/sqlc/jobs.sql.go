@@ -290,7 +290,7 @@ func (q *Queries) GetActiveSubscriptionIDForUser(ctx context.Context, arg GetAct
 }
 
 const getCompanyProfileBySlug = `-- name: GetCompanyProfileBySlug :one
-SELECT id, slug, name, tagline, profile_pic_url, home_page_url, linkedin_url, employee_range, founded_year, sponsors_h1b, industry_specialities
+SELECT id, slug, name, tagline, profile_pic_url, home_page_url, linkedin_url, employee_range, founded_year, sponsors_h1b, industries
 FROM parsed_companies
 WHERE lower(trim(COALESCE(slug, ''))) = $1
 LIMIT 1
@@ -307,7 +307,7 @@ type GetCompanyProfileBySlugRow struct {
 	EmployeeRange        pgtype.Text `json:"employee_range"`
 	FoundedYear          pgtype.Text `json:"founded_year"`
 	SponsorsH1b          pgtype.Bool `json:"sponsors_h1b"`
-	IndustrySpecialities []byte      `json:"industry_specialities"`
+	Industries           []byte      `json:"industries"`
 }
 
 func (q *Queries) GetCompanyProfileBySlug(ctx context.Context, slug pgtype.Text) (*GetCompanyProfileBySlugRow, error) {
@@ -324,7 +324,7 @@ func (q *Queries) GetCompanyProfileBySlug(ctx context.Context, slug pgtype.Text)
 		&i.EmployeeRange,
 		&i.FoundedYear,
 		&i.SponsorsH1b,
-		&i.IndustrySpecialities,
+		&i.Industries,
 	)
 	return &i, err
 }

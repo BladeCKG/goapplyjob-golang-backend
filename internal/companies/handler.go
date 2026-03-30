@@ -41,7 +41,7 @@ type companyListItem struct {
 	LinkedInURL        *string  `json:"linkedin_url"`
 	EmployeeRange      *string  `json:"employee_range"`
 	FoundedYear        *string  `json:"founded_year"`
-	IndustrySpecialies []string `json:"industry_specialities"`
+	Industries         []string `json:"industries"`
 	TotalJobs          int64    `json:"total_jobs"`
 	LatestJobPostedAt  *string  `json:"latest_job_posted_at"`
 }
@@ -57,7 +57,7 @@ type companyProfileItem struct {
 	EmployeeRange      *string  `json:"employee_range"`
 	FoundedYear        *string  `json:"founded_year"`
 	SponsorsH1B        *bool    `json:"sponsors_h1b"`
-	IndustrySpecialies []string `json:"industry_specialities"`
+	Industries         []string `json:"industries"`
 	TotalJobs          int64    `json:"total_jobs"`
 	LatestJobPostedAt  *string  `json:"latest_job_posted_at"`
 }
@@ -141,7 +141,7 @@ func (h *Handler) listCompanies(c *gin.Context) {
 				SELECT 1
 				FROM jsonb_array_elements_text(
 					CASE
-						WHEN jsonb_typeof(pc.industry_specialities::jsonb) = 'array' THEN pc.industry_specialities::jsonb
+						WHEN jsonb_typeof(pc.industries::jsonb) = 'array' THEN pc.industries::jsonb
 						ELSE '[]'::jsonb
 					END
 				) AS ind(value)
@@ -187,13 +187,13 @@ func (h *Handler) listCompanies(c *gin.Context) {
 		       pc.linkedin_url,
 		       pc.employee_range,
 		       pc.founded_year,
-		       pc.industry_specialities::jsonb,
+		       pc.industries::jsonb,
 		       count(pj.id) AS total_jobs,
 		       max(pj.created_at_source) AS latest_job_posted_at
 		FROM parsed_companies pc
 		JOIN parsed_jobs pj ON pj.company_id = pc.id
 		WHERE %s
-		GROUP BY pc.id, pc.slug, pc.name, pc.tagline, pc.chatgpt_description, pc.linkedin_description, pc.profile_pic_url, pc.home_page_url, pc.linkedin_url, pc.employee_range, pc.founded_year, pc.industry_specialities::jsonb
+		GROUP BY pc.id, pc.slug, pc.name, pc.tagline, pc.chatgpt_description, pc.linkedin_description, pc.profile_pic_url, pc.home_page_url, pc.linkedin_url, pc.employee_range, pc.founded_year, pc.industries::jsonb
 		ORDER BY max(pj.created_at_source) DESC, pc.id DESC
 		LIMIT $%d OFFSET $%d`, whereClause, limitArg, offsetArg)
 
@@ -217,10 +217,10 @@ func (h *Handler) listCompanies(c *gin.Context) {
 		var linkedin pgtype.Text
 		var employeeRange pgtype.Text
 		var foundedYear pgtype.Text
-		var industrySpecialities []byte
+		var industries []byte
 		var totalJobs int64
 		var latestJob pgtype.Timestamptz
-		if err := rows.Scan(&companyId, &slug, &name, &tagline, &chatgptDescription, &linkedinDescription, &profilePic, &homePage, &linkedin, &employeeRange, &foundedYear, &industrySpecialities, &totalJobs, &latestJob); err != nil {
+		if err := rows.Scan(&companyId, &slug, &name, &tagline, &chatgptDescription, &linkedinDescription, &profilePic, &homePage, &linkedin, &employeeRange, &foundedYear, &industries, &totalJobs, &latestJob); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load companies"})
 			return
 		}
@@ -229,8 +229,8 @@ func (h *Handler) listCompanies(c *gin.Context) {
 			continue
 		}
 		industryValues := []string{}
-		if len(industrySpecialities) > 0 {
-			_ = json.Unmarshal(industrySpecialities, &industryValues)
+		if len(industries) > 0 {
+			_ = json.Unmarshal(industries, &industryValues)
 		}
 		description := pgTextPtr(chatgptDescription)
 		if description == nil {
@@ -247,7 +247,7 @@ func (h *Handler) listCompanies(c *gin.Context) {
 			LinkedInURL:        pgTextPtr(linkedin),
 			EmployeeRange:      pgTextPtr(employeeRange),
 			FoundedYear:        pgTextPtr(foundedYear),
-			IndustrySpecialies: industryValues,
+			Industries:         industryValues,
 			TotalJobs:          totalJobs,
 			LatestJobPostedAt:  timestamptzStringPtr(latestJob),
 		})
@@ -337,8 +337,8 @@ func (h *Handler) companyProfile(c *gin.Context) {
 		FoundedYear:   pgTextPtr(row.FoundedYear),
 		SponsorsH1B:   pgBoolPtr(row.SponsorsH1b),
 	}
-	if len(row.IndustrySpecialities) > 0 {
-		_ = json.Unmarshal(row.IndustrySpecialities, &item.IndustrySpecialies)
+	if len(row.Industries) > 0 {
+		_ = json.Unmarshal(row.Industries, &item.Industries)
 	}
 	stats, err := h.q.GetCompanyProfileStats(c.Request.Context(), pgtype.Int4{Int32: row.ID, Valid: true})
 	if err != nil {
