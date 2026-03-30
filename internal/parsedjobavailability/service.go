@@ -207,6 +207,11 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		return 0, err
 	}
 	if len(jobs) == 0 {
+		if lastParsedJobID > 0 {
+			if err := s.saveLastParsedJobID(ctx, 0); err != nil {
+				return 0, err
+			}
+		}
 		log.Printf("parsed-job-availability-worker batch_done rows=0 processed=0")
 		return 0, nil
 	}

@@ -210,3 +210,47 @@ func TestProcessPendingDoesNotAdvanceCheckpointPastFetchFailure(t *testing.T) {
 		t.Fatalf("expected no checkpoint row, got %d", count)
 	}
 }
+
+func TestProcessPendingResetsCheckpointAfterReachingEnd(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "parsed_job_availability_reset"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	insertAvailabilityJob(t, db, 1, 1, "builtin", "https://example.com/jobs/open")
+
+	svc := New(Config{WorkerCount: 1}, db)
+	svc.EnabledSources = map[string]struct{}{"builtin": {}}
+	svc.ReadHTMLForSource = func(context.Context, string, string) (string, int, error) {
+		return "<html>open</html>", 200, nil
+	}
+
+	processed, err := svc.ProcessPending(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected 1 processed row, got %d", processed)
+	}
+
+	processed, err = svc.ProcessPending(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 0 {
+		t.Fatalf("expected 0 processed rows after reaching end, got %d", processed)
+	}
+
+	var stateText string
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT COALESCE(state::text, '') FROM worker_states WHERE worker_name = ?`, constants.WorkerNameParsedAvailability).Scan(&stateText); err != nil {
+		t.Fatal(err)
+	}
+	state := map[string]any{}
+	if err := json.Unmarshal([]byte(stateText), &state); err != nil {
+		t.Fatal(err)
+	}
+	if state[workerStateLastCheckedParsedJobIDKey].(float64) != 0 {
+		t.Fatalf("expected checkpoint reset to 0, got %#v", state)
+	}
+}
