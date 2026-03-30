@@ -4,9 +4,12 @@ import (
 	"database/sql"
 	"reflect"
 	"testing"
+
+	"goapplyjob-golang-backend/internal/extract/techstack"
 )
 
 func TestExtractForRowReturnsNormalizedTechStackForEligibleRow(t *testing.T) {
+	extractor := techstack.NewExtractor("")
 	row := parsedJobRow{
 		Source:              "dailyremote",
 		RoleDescription:     sql.NullString{String: "Build services with Node.js and PostgreSQL.", Valid: true},
@@ -14,7 +17,7 @@ func TestExtractForRowReturnsNormalizedTechStackForEligibleRow(t *testing.T) {
 		CategorizedFunction: sql.NullString{String: "Software Engineer", Valid: true},
 	}
 
-	got, ok := extractForRow(row)
+	got, ok := extractForRow(extractor, row)
 	if !ok {
 		t.Fatal("expected row to be eligible")
 	}
@@ -25,6 +28,7 @@ func TestExtractForRowReturnsNormalizedTechStackForEligibleRow(t *testing.T) {
 }
 
 func TestExtractForRowSkipsExistingTechStack(t *testing.T) {
+	extractor := techstack.NewExtractor("")
 	row := parsedJobRow{
 		Source:              "dailyremote",
 		RoleDescription:     sql.NullString{String: "Build services with Node.js.", Valid: true},
@@ -32,9 +36,8 @@ func TestExtractForRowSkipsExistingTechStack(t *testing.T) {
 		TechStackJSON:       sql.NullString{String: `["Go"]`, Valid: true},
 	}
 
-	got, ok := extractForRow(row)
+	got, ok := extractForRow(extractor, row)
 	if ok || got != nil {
 		t.Fatalf("expected row to be skipped, got=%#v ok=%t", got, ok)
 	}
 }
-

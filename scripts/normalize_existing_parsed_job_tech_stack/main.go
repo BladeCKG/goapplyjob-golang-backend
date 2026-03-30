@@ -6,10 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
-	"strings"
-	"sync"
 	"time"
 
 	"goapplyjob-golang-backend/internal/config"
@@ -33,8 +29,9 @@ func main() {
 		log.Fatalf("db open: %v", err)
 	}
 	defer db.Close()
+	extractor := techstack.NewExtractor(cfg.TechStackCatalogURL)
 
-	scanned, updated, err := run(context.Background(), db, *dryRun, *batchSize)
+	scanned, updated, err := run(context.Background(), db, extractor, *dryRun, *batchSize)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -51,16 +48,7 @@ type parsedJobRow struct {
 	TechStackJSON string
 }
 
-type techstackCatalogEntry struct {
-	Canonical string `json:"canonical"`
-}
-
-var (
-	loadCanonicalsOnce sync.Once
-	exactCanonicals    map[string]string
-)
-
-func run(ctx context.Context, db *database.DB, dryRun bool, batchSize int) (int, int, error) {
+func run(ctx context.Context, db *database.DB, extractor techstack.Extractor, dryRun bool, batchSize int) (int, int, error) {
 	scanned := 0
 	updated := 0
 	lastParsedJobID := int64(0)
@@ -88,7 +76,7 @@ func run(ctx context.Context, db *database.DB, dryRun bool, batchSize int) (int,
 			scanned++
 
 			before := parseJSONArrayStrings(row.TechStackJSON)
-			after := normalizeTechStack(before)
+			after := normalizeTechStack(extractor, before)
 			if equalStringSlices(before, after) {
 				continue
 			}
@@ -198,14 +186,14 @@ func parseJSONArrayStrings(value string) []string {
 	return out
 }
 
-func normalizeTechStack(values []string) []string {
+func normalizeTechStack(extractor techstack.Extractor, values []string) []string {
 	if len(values) == 0 {
 		return []string{}
 	}
 	normalized := make([]string, 0, len(values))
 	seen := make(map[string]struct{}, len(values))
 	for _, value := range values {
-		if canonical, ok := normalizeExactCanonical(value); ok {
+		if canonical, ok := extractor.ExactCanonical(value); ok {
 			if _, ok := seen[canonical]; ok {
 				continue
 			}
@@ -213,7 +201,7 @@ func normalizeTechStack(values []string) []string {
 			seen[canonical] = struct{}{}
 			continue
 		}
-		extracted := techstack.Extract(value)
+		extracted := extractor.Extract(value)
 		if len(extracted) == 0 {
 			continue
 		}
@@ -225,41 +213,6 @@ func normalizeTechStack(values []string) []string {
 		seen[canonical] = struct{}{}
 	}
 	return normalized
-}
-
-func normalizeExactCanonical(value string) (string, bool) {
-	if exactCanonicals != nil {
-		canonical, ok := exactCanonicals[strings.ToLower(value)]
-		return canonical, ok
-	}
-	loadCanonicalsOnce.Do(loadExactCanonicals)
-	if value == "" {
-		return "", false
-	}
-	canonical, ok := exactCanonicals[strings.ToLower(value)]
-	return canonical, ok
-}
-
-func loadExactCanonicals() {
-	path := filepath.Join("internal", "extract", "techstack", "catalog.json")
-	content, err := os.ReadFile(path)
-	if err != nil {
-		exactCanonicals = map[string]string{}
-		return
-	}
-	var entries []techstackCatalogEntry
-	if err := json.Unmarshal(content, &entries); err != nil {
-		exactCanonicals = map[string]string{}
-		return
-	}
-	loaded := make(map[string]string, len(entries))
-	for _, entry := range entries {
-		if entry.Canonical == "" {
-			continue
-		}
-		loaded[strings.ToLower(entry.Canonical)] = entry.Canonical
-	}
-	exactCanonicals = loaded
 }
 
 func equalStringSlices(left, right []string) bool {

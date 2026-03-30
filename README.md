@@ -178,6 +178,14 @@ CATEGORY_SIGNAL_TOKENS_URL=https://example.com/category_signal_tokens.json
 
 If that env is not set, the backend uses the embedded `internal/parsed/category_signal_tokens.json`.
 
+For the tech stack catalog, you can similarly set:
+
+```env
+TECH_STACK_CATALOG_URL=https://example.com/catalog.json
+```
+
+If that env is not set, the backend uses the embedded `internal/extract/techstack/catalog.json`.
+
 ### Docker Bootstrap (Linux + Windows)
 
 Linux:

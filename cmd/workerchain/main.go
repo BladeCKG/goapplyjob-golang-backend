@@ -157,6 +157,7 @@ func main() {
 					ErrorBackoffSeconds:     errorBackoffSeconds,
 					WorkerCount:             config.GetenvInt("PARSED_JOB_WORKER_COUNT", 1),
 					CategorySignalTokensURL: cfg.CategorySignalTokensURL,
+					TechStackCatalogURL:     cfg.TechStackCatalogURL,
 				}, db)
 				parsedSvc.EnabledSources = enabledSources
 				parsedAIClassifierSvc := parsedaiclassifier.New(parsedaiclassifier.Config{

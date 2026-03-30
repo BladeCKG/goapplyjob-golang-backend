@@ -179,6 +179,7 @@ type Config struct {
 	ErrorBackoffSeconds     int
 	WorkerCount             int
 	CategorySignalTokensURL string
+	TechStackCatalogURL     string
 }
 
 func New(cfg Config, db *database.DB) *Service { return &Service{DB: db, Config: cfg} }
@@ -1188,11 +1189,11 @@ func normalizeTechStack(values any) []string {
 	return techstacknorm.Normalize(values)
 }
 
-func extractManualTechStackIfNeeded(roleDescription, roleRequirements string, normalizedTechStack []string, extractionEnabled bool, categorizedTitle, categorizedFunction string) []string {
+func extractManualTechStackIfNeeded(extractor techstack.Extractor, roleDescription, roleRequirements string, normalizedTechStack []string, extractionEnabled bool, categorizedTitle, categorizedFunction string) []string {
 	if len(normalizedTechStack) > 0 || !extractionEnabled || !techstack.IsAllowedInference(categorizedTitle, categorizedFunction) {
 		return normalizedTechStack
 	}
-	return techstacknorm.Normalize(techstack.ExtractDescriptionRequirements(roleDescription, roleRequirements))
+	return techstacknorm.Normalize(extractor.ExtractDescriptionRequirements(roleDescription, roleRequirements))
 }
 
 func normalizeCountryName(value string) string {
@@ -1548,6 +1549,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			}
 		}
 		normalizedTechStack = extractManualTechStackIfNeeded(
+			techstack.NewExtractor(s.Config.TechStackCatalogURL),
 			stringValue(payload["roleDescription"]),
 			stringValue(payload["roleRequirements"]),
 			normalizedTechStack,
@@ -2342,7 +2344,7 @@ func (s *Service) upsertCompanyFromPayload(ctx context.Context, payload map[stri
 		    chatgpt_description_brazil, chatgpt_description_france, chatgpt_description_germany, linkedin_description_brazil, linkedin_description_france, linkedin_description_germany,
 		    funding_data, chatgpt_industries, industry_specialities, industry_specialities_brazil, industry_specialities_france, industry_specialities_germany, updated_at
 		  )
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 RETURNING id`,
 		nilIfEmpty(externalCompanyIDToken(externalCompanyIDVal)),
 		nilIfEmpty(nameVal),

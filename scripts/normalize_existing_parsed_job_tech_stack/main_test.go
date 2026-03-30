@@ -3,27 +3,26 @@ package main
 import (
 	"reflect"
 	"testing"
+
+	"goapplyjob-golang-backend/internal/extract/techstack"
 )
 
-func TestNormalizeExactCanonical(t *testing.T) {
-	exactCanonicals = map[string]string{
-		"go":      "Go",
-		"angular": "Angular",
-	}
+func TestExactCanonical(t *testing.T) {
+	extractor := techstack.NewExtractor("")
 
-	got, ok := normalizeExactCanonical("Go")
+	got, ok := extractor.ExactCanonical("Go")
 	if !ok || got != "Go" {
-		t.Fatalf("normalizeExactCanonical mismatch got=%q ok=%v", got, ok)
+		t.Fatalf("ExactCanonical mismatch got=%q ok=%v", got, ok)
 	}
 
-	got, ok = normalizeExactCanonical("angular")
+	got, ok = extractor.ExactCanonical("angular")
 	if !ok || got != "Angular" {
-		t.Fatalf("normalizeExactCanonical mismatch got=%q ok=%v", got, ok)
+		t.Fatalf("ExactCanonical mismatch got=%q ok=%v", got, ok)
 	}
 
-	got, ok = normalizeExactCanonical("angular js")
+	got, ok = extractor.ExactCanonical("angular js")
 	if ok || got != "" {
-		t.Fatalf("normalizeExactCanonical unexpected match got=%q ok=%v", got, ok)
+		t.Fatalf("ExactCanonical unexpected match got=%q ok=%v", got, ok)
 	}
 }
 
@@ -36,11 +35,9 @@ func TestParseJSONArrayStrings(t *testing.T) {
 }
 
 func TestNormalizationRule(t *testing.T) {
-	exactCanonicals = map[string]string{
-		"go": "Go",
-	}
+	extractor := techstack.NewExtractor("")
 	before := parseJSONArrayStrings(`["angular","ReactJS","unknown","postgres","Go","Golang"]`)
-	after := normalizeTechStack(before)
+	after := normalizeTechStack(extractor, before)
 	want := []string{"Angular", "React", "PostgreSQL", "Go"}
 	if !reflect.DeepEqual(after, want) {
 		t.Fatalf("normalizeTechStack mismatch got=%#v want=%#v", after, want)
@@ -48,11 +45,9 @@ func TestNormalizationRule(t *testing.T) {
 }
 
 func TestNormalizationDropsUnmatchedValues(t *testing.T) {
-	exactCanonicals = map[string]string{
-		"go": "Go",
-	}
+	extractor := techstack.NewExtractor("")
 	before := parseJSONArrayStrings(`["Go","unknown"]`)
-	after := normalizeTechStack(before)
+	after := normalizeTechStack(extractor, before)
 	want := []string{"Go"}
 	if !reflect.DeepEqual(after, want) {
 		t.Fatalf("normalizeTechStack mismatch got=%#v want=%#v", after, want)
@@ -60,11 +55,9 @@ func TestNormalizationDropsUnmatchedValues(t *testing.T) {
 }
 
 func TestNormalizationAllowsAliasInsideLine(t *testing.T) {
-	exactCanonicals = map[string]string{
-		"go": "Go",
-	}
+	extractor := techstack.NewExtractor("")
 	before := parseJSONArrayStrings(`["Go","angular js","postgres sql","unknown"]`)
-	after := normalizeTechStack(before)
+	after := normalizeTechStack(extractor, before)
 	want := []string{"Go", "Angular", "PostgreSQL"}
 	if !reflect.DeepEqual(after, want) {
 		t.Fatalf("normalizeTechStack mismatch got=%#v want=%#v", after, want)

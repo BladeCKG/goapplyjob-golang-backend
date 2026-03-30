@@ -3,10 +3,13 @@ package techstack
 import (
 	_ "embed"
 	"encoding/json"
+	"io"
+	"net/http"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 type catalogEntry struct {
@@ -30,12 +33,24 @@ type matchCandidate struct {
 var catalogJSON []byte
 
 var (
-	loadCatalogOnce sync.Once
-	matchers        []matcherEntry
+	catalogMu         sync.RWMutex
+	defaultMatchers   []matcherEntry
+	defaultCanonicals map[string]string
+	matchersByURL     = map[string][]matcherEntry{}
+	canonicalsByURL   = map[string]map[string]string{}
+	catalogETagByURL  = map[string]string{}
 )
 
-func Extract(text string) []string {
-	loadCatalogOnce.Do(loadCatalog)
+type Extractor struct {
+	catalogURL string
+}
+
+func NewExtractor(catalogURL string) Extractor {
+	return Extractor{catalogURL: strings.TrimSpace(catalogURL)}
+}
+
+func (e Extractor) Extract(text string) []string {
+	matchers := getMatchers(e.catalogURL)
 	if strings.TrimSpace(text) == "" {
 		return []string{}
 	}
@@ -87,32 +102,128 @@ func Extract(text string) []string {
 	return results
 }
 
-func ExtractDescriptionRequirements(description, requirements string) []string {
+func (e Extractor) ExtractDescriptionRequirements(description, requirements string) []string {
 	switch {
 	case description == "" && requirements == "":
 		return []string{}
 	case description == "":
-		return Extract(requirements)
+		return e.Extract(requirements)
 	case requirements == "":
-		return Extract(description)
+		return e.Extract(description)
 	default:
-		return Extract(description + "\n\n" + requirements)
+		return e.Extract(description + "\n\n" + requirements)
 	}
 }
 
-func loadCatalog() {
+func (e Extractor) ExactCanonical(value string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return "", false
+	}
+	canonicals := getCanonicals(e.catalogURL)
+	canonical, ok := canonicals[normalized]
+	return canonical, ok
+}
+
+func getMatchers(catalogURL string) []matcherEntry {
+	if catalogURL == "" {
+		catalogMu.RLock()
+		if defaultMatchers != nil && defaultCanonicals != nil {
+			matchers := defaultMatchers
+			catalogMu.RUnlock()
+			return matchers
+		}
+		catalogMu.RUnlock()
+
+		loaded, canonicals, err := buildCatalog(catalogJSON)
+		if err != nil {
+			return []matcherEntry{}
+		}
+
+		catalogMu.Lock()
+		defaultMatchers = loaded
+		defaultCanonicals = canonicals
+		catalogMu.Unlock()
+		return loaded
+	}
+
+	catalogMu.RLock()
+	prevETag := catalogETagByURL[catalogURL]
+	catalogMu.RUnlock()
+
+	req, err := http.NewRequest(http.MethodGet, catalogURL, nil)
+	if err != nil {
+		return []matcherEntry{}
+	}
+	if prevETag != "" {
+		req.Header.Set("If-None-Match", prevETag)
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return []matcherEntry{}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotModified {
+		catalogMu.RLock()
+		matchers := matchersByURL[catalogURL]
+		catalogMu.RUnlock()
+		if matchers == nil {
+			return []matcherEntry{}
+		}
+		return matchers
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return []matcherEntry{}
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return []matcherEntry{}
+	}
+	loaded, canonicals, err := buildCatalog(raw)
+	if err != nil {
+		return []matcherEntry{}
+	}
+
+	catalogMu.Lock()
+	matchersByURL[catalogURL] = loaded
+	canonicalsByURL[catalogURL] = canonicals
+	catalogETagByURL[catalogURL] = resp.Header.Get("ETag")
+	catalogMu.Unlock()
+	return loaded
+}
+
+func getCanonicals(catalogURL string) map[string]string {
+	_ = getMatchers(catalogURL)
+	catalogMu.RLock()
+	defer catalogMu.RUnlock()
+	if catalogURL == "" {
+		if defaultCanonicals == nil {
+			return map[string]string{}
+		}
+		return defaultCanonicals
+	}
+	if canonicals := canonicalsByURL[catalogURL]; canonicals != nil {
+		return canonicals
+	}
+	return map[string]string{}
+}
+
+func buildCatalog(raw []byte) ([]matcherEntry, map[string]string, error) {
 	var entries []catalogEntry
-	if err := json.Unmarshal(catalogJSON, &entries); err != nil {
-		matchers = []matcherEntry{}
-		return
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, nil, err
 	}
 
 	loaded := make([]matcherEntry, 0, len(entries))
+	canonicals := make(map[string]string, len(entries))
 	for _, entry := range entries {
 		canonical := strings.TrimSpace(entry.Canonical)
 		if canonical == "" {
 			continue
 		}
+		canonicals[strings.ToLower(canonical)] = canonical
 		aliasSet := map[string]struct{}{}
 		for _, alias := range entry.Aliases {
 			trimmed := strings.TrimSpace(alias)
@@ -143,7 +254,7 @@ func loadCatalog() {
 			patterns:  patterns,
 		})
 	}
-	matchers = loaded
+	return loaded, canonicals, nil
 }
 
 func buildAliasPattern(alias string, caseSensitive bool) string {

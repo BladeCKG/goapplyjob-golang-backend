@@ -41,10 +41,12 @@ func main() {
 		log.Fatalf("db open: %v", err)
 	}
 	defer db.Close()
+	extractor := techstack.NewExtractor(cfg.TechStackCatalogURL)
 
 	scanned, updated, err := run(
 		context.Background(),
 		db,
+		extractor,
 		*fromParsedJobID,
 		*toParsedJobID,
 		*dryRun,
@@ -80,7 +82,7 @@ type parsedJobRow struct {
 	TechStackJSON       sql.NullString
 }
 
-func run(ctx context.Context, db *database.DB, fromParsedJobID, toParsedJobID int64, dryRun bool, batchSize int) (int, int, error) {
+func run(ctx context.Context, db *database.DB, extractor techstack.Extractor, fromParsedJobID, toParsedJobID int64, dryRun bool, batchSize int) (int, int, error) {
 	scanned := 0
 	updated := 0
 	lastParsedJobID := fromParsedJobID - 1
@@ -107,7 +109,7 @@ func run(ctx context.Context, db *database.DB, fromParsedJobID, toParsedJobID in
 			lastParsedJobID = row.ParsedJobID
 			scanned++
 
-			nextTechStack, ok := extractForRow(row)
+			nextTechStack, ok := extractForRow(extractor, row)
 			if !ok {
 				continue
 			}
@@ -213,7 +215,7 @@ func selectBatch(ctx context.Context, db *database.DB, lastParsedJobID, toParsed
 	return out, nil
 }
 
-func extractForRow(row parsedJobRow) ([]string, bool) {
+func extractForRow(extractor techstack.Extractor, row parsedJobRow) ([]string, bool) {
 	plugin, ok := plugins.Get(row.Source)
 	if !ok || !plugin.UseManualTechStackExtraction {
 		return nil, false
@@ -225,7 +227,7 @@ func extractForRow(row parsedJobRow) ([]string, bool) {
 		return nil, false
 	}
 
-	extracted := techstack.ExtractDescriptionRequirements(row.RoleDescription.String, row.RoleRequirements.String)
+	extracted := extractor.ExtractDescriptionRequirements(row.RoleDescription.String, row.RoleRequirements.String)
 	normalized := techstacknorm.Normalize(extracted)
 	if len(normalized) == 0 {
 		return nil, false
@@ -255,4 +257,3 @@ func hasExistingTechStack(raw sql.NullString) bool {
 	}
 	return false
 }
-
