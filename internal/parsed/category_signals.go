@@ -3,11 +3,11 @@ package parsed
 import (
 	_ "embed"
 	"encoding/json"
+	"io"
+	"net/http"
 	"sync"
+	"time"
 )
-
-//go:embed category_signal_tokens.json
-var categorySignalTokensJSON []byte
 
 type categorySignalEntry struct {
 	Category string                `json:"category"`
@@ -23,18 +23,23 @@ type categorySignalTerms struct {
 	tokens map[string]float64
 }
 
+//go:embed category_signal_tokens.json
+var categorySignalTokensJSON []byte
+
 var (
-	loadCategorySignalsOnce sync.Once
-	categorySignalCatalog   map[string]categorySignalTerms
+	categorySignalCatalogMu        sync.RWMutex
+	categorySignalCatalogDefault   map[string]categorySignalTerms
+	categorySignalCatalogByURL     = map[string]map[string]categorySignalTerms{}
+	categorySignalCatalogETagByURL = map[string]string{}
 )
 
-func loadCategorySignals() {
+func buildCategorySignalCatalog(raw []byte) (map[string]categorySignalTerms, error) {
 	var entries []categorySignalEntry
-	if err := json.Unmarshal(categorySignalTokensJSON, &entries); err != nil {
-		panic(err)
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, err
 	}
 
-	categorySignalCatalog = map[string]categorySignalTerms{}
+	catalog := map[string]categorySignalTerms{}
 	for _, entry := range entries {
 		categoryKey := normalizeRoleTitleForExactMatch(entry.Category)
 		if categoryKey == "" {
@@ -53,19 +58,82 @@ func loadCategorySignals() {
 			}
 		}
 
-		categorySignalCatalog[categoryKey] = categorySignalTerms{
+		catalog[categoryKey] = categorySignalTerms{
 			tokens: tokens,
 		}
 	}
+	return catalog, nil
 }
 
-func getCategorySignalCatalog() map[string]categorySignalTerms {
-	loadCategorySignalsOnce.Do(loadCategorySignals)
-	return categorySignalCatalog
+func getCategorySignalCatalog(url string) map[string]categorySignalTerms {
+	if url == "" {
+		categorySignalCatalogMu.RLock()
+		if categorySignalCatalogDefault != nil {
+			catalog := categorySignalCatalogDefault
+			categorySignalCatalogMu.RUnlock()
+			return catalog
+		}
+		categorySignalCatalogMu.RUnlock()
+
+		catalog, err := buildCategorySignalCatalog(categorySignalTokensJSON)
+		if err != nil {
+			panic(err)
+		}
+
+		categorySignalCatalogMu.Lock()
+		categorySignalCatalogDefault = catalog
+		categorySignalCatalogMu.Unlock()
+		return catalog
+	}
+
+	categorySignalCatalogMu.RLock()
+	prevETag := categorySignalCatalogETagByURL[url]
+	categorySignalCatalogMu.RUnlock()
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		panic(err)
+	}
+	if prevETag != "" {
+		req.Header.Set("If-None-Match", prevETag)
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		panic(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotModified {
+		categorySignalCatalogMu.RLock()
+		catalog := categorySignalCatalogByURL[url]
+		categorySignalCatalogMu.RUnlock()
+		if catalog == nil {
+			panic("category signal catalog returned 304 before initial load")
+		}
+		return catalog
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		panic("failed to fetch category signal tokens: " + resp.Status)
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		panic(err)
+	}
+	catalog, err := buildCategorySignalCatalog(raw)
+	if err != nil {
+		panic(err)
+	}
+
+	categorySignalCatalogMu.Lock()
+	categorySignalCatalogByURL[url] = catalog
+	categorySignalCatalogETagByURL[url] = resp.Header.Get("ETag")
+	categorySignalCatalogMu.Unlock()
+	return catalog
 }
 
-func categorySignalWeight(sourceNormalizedTitle, candidateCategoryTitle, candidateCategoryFunction string) float64 {
-	catalog := getCategorySignalCatalog()
+func categorySignalWeightWithURL(catalogURL, sourceNormalizedTitle, candidateCategoryTitle, candidateCategoryFunction string) float64 {
+	catalog := getCategorySignalCatalog(catalogURL)
 	if len(catalog) == 0 || sourceNormalizedTitle == "" {
 		return 0
 	}
@@ -96,4 +164,8 @@ func categorySignalWeight(sourceNormalizedTitle, candidateCategoryTitle, candida
 	}
 
 	return weight
+}
+
+func categorySignalWeight(sourceNormalizedTitle, candidateCategoryTitle, candidateCategoryFunction string) float64 {
+	return categorySignalWeightWithURL("", sourceNormalizedTitle, candidateCategoryTitle, candidateCategoryFunction)
 }

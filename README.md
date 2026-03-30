@@ -170,6 +170,14 @@ go run ./cmd/migrate
 
 Then set `ENABLED_SOURCES` in `.env` before starting workers so the first watcher/import cycle only creates the sources you want.
 
+If you want to override the parsed category signal JSON without rebuilding, set:
+
+```env
+CATEGORY_SIGNAL_TOKENS_URL=https://example.com/category_signal_tokens.json
+```
+
+If that env is not set, the backend uses the embedded `internal/parsed/category_signal_tokens.json`.
+
 ### Docker Bootstrap (Linux + Windows)
 
 Linux:

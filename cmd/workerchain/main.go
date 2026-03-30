@@ -151,11 +151,12 @@ func main() {
 				rawSvc.ReadHTMLForSource = makeReadHTMLForSourceWith429Retry(retries429, time.Duration(retryDelaySeconds)*time.Second)
 
 				parsedSvc := parsed.New(parsed.Config{
-					BatchSize:           config.GetenvInt("PARSED_JOB_WORKER_BATCH_SIZE", 200),
-					PollSeconds:         config.GetenvFloat("PARSED_JOB_WORKER_POLL_SECONDS", 5),
-					RunOnce:             true,
-					ErrorBackoffSeconds: errorBackoffSeconds,
-					WorkerCount:         config.GetenvInt("PARSED_JOB_WORKER_COUNT", 1),
+					BatchSize:               config.GetenvInt("PARSED_JOB_WORKER_BATCH_SIZE", 200),
+					PollSeconds:             config.GetenvFloat("PARSED_JOB_WORKER_POLL_SECONDS", 5),
+					RunOnce:                 true,
+					ErrorBackoffSeconds:     errorBackoffSeconds,
+					WorkerCount:             config.GetenvInt("PARSED_JOB_WORKER_COUNT", 1),
+					CategorySignalTokensURL: cfg.CategorySignalTokensURL,
 				}, db)
 				parsedSvc.EnabledSources = enabledSources
 				parsedAIClassifierSvc := parsedaiclassifier.New(parsedaiclassifier.Config{

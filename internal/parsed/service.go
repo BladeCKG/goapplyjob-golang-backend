@@ -173,11 +173,12 @@ type Service struct {
 }
 
 type Config struct {
-	BatchSize           int
-	PollSeconds         float64
-	RunOnce             bool
-	ErrorBackoffSeconds int
-	WorkerCount         int
+	BatchSize               int
+	PollSeconds             float64
+	RunOnce                 bool
+	ErrorBackoffSeconds     int
+	WorkerCount             int
+	CategorySignalTokensURL string
 }
 
 func New(cfg Config, db *database.DB) *Service { return &Service{DB: db, Config: cfg} }
@@ -982,7 +983,7 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 					genericOneWordCategoryPenalty = 1
 				}
 
-				categorySignalScore := categorySignalWeight(sourceNormalizedTitle, candidateTitle.String, candidateFunction.String)
+				categorySignalScore := categorySignalWeightWithURL(s.Config.CategorySignalTokensURL, sourceNormalizedTitle, candidateTitle.String, candidateFunction.String)
 
 				rank := matchRank{
 					exactNormalizedTitleMatch:     exactNormalizedTitleMatch,
