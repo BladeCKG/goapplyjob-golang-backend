@@ -148,8 +148,16 @@
     "category": "Administration",
     "tokens": [
       {
+        "token": "admin",
+        "weight": 0.75
+      },
+      {
         "token": "administration",
         "weight": 2.0
+      },
+      {
+        "token": "administrator",
+        "weight": 1.5
       }
     ]
   },
@@ -754,6 +762,10 @@
   {
     "category": "Communications",
     "tokens": [
+      {
+        "token": "communication",
+        "weight": 1.75
+      },
       {
         "token": "communications",
         "weight": 2.0
@@ -2291,6 +2303,14 @@
   {
     "category": "Recruitment",
     "tokens": [
+      {
+        "token": "recruiter",
+        "weight": 1.75
+      },
+      {
+        "token": "recruiting",
+        "weight": 1.75
+      },
       {
         "token": "recruitment",
         "weight": 1.9166666666666665
