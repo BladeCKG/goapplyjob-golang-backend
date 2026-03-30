@@ -1629,6 +1629,7 @@ func (h *Handler) listParsedCompanies(c *gin.Context) {
 		"profile_pic_url":     {columnExpr: "profile_pic_url", valueType: "text"},
 		"sponsors_h1b":        {columnExpr: "sponsors_h1b", valueType: "bool"},
 		"employee_range":      {columnExpr: "employee_range", valueType: "text"},
+		"industry_specialities": {columnExpr: "industry_specialities::text", valueType: "text"},
 	}
 	for _, item := range parsedFilters {
 		def, ok := filterDefinitions[item.Column]
@@ -1653,7 +1654,7 @@ func (h *Handler) listParsedCompanies(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list parsed companies"})
 		return
 	}
-	query := `SELECT id, external_company_id, name, slug, tagline, founded_year, home_page_url, linkedin_url, profile_pic_url, sponsors_h1b, employee_range FROM parsed_companies` + where + orderClause + ` LIMIT ? OFFSET ?`
+	query := `SELECT id, external_company_id, name, slug, tagline, founded_year, home_page_url, linkedin_url, profile_pic_url, sponsors_h1b, employee_range, industry_specialities::text FROM parsed_companies` + where + orderClause + ` LIMIT ? OFFSET ?`
 	queryArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, queryArgs...)
 	if err != nil {
@@ -1670,8 +1671,9 @@ func (h *Handler) listParsedCompanies(c *gin.Context) {
 			profilePicURL                   sql.NullString
 			sponsors                        sql.NullBool
 			employeeRange                   sql.NullString
+			industrySpecialities            sql.NullString
 		)
-		if err := rows.Scan(&id, &externalID, &name, &slug, &tagline, &foundedYear, &homePage, &linkedin, &profilePicURL, &sponsors, &employeeRange); err != nil {
+		if err := rows.Scan(&id, &externalID, &name, &slug, &tagline, &foundedYear, &homePage, &linkedin, &profilePicURL, &sponsors, &employeeRange, &industrySpecialities); err != nil {
 			continue
 		}
 		items = append(items, gin.H{
@@ -1686,6 +1688,7 @@ func (h *Handler) listParsedCompanies(c *gin.Context) {
 			"profile_pic_url":     nullableString(profilePicURL),
 			"sponsors_h1b":        nullableBool(sponsors),
 			"employee_range":      nullableString(employeeRange),
+			"industry_specialities": parseJSONStringArray(industrySpecialities),
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"total": total, "items": items})
@@ -1716,6 +1719,7 @@ func (h *Handler) updateParsedCompany(c *gin.Context) {
 		"profile_pic_url":     jsonPatchStringOrNull,
 		"sponsors_h1b":        jsonPatchBoolOrNull,
 		"employee_range":      jsonPatchStringOrNull,
+		"industry_specialities": jsonPatchStringArrayOrNull,
 	})
 	if !ok {
 		return
