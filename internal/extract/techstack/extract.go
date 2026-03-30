@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"regexp"
 	"sort"
@@ -126,50 +127,68 @@ func (e Extractor) ExactCanonical(value string) (string, bool) {
 }
 
 func loadCatalog(catalogURL string) ([]matcherEntry, map[string]string) {
+	defaultMatchers, defaultCanonicals := getDefaultCatalog()
 	if catalogURL == "" {
-		catalogMu.RLock()
-		if defaultMatchers != nil && defaultCanonicals != nil {
-			matchers := defaultMatchers
-			canonicals := defaultCanonicals
-			catalogMu.RUnlock()
-			return matchers, canonicals
-		}
-		catalogMu.RUnlock()
-
-		loaded, canonicals, err := buildCatalog(catalogJSON)
-		if err != nil {
-			return []matcherEntry{}, map[string]string{}
-		}
-
-		catalogMu.Lock()
-		defaultMatchers = loaded
-		defaultCanonicals = canonicals
-		catalogMu.Unlock()
-		return loaded, canonicals
+		return defaultMatchers, defaultCanonicals
 	}
 
 	req, err := http.NewRequest(http.MethodGet, catalogURL, nil)
 	if err != nil {
-		return []matcherEntry{}, map[string]string{}
+		log.Printf("techstack catalog remote_load_failed url=%q error=%v; falling back to embedded catalog", catalogURL, err)
+		return defaultMatchers, defaultCanonicals
 	}
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return []matcherEntry{}, map[string]string{}
+		log.Printf("techstack catalog remote_load_failed url=%q error=%v; falling back to embedded catalog", catalogURL, err)
+		return defaultMatchers, defaultCanonicals
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return []matcherEntry{}, map[string]string{}
+		log.Printf("techstack catalog remote_load_failed url=%q status=%s; falling back to embedded catalog", catalogURL, resp.Status)
+		return defaultMatchers, defaultCanonicals
 	}
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return []matcherEntry{}, map[string]string{}
+		log.Printf("techstack catalog remote_load_failed url=%q error=%v; falling back to embedded catalog", catalogURL, err)
+		return defaultMatchers, defaultCanonicals
 	}
 	loaded, canonicals, err := buildCatalog(raw)
 	if err != nil {
+		log.Printf("techstack catalog remote_load_failed url=%q error=%v; falling back to embedded catalog", catalogURL, err)
+		return defaultMatchers, defaultCanonicals
+	}
+	log.Printf("techstack catalog remote_load_succeeded url=%q canonicals=%d", catalogURL, len(canonicals))
+	return loaded, canonicals
+}
+
+func getDefaultCatalog() ([]matcherEntry, map[string]string) {
+	catalogMu.RLock()
+	if defaultMatchers != nil && defaultCanonicals != nil {
+		matchers := defaultMatchers
+		canonicals := defaultCanonicals
+		catalogMu.RUnlock()
+		return matchers, canonicals
+	}
+	catalogMu.RUnlock()
+
+	loaded, canonicals, err := buildCatalog(catalogJSON)
+	if err != nil {
+		log.Printf("techstack catalog embedded_load_failed error=%v", err)
 		return []matcherEntry{}, map[string]string{}
 	}
+	log.Printf("techstack catalog embedded_load_succeeded canonicals=%d", len(canonicals))
+
+	catalogMu.Lock()
+	if defaultMatchers == nil || defaultCanonicals == nil {
+		defaultMatchers = loaded
+		defaultCanonicals = canonicals
+	} else {
+		loaded = defaultMatchers
+		canonicals = defaultCanonicals
+	}
+	catalogMu.Unlock()
 	return loaded, canonicals
 }
 

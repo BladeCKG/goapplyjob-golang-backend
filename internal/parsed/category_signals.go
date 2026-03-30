@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -64,47 +65,64 @@ func buildCategorySignalCatalog(raw []byte) (map[string]categorySignalTerms, err
 }
 
 func getCategorySignalCatalog(url string) map[string]categorySignalTerms {
+	defaultCatalog := getDefaultCategorySignalCatalog()
 	if url == "" {
-		categorySignalCatalogMu.RLock()
-		if categorySignalCatalogDefault != nil {
-			catalog := categorySignalCatalogDefault
-			categorySignalCatalogMu.RUnlock()
-			return catalog
-		}
-		categorySignalCatalogMu.RUnlock()
-
-		catalog, err := buildCategorySignalCatalog(categorySignalTokensJSON)
-		if err != nil {
-			panic(err)
-		}
-
-		categorySignalCatalogMu.Lock()
-		categorySignalCatalogDefault = catalog
-		categorySignalCatalogMu.Unlock()
-		return catalog
+		return defaultCatalog
 	}
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		panic(err)
+		log.Printf("parsed category signals remote_load_failed url=%q error=%v; falling back to embedded catalog", url, err)
+		return defaultCatalog
 	}
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		panic(err)
+		log.Printf("parsed category signals remote_load_failed url=%q error=%v; falling back to embedded catalog", url, err)
+		return defaultCatalog
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		panic("failed to fetch category signal tokens: " + resp.Status)
+		log.Printf("parsed category signals remote_load_failed url=%q status=%s; falling back to embedded catalog", url, resp.Status)
+		return defaultCatalog
 	}
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		panic(err)
+		log.Printf("parsed category signals remote_load_failed url=%q error=%v; falling back to embedded catalog", url, err)
+		return defaultCatalog
 	}
 	catalog, err := buildCategorySignalCatalog(raw)
 	if err != nil {
-		panic(err)
+		log.Printf("parsed category signals remote_load_failed url=%q error=%v; falling back to embedded catalog", url, err)
+		return defaultCatalog
 	}
+	log.Printf("parsed category signals remote_load_succeeded url=%q categories=%d", url, len(catalog))
+	return catalog
+}
+
+func getDefaultCategorySignalCatalog() map[string]categorySignalTerms {
+	categorySignalCatalogMu.RLock()
+	if categorySignalCatalogDefault != nil {
+		catalog := categorySignalCatalogDefault
+		categorySignalCatalogMu.RUnlock()
+		return catalog
+	}
+	categorySignalCatalogMu.RUnlock()
+
+	catalog, err := buildCategorySignalCatalog(categorySignalTokensJSON)
+	if err != nil {
+		log.Printf("parsed category signals embedded_load_failed error=%v", err)
+		return map[string]categorySignalTerms{}
+	}
+	log.Printf("parsed category signals embedded_load_succeeded categories=%d", len(catalog))
+
+	categorySignalCatalogMu.Lock()
+	if categorySignalCatalogDefault == nil {
+		categorySignalCatalogDefault = catalog
+	} else {
+		catalog = categorySignalCatalogDefault
+	}
+	categorySignalCatalogMu.Unlock()
 	return catalog
 }
 
