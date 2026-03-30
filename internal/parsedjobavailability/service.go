@@ -17,7 +17,7 @@ import (
 
 const (
 	workerStateLastCheckedParsedJobIDKey = "last_checked_parsed_job_id"
-	defaultBatchSize                     = 500
+	defaultBatchSize                     = 200
 	defaultWorkerCount                   = 4
 	WorkerLogPrefix                      = "job-availability-worker"
 )

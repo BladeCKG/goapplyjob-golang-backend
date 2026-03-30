@@ -168,7 +168,7 @@ func main() {
 				}, db)
 				parsedAIClassifierSvc.EnabledSources = enabledSources
 				parsedAvailabilitySvc := parsedjobavailability.New(parsedjobavailability.Config{
-					BatchSize:           config.GetenvInt("PARSED_JOB_AVAILABILITY_BATCH_SIZE", 500),
+					BatchSize:           config.GetenvInt("PARSED_JOB_AVAILABILITY_BATCH_SIZE", 200),
 					PollSeconds:         config.GetenvFloat("PARSED_JOB_AVAILABILITY_POLL_SECONDS", 5),
 					RunOnce:             true,
 					ErrorBackoffSeconds: errorBackoffSeconds,
