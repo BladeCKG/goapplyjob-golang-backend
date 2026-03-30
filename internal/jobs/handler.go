@@ -1088,7 +1088,7 @@ func buildJobsWhereSQL(input listingFilterInput) (string, []any) {
 			}
 			locOr = append(locOr, fmt.Sprintf("CAST(p.location_us_states AS jsonb) @> to_jsonb(ARRAY[%s::text])", b.add(state)))
 		}
-		if len(input.USStates) > 0 {
+		if len(input.USStates) > 0 && !input.StrictLocation {
 			locOr = append(
 				locOr,
 				fmt.Sprintf(
@@ -1461,7 +1461,9 @@ func (h *Handler) topCategories(c *gin.Context) {
 			input.Countries = append(input.Countries, trimmed)
 		}
 	}
-	input.Countries = expandCountryFilterTerms(input.Countries)
+	if !input.StrictLocation {
+		input.Countries = expandCountryFilterTerms(input.Countries)
+	}
 	input.HasStructuredLocation = len(input.USStates) > 0 || len(input.Countries) > 0
 
 	args := []any{cutoff}
@@ -1481,7 +1483,7 @@ func (h *Handler) topCategories(c *gin.Context) {
 			args = append(args, state)
 			locOr = append(locOr, fmt.Sprintf("CAST(p.location_us_states AS jsonb) @> to_jsonb(ARRAY[$%d::text])", len(args)))
 		}
-		if len(input.USStates) > 0 {
+		if len(input.USStates) > 0 && !input.StrictLocation {
 			args = append(args, unitedStatesCountry)
 			locOr = append(
 				locOr,
@@ -1565,7 +1567,9 @@ func (h *Handler) topFunctions(c *gin.Context) {
 			input.Countries = append(input.Countries, trimmed)
 		}
 	}
-	input.Countries = expandCountryFilterTerms(input.Countries)
+	if !queryBoolDefault(c, "strict_location", false) {
+		input.Countries = expandCountryFilterTerms(input.Countries)
+	}
 	input.HasStructuredLocation = len(input.USStates) > 0 || len(input.Countries) > 0
 
 	args := []any{cutoff}
@@ -1585,7 +1589,7 @@ func (h *Handler) topFunctions(c *gin.Context) {
 			args = append(args, state)
 			locOr = append(locOr, fmt.Sprintf("CAST(p.location_us_states AS jsonb) @> to_jsonb(ARRAY[$%d::text])", len(args)))
 		}
-		if len(input.USStates) > 0 {
+		if len(input.USStates) > 0 && !queryBoolDefault(c, "strict_location", false) {
 			args = append(args, unitedStatesCountry)
 			locOr = append(
 				locOr,
@@ -1676,6 +1680,7 @@ type listingFilterInput struct {
 	TitleTokenGroupsJSON  []byte
 	CompanyFilter         string
 	HasStructuredLocation bool
+	StrictLocation        bool
 	USStates              []string
 	Countries             []string
 	LocationPatterns      []string
@@ -1712,6 +1717,7 @@ func (h *Handler) buildListingFilterInput(c *gin.Context, currentUser *auth.User
 		TechStacks:           []string{},
 		LocationTypes:        []string{},
 		EmploymentTypes:      []string{},
+		StrictLocation:       queryBoolDefault(c, "strict_location", false),
 	}
 
 	if categories := uniqueStrings(parseCSVQuery(c.Query("job_categories"))); len(categories) > 0 {
@@ -1761,7 +1767,9 @@ func (h *Handler) buildListingFilterInput(c *gin.Context, currentUser *auth.User
 			input.Countries = append(input.Countries, trimmed)
 		}
 	}
-	input.Countries = expandCountryFilterTerms(input.Countries)
+	if !queryBoolDefault(c, "strict_location", false) {
+		input.Countries = expandCountryFilterTerms(input.Countries)
+	}
 	input.HasStructuredLocation = len(input.USStates) > 0 || len(input.Countries) > 0
 
 	input.CompanyFilter = strings.ToLower(strings.TrimSpace(c.Query("company")))
@@ -2216,6 +2224,21 @@ func parseIntDefault(raw string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func queryBoolDefault(c *gin.Context, key string, fallback bool) bool {
+	value := strings.TrimSpace(c.Query(key))
+	if value == "" {
+		return fallback
+	}
+	switch strings.ToLower(value) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func parsePostDateFrom(raw string) (time.Time, bool) {

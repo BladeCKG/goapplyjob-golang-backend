@@ -492,6 +492,37 @@ func TestJobsListLocationFilterSupportsStateWithCountryLabel(t *testing.T) {
 	}
 }
 
+func TestJobsListStrictLocationDisablesBroadening(t *testing.T) {
+	router, db := testRouter(t)
+	defer db.Close()
+
+	insertJob(t, db, 451, "https://example.com/strict-state", "Austin", "Texas", 120, 160, true, time.Now().UTC())
+	insertJob(t, db, 452, "https://example.com/strict-worldwide", "Remote", "Oregon", 120, 160, true, time.Now().UTC())
+	if _, err := db.SQL.ExecContext(context.Background(), `UPDATE parsed_jobs SET location_us_states = '[]', location_countries = '["Worldwide"]', location_city = 'Remote' WHERE raw_us_job_id = ?`, 452); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/jobs?us_states=Texas", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+	var broadBody map[string]any
+	decodeBody(t, rec.Body.Bytes(), &broadBody)
+	if broadBody["total"].(float64) != 2 {
+		t.Fatalf("expected broad location matching to include worldwide job, got %#v", broadBody)
+	}
+
+	strictReq := httptest.NewRequest(http.MethodGet, "/jobs?us_states=Texas&strict_location=true", nil)
+	strictRec := httptest.NewRecorder()
+	router.ServeHTTP(strictRec, strictReq)
+	assertStatus(t, strictRec.Code, http.StatusOK)
+	var strictBody map[string]any
+	decodeBody(t, strictRec.Body.Bytes(), &strictBody)
+	if strictBody["total"].(float64) != 1 {
+		t.Fatalf("expected strict location matching to keep only exact state job, got %#v", strictBody)
+	}
+}
+
 func TestJobDetailEndpoint(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
