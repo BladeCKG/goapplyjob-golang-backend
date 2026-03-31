@@ -145,15 +145,15 @@ func TestFindSimilarRemoteCategoriesScansBeyondFirstThousandCandidates(t *testin
 		id := int64(i + 1)
 		insertSimilarCategoryCandidate(t, db, id, fmt.Sprintf("Engineer %d", i), "Engineer", "Engineering", nil, now.Add(-time.Duration(i)*time.Second))
 	}
-	insertSimilarCategoryCandidate(t, db, 2001, "Product Implementation Engineer", "Implementation Engineer", "Engineering", nil, now.Add(-time.Hour))
+	insertSimilarCategoryCandidate(t, db, 2001, "Product Implementation Engineer", "Implementation Specialist", "Engineering", nil, now.Add(-time.Hour))
 
 	svc := New(Config{}, db)
 	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Senior Product Implementation Engineer", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if title != "Implementation Engineer" || function != "Engineering" {
-		t.Fatalf("expected scan to find Implementation Engineer/Engineering, got %q / %q", title, function)
+	if title != "Implementation Specialist" || function != "Engineering" {
+		t.Fatalf("expected scan to find Implementation Specialist/Engineering, got %q / %q", title, function)
 	}
 }
 
@@ -270,15 +270,15 @@ func TestFindSimilarRemoteCategoriesPrefersImplementationEngineerOverEngineer(t 
 
 	now := time.Now().UTC()
 	insertSimilarCategoryCandidate(t, db, 1, "Engineer", "Engineer", "Engineering", nil, now)
-	insertSimilarCategoryCandidate(t, db, 2, "Consultant", "Implementation Engineer", "Engineering", nil, now.Add(-time.Minute))
+	insertSimilarCategoryCandidate(t, db, 2, "Consultant", "Implementation Specialist", "Engineering", nil, now.Add(-time.Minute))
 
 	svc := New(Config{}, db)
 	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Product Implementation Engineer", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if title != "Implementation Engineer" || function != "Engineering" {
-		t.Fatalf("expected Implementation Engineer/Engineering, got %q / %q", title, function)
+	if title != "Implementation Specialist" || function != "Engineering" {
+		t.Fatalf("expected Implementation Specialist/Engineering, got %q / %q", title, function)
 	}
 }
 
@@ -339,7 +339,7 @@ func TestFindSimilarRemoteCategoriesDoesNotScanBeyondMaxRows(t *testing.T) {
 	}
 	// Strong candidate intentionally placed beyond max scan limit.
 	// Role title intentionally does not exactly match input to avoid exact-title fast path.
-	insertSimilarCategoryCandidate(t, db, 3001, "Consultant", "Implementation Engineer", "Engineering", nil, now.Add(-3000*time.Second))
+	insertSimilarCategoryCandidate(t, db, 3001, "Consultant", "Implementation Specialist", "Engineering", nil, now.Add(-3000*time.Second))
 
 	svc := New(Config{}, db)
 	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Product Implementation Engineer", nil)
@@ -359,7 +359,7 @@ func TestFindSimilarRemoteCategoriesConfidenceGateRejectsWeakOverlap(t *testing.
 	defer db.Close()
 
 	now := time.Now().UTC()
-	insertSimilarCategoryCandidate(t, db, 1, "Support Analyst", "Support Specialist", "Operations", nil, now)
+	insertSimilarCategoryCandidate(t, db, 1, "Support Analyst", "Customer Support", "Operations", nil, now)
 	insertSimilarCategoryCandidate(t, db, 2, "Finance Manager", "Manager", "Operations", nil, now.Add(-time.Minute))
 
 	svc := New(Config{}, db)
@@ -403,7 +403,7 @@ func TestFindSimilarRemoteCategoriesConfidenceGateAcceptsWithSpecificSignal(t *t
 	defer db.Close()
 
 	now := time.Now().UTC()
-	insertSimilarCategoryCandidate(t, db, 1, "Implementation Engineer", "Implementation Engineer", "Engineering", nil, now)
+	insertSimilarCategoryCandidate(t, db, 1, "Implementation Engineer", "Implementation Specialist", "Engineering", nil, now)
 	insertSimilarCategoryCandidate(t, db, 2, "Engineer", "Engineer", "Engineering", nil, now.Add(-time.Minute))
 
 	svc := New(Config{}, db)
@@ -411,7 +411,7 @@ func TestFindSimilarRemoteCategoriesConfidenceGateAcceptsWithSpecificSignal(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if title != "Implementation Engineer" || function != "Engineering" {
+	if title != "Implementation Specialist" || function != "Engineering" {
 		t.Fatalf("expected specific-signal candidate to pass confidence gate, got %q / %q", title, function)
 	}
 }

@@ -234,7 +234,7 @@ func TestFindSimilarRemoteCategoriesAvoidsGenericEngineer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, role_title, categorized_job_title, categorized_job_function, updated_at) VALUES (1, 'Engineer', 'Engineer', 'Engineering', ?), (2, 'Consultant', 'Implementation Engineer', 'Engineering', ?)`, time.Now().UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano))
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, role_title, categorized_job_title, categorized_job_function, updated_at) VALUES (1, 'Engineer', 'Engineer', 'Engineering', ?), (2, 'Consultant', 'Implementation Specialist', 'Engineering', ?)`, time.Now().UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestFindSimilarRemoteCategoriesAvoidsGenericEngineer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if title != "Implementation Engineer" || function != "Engineering" {
+	if title != "Implementation Specialist" || function != "Engineering" {
 		t.Fatalf("expected specific category match, got %q / %q", title, function)
 	}
 }

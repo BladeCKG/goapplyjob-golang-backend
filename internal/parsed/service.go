@@ -63,7 +63,6 @@ var workModeNoiseTokens = map[string]struct{}{
 }
 
 var genericCategoryMatchTokens = map[string]struct{}{
-	"and":      {},
 	"engineer": {}, "developer": {}, "manager": {}, "specialist": {},
 	"consultant": {}, "analyst": {}, "architect": {}, "designer": {},
 	"director": {}, "representative": {}, "support": {}, "technical": {},
@@ -313,6 +312,29 @@ func shouldSkipRoleToken(token string) bool {
 
 var similarityTokenSplitRegexp = regexp.MustCompile(`[^a-z0-9]+`)
 
+var pluralTokenReplacements = map[string]string{
+	"engineers":       "engineer",
+	"developers":      "developer",
+	"managers":        "manager",
+	"specialists":     "specialist",
+	"consultants":     "consultant",
+	"analysts":        "analyst",
+	"architects":      "architect",
+	"designers":       "designer",
+	"directors":       "director",
+	"representatives": "representative",
+	"administrators":  "administrator",
+	"producers":       "producer",
+	"writers":         "writer",
+}
+
+func normalizeRoleToken(token string) string {
+	if replacement, ok := pluralTokenReplacements[token]; ok {
+		return replacement
+	}
+	return token
+}
+
 func tokenizeRoleTitleForSimilarity(roleTitle string) map[string]struct{} {
 	rawTokens := similarityTokenSplitRegexp.Split(normalizeTextForMatching(roleTitle), -1)
 	out := map[string]struct{}{}
@@ -320,6 +342,7 @@ func tokenizeRoleTitleForSimilarity(roleTitle string) map[string]struct{} {
 		if len(token) <= 1 {
 			continue
 		}
+		token = normalizeRoleToken(token)
 		if shouldSkipRoleToken(token) {
 			continue
 		}
@@ -335,6 +358,7 @@ func tokenizeTextForSequence(value string) []string {
 		if len(token) <= 1 {
 			continue
 		}
+		token = normalizeRoleToken(token)
 		if shouldSkipRoleToken(token) {
 			continue
 		}
@@ -432,9 +456,8 @@ func normalizeSkillValuesForQuery(values []string) []string {
 }
 
 func buildSimilarityQueryTokens(sourceSequenceTokens []string) []string {
-	specific := make([]string, 0, len(sourceSequenceTokens))
-	generic := make([]string, 0, len(sourceSequenceTokens))
 	seen := make(map[string]struct{}, len(sourceSequenceTokens))
+	out := make([]string, 0, len(sourceSequenceTokens))
 
 	for _, token := range sourceSequenceTokens {
 		if token == "" {
@@ -445,17 +468,10 @@ func buildSimilarityQueryTokens(sourceSequenceTokens []string) []string {
 		}
 		seen[token] = struct{}{}
 
-		if isGenericCategoryToken(token) {
-			generic = append(generic, token)
-		} else {
-			specific = append(specific, token)
-		}
+		out = append(out, token)
 	}
 
-	sort.SliceStable(specific, func(i, j int) bool { return len(specific[i]) > len(specific[j]) })
-	sort.SliceStable(generic, func(i, j int) bool { return len(generic[i]) > len(generic[j]) })
-
-	out := append(specific, generic...)
+	sort.SliceStable(out, func(i, j int) bool { return len(out[i]) > len(out[j]) })
 	if len(out) > similarCategoryQueryTopN {
 		out = out[:similarCategoryQueryTopN]
 	}
@@ -545,17 +561,25 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 	categorySignalCatalog := s.categorySignalCatalog
 
 	// Fast exact-title path.
-	normalizedInputTitle := strings.ToLower(strings.TrimSpace(roleTitle))
-	if normalizedInputTitle != "" {
+	if strings.TrimSpace(roleTitle) != "" {
+		roleTokenList := make([]string, 0, len(sourceTokens))
+		for token := range sourceTokens {
+			roleTokenList = append(roleTokenList, token)
+		}
 		query := `SELECT p.role_title, p.categorized_job_title, p.categorized_job_function, COALESCE(p.tech_stack::text, '[]')
 			FROM parsed_jobs p
 			JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
 			WHERE r.source = ?
 			  AND p.role_title IS NOT NULL
 			  AND p.categorized_job_title IS NOT NULL
-			  AND p.categorized_job_function IS NOT NULL
-			  AND LOWER(TRIM(p.role_title)) = ?`
-		args := []any{sourceRemoteRocketship, normalizedInputTitle}
+			  AND p.categorized_job_function IS NOT NULL`
+		args := []any{sourceRemoteRocketship}
+		if len(roleTokenList) > 0 {
+			for _, token := range roleTokenList {
+				query += ` AND LOWER(p.role_title) LIKE '%' || ? || '%'`
+				args = append(args, token)
+			}
+		}
 
 		if len(sourceSkillValues) > 0 {
 			query += ` AND EXISTS (
@@ -655,7 +679,22 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 		}
 	}
 
-	queryTokens := buildSimilarityQueryTokens(sourceSequenceTokens)
+	catalogTokenSet := map[string]struct{}{}
+	for _, terms := range categorySignalCatalog {
+		for token := range terms.tokens {
+			catalogTokenSet[token] = struct{}{}
+		}
+	}
+	filteredSequenceTokens := make([]string, 0, len(sourceSequenceTokens))
+	for _, token := range sourceSequenceTokens {
+		if _, ok := catalogTokenSet[token]; ok {
+			filteredSequenceTokens = append(filteredSequenceTokens, token)
+		}
+	}
+	if len(filteredSequenceTokens) == 0 {
+		filteredSequenceTokens = sourceSequenceTokens
+	}
+	queryTokens := buildSimilarityQueryTokens(filteredSequenceTokens)
 
 	type matchRank struct {
 		exactNormalizedTitleMatch     int
@@ -681,12 +720,12 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 		switch {
 		case left.exactNormalizedTitleMatch != right.exactNormalizedTitleMatch:
 			return left.exactNormalizedTitleMatch > right.exactNormalizedTitleMatch
+		case left.categorySignalWeight != right.categorySignalWeight:
+			return left.categorySignalWeight > right.categorySignalWeight
 		case left.nonGenericCategoryPreference != right.nonGenericCategoryPreference:
 			return left.nonGenericCategoryPreference > right.nonGenericCategoryPreference
 		case left.genericOneWordCategoryPenalty != right.genericOneWordCategoryPenalty:
 			return left.genericOneWordCategoryPenalty < right.genericOneWordCategoryPenalty
-		case left.categorySignalWeight != right.categorySignalWeight:
-			return left.categorySignalWeight > right.categorySignalWeight
 		case left.weightedSpecificTokenHits != right.weightedSpecificTokenHits:
 			return left.weightedSpecificTokenHits > right.weightedSpecificTokenHits
 		case left.combinedSpecificTokenHits != right.combinedSpecificTokenHits:
@@ -1159,7 +1198,7 @@ func (s *Service) findExactNormalizedCategoryMatch(ctx context.Context, normaliz
 	if err := rows.Err(); err != nil {
 		return "", "", err
 	}
-	return "", "", nil
+	return "Any", "Any", nil
 }
 
 func isGenericCategoryToken(token string) bool {
