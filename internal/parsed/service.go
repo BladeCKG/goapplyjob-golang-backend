@@ -586,13 +586,6 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 	if len(filteredSequenceTokens) == 0 {
 		filteredSequenceTokens = sourceSequenceTokens
 		filteredCategorySet = map[string]struct{}{}
-		for _, token := range filteredSequenceTokens {
-			if categories, ok := categoryByToken[token]; ok {
-				for category := range categories {
-					filteredCategorySet[category] = struct{}{}
-				}
-			}
-		}
 	}
 	filteredCategories := make([]string, 0, len(filteredCategorySet))
 	for category := range filteredCategorySet {
@@ -608,7 +601,12 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 		if len(tokens) == 0 {
 			return "", "", false, nil
 		}
-		query := `SELECT p.role_title, p.categorized_job_title, p.categorized_job_function, COALESCE(p.tech_stack::text, '[]')
+		useCategoryDistinct := applyCategoryFilter && len(filteredCategories) > 0
+		query := `SELECT `
+		if useCategoryDistinct {
+			query += `DISTINCT ON (LOWER(p.categorized_job_title)) `
+		}
+		query += `p.role_title, p.categorized_job_title, p.categorized_job_function, COALESCE(p.tech_stack::text, '[]')
 			FROM parsed_jobs p
 			JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
 			WHERE r.source = ?
@@ -632,7 +630,11 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 			)`
 			args = append(args, sourceSkillValues)
 		}
-		query += ` ORDER BY p.updated_at DESC, p.id DESC LIMIT 100`
+		if useCategoryDistinct {
+			query += ` ORDER BY LOWER(p.categorized_job_title), p.updated_at DESC, p.id DESC`
+		} else {
+			query += ` ORDER BY p.updated_at DESC, p.id DESC LIMIT 100`
+		}
 
 		rows, err := s.DB.SQL.QueryContext(ctx, query, args...)
 		if err != nil {
@@ -735,6 +737,13 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 	}
 
 	title, function, ok, err = findAllTokensMatch(filteredSequenceTokens, true, true)
+	if err != nil {
+		return "Any", "Any", err
+	}
+	if ok {
+		return title, function, nil
+	}
+	title, function, ok, err = findAllTokensMatch(filteredSequenceTokens, false, true)
 	if err != nil {
 		return "Any", "Any", err
 	}
@@ -1161,9 +1170,12 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 
 	if bestRankSet && isConfidentMatch(bestRank) {
 		log.Printf(
-			"similar-category best_match role_title=%s candidate_role_title=%s",
+			"similar-category best_match role_title=%s candidate_role_title=%s signal=%0.2f overlap=%d skill_overlap=%d",
 			roleTitle,
 			bestCandidateRoleTitle,
+			bestRank.categorySignalWeight,
+			bestRank.overlapCount,
+			bestRank.skillOverlapCount,
 		)
 		return bestTitle, bestFunction, nil
 	}

@@ -96,11 +96,11 @@
     "tokens": [
       {
         "token": "accountant",
-        "weight": 5.0
+        "weight": 3.5
       },
       {
         "token": "accountants",
-        "weight": 4.85
+        "weight": 3.5
       },
       {
         "token": "accountspayable",
@@ -128,7 +128,7 @@
       },
       {
         "token": "payroll",
-        "weight": 4.5
+        "weight": 1.5
       }
     ]
   },
@@ -349,7 +349,7 @@
     "tokens": [
       {
         "token": "any",
-        "weight": 5.0
+        "weight": 0.0
       }
     ]
   },
@@ -530,7 +530,7 @@
     "tokens": [
       {
         "token": "bilingual",
-        "weight": 5.0
+        "weight": 3.5
       }
     ]
   },
@@ -1007,7 +1007,7 @@
     "tokens": [
       {
         "token": "collections",
-        "weight": 5.0
+        "weight": 3.5
       }
     ]
   },
@@ -1016,11 +1016,11 @@
     "tokens": [
       {
         "token": "communication",
-        "weight": 4.85
+        "weight": 3.5
       },
       {
         "token": "communications",
-        "weight": 5.0
+        "weight": 3.5
       }
     ]
   },
@@ -1046,7 +1046,7 @@
     "tokens": [
       {
         "token": "compliance",
-        "weight": 5.0
+        "weight": 3.5
       }
     ]
   },
@@ -1152,15 +1152,15 @@
     "tokens": [
       {
         "token": "content",
-        "weight": 3.88
+        "weight": 2.2
       },
       {
         "token": "writer",
-        "weight": 1.96
+        "weight": 2.8
       },
       {
         "token": "writers",
-        "weight": 1.96
+        "weight": 2.8
       },
       {
         "token": "editor",
@@ -1177,11 +1177,11 @@
     "tokens": [
       {
         "token": "controller",
-        "weight": 5.0
+        "weight": 3.5
       },
       {
         "token": "controllers",
-        "weight": 4.85
+        "weight": 3.5
       }
     ]
   },
@@ -1228,7 +1228,7 @@
       },
       {
         "token": "counselors",
-        "weight": 4.85
+        "weight": 5.0
       }
     ]
   },
@@ -1675,7 +1675,7 @@
     "tokens": [
       {
         "token": "events",
-        "weight": 5.0
+        "weight": 3.5
       }
     ]
   },
@@ -2049,7 +2049,7 @@
     "tokens": [
       {
         "token": "insurance",
-        "weight": 5.0
+        "weight": 3.5
       }
     ]
   },
@@ -2275,7 +2275,7 @@
       },
       {
         "token": "sem",
-        "weight": 5.0
+        "weight": 3.5
       }
     ]
   },
@@ -2382,7 +2382,7 @@
     "tokens": [
       {
         "token": "medical",
-        "weight": 2.63
+        "weight": 2.2
       },
       {
         "token": "medicalwriter",
@@ -2390,11 +2390,11 @@
       },
       {
         "token": "writer",
-        "weight": 1.96
+        "weight": 2.8
       },
       {
         "token": "writers",
-        "weight": 1.96
+        "weight": 2.8
       }
     ]
   },
@@ -2450,7 +2450,7 @@
     "tokens": [
       {
         "token": "notary",
-        "weight": 5.0
+        "weight": 3.5
       }
     ]
   },
@@ -2502,7 +2502,7 @@
       },
       {
         "token": "paralegals",
-        "weight": 4.85
+        "weight": 5.0
       }
     ]
   },
@@ -2511,7 +2511,7 @@
     "tokens": [
       {
         "token": "payroll",
-        "weight": 5.0
+        "weight": 3.5
       }
     ]
   },
@@ -2613,7 +2613,7 @@
     "tokens": [
       {
         "token": "procurement",
-        "weight": 5.0
+        "weight": 3.5
       }
     ]
   },
@@ -2994,7 +2994,7 @@
       },
       {
         "token": "research",
-        "weight": 3.88
+        "weight": 3.1
       }
     ]
   },
@@ -3011,7 +3011,7 @@
       },
       {
         "token": "research",
-        "weight": 3.88
+        "weight": 3.1
       }
     ]
   },
@@ -3050,7 +3050,7 @@
     "tokens": [
       {
         "token": "risk",
-        "weight": 5.0
+        "weight": 3.5
       }
     ]
   },
@@ -3059,7 +3059,7 @@
     "tokens": [
       {
         "token": "robotics",
-        "weight": 5.0
+        "weight": 3.5
       }
     ]
   },
@@ -3297,6 +3297,10 @@
         "weight": 1.5
       },
       {
+        "token": "development",
+        "weight": 1.5
+      },
+      {
         "token": "developers",
         "weight": 1.5
       },
@@ -3419,7 +3423,7 @@
     "tokens": [
       {
         "token": "servicenow",
-        "weight": 5.0
+        "weight": 3.5
       }
     ]
   },
@@ -3665,7 +3669,7 @@
     "tokens": [
       {
         "token": "tax",
-        "weight": 5.0
+        "weight": 3.5
       }
     ]
   },
@@ -3837,31 +3841,23 @@
     "tokens": [
       {
         "token": "behavioral",
-        "weight": 4.5
+        "weight": 2.5
       },
       {
         "token": "care",
-        "weight": 4.5
+        "weight": 2.5
       },
       {
         "token": "counseling",
         "weight": 4.5
       },
       {
-        "token": "counselor",
-        "weight": 5.0
-      },
-      {
-        "token": "counselors",
-        "weight": 4.7
-      },
-      {
         "token": "patient",
-        "weight": 4.5
+        "weight": 2.5
       },
       {
         "token": "patients",
-        "weight": 4.5
+        "weight": 2.5
       },
       {
         "token": "therapeutic",

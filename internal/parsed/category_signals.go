@@ -40,20 +40,11 @@ func buildCategorySignalCatalog(raw []byte) (map[string]categorySignalTerms, err
 
 	catalog := map[string]categorySignalTerms{}
 	for _, entry := range entries {
-		categoryKey := normalizeRoleTitleForExactMatch(entry.Category)
-		if categoryKey == "" {
-			continue
-		}
+		categoryKey := entry.Category
 		tokens := map[string]float64{}
 		for _, token := range entry.Tokens {
-			normalized := normalizeRoleTitleForExactMatch(token.Token)
-			if normalized == "" {
-				continue
-			}
-			for _, unit := range tokenizeTextForSequence(normalized) {
-				if token.Weight > tokens[unit] {
-					tokens[unit] = token.Weight
-				}
+			if token.Weight > tokens[token.Token] {
+				tokens[token.Token] = token.Weight
 			}
 		}
 
@@ -137,8 +128,7 @@ func categorySignalWeightFromCatalog(catalog map[string]categorySignalTerms, sou
 		sourceTokens[token] = struct{}{}
 	}
 	candidateKeys := []string{
-		normalizeRoleTitleForExactMatch(candidateCategoryTitle),
-		normalizeRoleTitleForExactMatch(candidateCategoryFunction),
+		candidateCategoryTitle,
 	}
 
 	for _, candidateKey := range candidateKeys {

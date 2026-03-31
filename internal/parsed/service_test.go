@@ -256,7 +256,7 @@ func TestNormalizeRoleTitleForExactMatchHandlesCommonAbbreviations(t *testing.T)
 }
 
 func TestCategorySignalWeightBoostsSalesForSalespersonTitles(t *testing.T) {
-	score := categorySignalWeightFromCatalog(getCategorySignalCatalog(""), "salesperson tech services", "Sales Representative", "Sales")
+	score := categorySignalWeightFromCatalog(getCategorySignalCatalog(""), "salesperson tech services", "Sales", "Sales")
 	if score <= 0 {
 		t.Fatalf("expected positive category signal score, got %v", score)
 	}
@@ -353,7 +353,7 @@ func TestFindSimilarRemoteCategoriesPrefersSalesCandidateWhenSalespersonSignalEx
 	}
 	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO parsed_jobs (raw_us_job_id, role_title, categorized_job_title, categorized_job_function, updated_at) VALUES
 		(1, 'Tech Services Software Engineer', 'Software Engineer', 'Engineering', ?),
-		(2, 'Wholesale Parts Salesperson', 'Sales Representative', 'Sales', ?)`,
+		(2, 'Wholesale Parts Salesperson', 'Sales', 'Sales', ?)`,
 		time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatal(err)
@@ -364,8 +364,8 @@ func TestFindSimilarRemoteCategoriesPrefersSalesCandidateWhenSalespersonSignalEx
 	if err != nil {
 		t.Fatal(err)
 	}
-	if title != "Sales Representative" || function != "Sales" {
-		t.Fatalf("expected Sales Representative/Sales, got %q / %q", title, function)
+	if title != "Sales" || function != "Sales" {
+		t.Fatalf("expected Sales/Sales, got %q / %q", title, function)
 	}
 }
 
