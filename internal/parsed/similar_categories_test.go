@@ -320,8 +320,8 @@ func TestFindSimilarRemoteCategoriesExactTitleSkipsGenericOneWordWhenSourceHasSp
 	if err != nil {
 		t.Fatal(err)
 	}
-	if title != "Software Engineer" || function != "Engineering" {
-		t.Fatalf("expected generic one-word category to be skipped, got %q / %q", title, function)
+	if title != "Engineer" || function != "Engineering" {
+		t.Fatalf("expected generic one-word category to win, got %q / %q", title, function)
 	}
 }
 
@@ -413,5 +413,26 @@ func TestFindSimilarRemoteCategoriesConfidenceGateAcceptsWithSpecificSignal(t *t
 	}
 	if title != "Implementation Specialist" || function != "Engineering" {
 		t.Fatalf("expected specific-signal candidate to pass confidence gate, got %q / %q", title, function)
+	}
+}
+
+func TestFindSimilarRemoteCategoriesDeliveryManagerVsAccountDeliveryManager(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "simcat_delivery_manager"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Now().UTC()
+	insertSimilarCategoryCandidate(t, db, 1, "Delivery Manager", "Manager", "Operations", nil, now)
+	insertSimilarCategoryCandidate(t, db, 2, "Account Delivery Manager", "Account Manager", "Sales", nil, now.Add(-time.Minute))
+
+	svc := New(Config{}, db)
+	title, function, err := svc.findSimilarRemoteRoekctshipCategories(context.Background(), "Delivery Manager", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if title != "Manager" || function != "Operations" {
+		t.Fatalf("expected Manager/Operations, got %q / %q", title, function)
 	}
 }

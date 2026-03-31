@@ -287,6 +287,8 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 			existingID    int64
 			isReady       bool
 			rawJSONText   any
+			rawJSONString string
+			existingRaw   string
 			extraJSONText any
 		}
 		pendingUpdates := make([]pendingUpdate, 0, len(buffer))
@@ -303,10 +305,12 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 				continue
 			}
 			rawJSONText := any(nil)
+			rawJSONString := ""
 			isReady := false
 			if row.RawJSON != nil {
 				body, _ := json.Marshal(row.RawJSON)
-				rawJSONText = string(body)
+				rawJSONString = string(body)
+				rawJSONText = rawJSONString
 				isReady = true
 			}
 			extraJSONText := any(nil)
@@ -335,6 +339,8 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 				existingID:    existingID,
 				isReady:       isReady,
 				rawJSONText:   rawJSONText,
+				rawJSONString: rawJSONString,
+				existingRaw:   strings.TrimSpace(existingRawJSON.String),
 				extraJSONText: extraJSONText,
 			})
 		}
@@ -359,7 +365,32 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 		}
 
 		for _, candidate := range pendingUpdates {
-			if _, hasParsed := parsedByRawID[candidate.existingID]; hasParsed {
+			hasParsed := false
+			if _, ok := parsedByRawID[candidate.existingID]; ok {
+				hasParsed = true
+			}
+			if hasParsed && candidate.rawJSONString != "" && candidate.rawJSONString == candidate.existingRaw {
+				if _, err := tx.Exec(
+					`UPDATE raw_us_jobs
+					 SET post_date = ?,
+					     is_ready = ?,
+					     extra_json = ?,
+					     raw_json = ?
+					 WHERE id = ?`,
+					candidate.row.PostDate.Format(time.RFC3339),
+					candidate.isReady,
+					candidate.extraJSONText,
+					candidate.rawJSONText,
+					candidate.existingID,
+				); err != nil {
+					failedDB++
+					failedRows[candidate.url] = candidate.row
+				} else {
+					updated++
+				}
+				continue
+			}
+			if hasParsed {
 				var parsedJobID int64
 				err := tx.QueryRow(`SELECT id FROM parsed_jobs WHERE raw_us_job_id = ? LIMIT 1`, candidate.existingID).Scan(&parsedJobID)
 				if err == nil {

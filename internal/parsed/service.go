@@ -596,6 +596,7 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 	for token := range sourceTokens {
 		roleTokenList = append(roleTokenList, token)
 	}
+	sourceSequenceNormalizedTokens := tokenizeTextForSequence(sourceNormalizedTitle)
 
 	findAllTokensMatch := func(tokens []string, applySkillFilter bool, applyCategoryFilter bool) (string, string, bool, error) {
 		if len(tokens) == 0 {
@@ -650,6 +651,7 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 		bestSkillOverlapRatio := -1.0
 		bestCategoryOverlap := -1
 		bestSequence := -1
+		bestExactRoleMatch := false
 
 		for rows.Next() {
 			var candidateRoleTitle, candidateTitle sql.NullString
@@ -665,8 +667,27 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 				titleTokenSet[token] = struct{}{}
 			}
 
+			combinedCategorySet := map[string]struct{}{}
+			for _, token := range titleTokens {
+				combinedCategorySet[token] = struct{}{}
+			}
+			// function tokens removed from overlap signals
+
+			candidateSkillTokens := tokenizeTechStackForSimilarity(parseStringJSONArray(candidateTechStackRaw.String))
+			skillOverlapCount := setIntersectionCount(sourceSkillTokens, candidateSkillTokens)
+			skillOverlapRatio := 0.0
+			if len(sourceSkillTokens) > 0 {
+				skillOverlapRatio = float64(skillOverlapCount) / float64(len(sourceSkillTokens))
+			}
+
+			categoryOverlapCount := setIntersectionCount(sourceTokens, combinedCategorySet)
+			candidateNormalizedRole := normalizeRoleTitleForExactMatch(candidateRoleTitle.String)
+			candidateRoleSequenceTokens := tokenizeTextForSequence(candidateNormalizedRole)
+			sequenceCount := orderedTokenMatchCount(sourceSequenceNormalizedTokens, candidateRoleSequenceTokens)
+			exactRoleMatch := candidateNormalizedRole != "" && candidateNormalizedRole == sourceNormalizedTitle
+
 			skipCandidate := false
-			if sourceHasSpecificTokens && len(titleTokenSet) == 1 {
+			if sourceHasSpecificTokens && len(titleTokenSet) == 1 && !exactRoleMatch {
 				for token := range titleTokenSet {
 					if isGenericCategoryToken(token) {
 						skipCandidate = true
@@ -678,36 +699,15 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 				continue
 			}
 
-			functionTokens := tokenizeTextForSequence(candidateFunction.String)
-			combinedCategorySet := map[string]struct{}{}
-			for _, token := range titleTokens {
-				combinedCategorySet[token] = struct{}{}
-			}
-			for _, token := range functionTokens {
-				combinedCategorySet[token] = struct{}{}
-			}
-
-			candidateSkillTokens := tokenizeTechStackForSimilarity(parseStringJSONArray(candidateTechStackRaw.String))
-			skillOverlapCount := setIntersectionCount(sourceSkillTokens, candidateSkillTokens)
-			skillOverlapRatio := 0.0
-			if len(sourceSkillTokens) > 0 {
-				skillOverlapRatio = float64(skillOverlapCount) / float64(len(sourceSkillTokens))
-			}
-
-			categoryOverlapCount := setIntersectionCount(sourceTokens, combinedCategorySet)
-			sequenceCount := orderedTokenMatchCount(sourceSequenceTokens, titleTokens)
-			if functionSeq := orderedTokenMatchCount(sourceSequenceTokens, functionTokens); functionSeq > sequenceCount {
-				sequenceCount = functionSeq
-			}
-
 			signalWeight := categorySignalWeightFromCatalog(categorySignalCatalog, sourceNormalizedTitle, candidateTitle.String, candidateFunction.String)
 
 			if !bestSet ||
-				signalWeight > bestSignalWeight ||
-				(signalWeight == bestSignalWeight && skillOverlapCount > bestSkillOverlapCount) ||
-				(signalWeight == bestSignalWeight && skillOverlapCount == bestSkillOverlapCount && skillOverlapRatio > bestSkillOverlapRatio) ||
-				(signalWeight == bestSignalWeight && skillOverlapCount == bestSkillOverlapCount && skillOverlapRatio == bestSkillOverlapRatio && categoryOverlapCount > bestCategoryOverlap) ||
-				(signalWeight == bestSignalWeight && skillOverlapCount == bestSkillOverlapCount && skillOverlapRatio == bestSkillOverlapRatio && categoryOverlapCount == bestCategoryOverlap && sequenceCount > bestSequence) {
+				(exactRoleMatch && !bestExactRoleMatch) ||
+				(exactRoleMatch == bestExactRoleMatch && signalWeight > bestSignalWeight) ||
+				(exactRoleMatch == bestExactRoleMatch && signalWeight == bestSignalWeight && skillOverlapCount > bestSkillOverlapCount) ||
+				(exactRoleMatch == bestExactRoleMatch && signalWeight == bestSignalWeight && skillOverlapCount == bestSkillOverlapCount && skillOverlapRatio > bestSkillOverlapRatio) ||
+				(exactRoleMatch == bestExactRoleMatch && signalWeight == bestSignalWeight && skillOverlapCount == bestSkillOverlapCount && skillOverlapRatio == bestSkillOverlapRatio && categoryOverlapCount > bestCategoryOverlap) ||
+				(exactRoleMatch == bestExactRoleMatch && signalWeight == bestSignalWeight && skillOverlapCount == bestSkillOverlapCount && skillOverlapRatio == bestSkillOverlapRatio && categoryOverlapCount == bestCategoryOverlap && sequenceCount > bestSequence) {
 				bestSet = true
 				bestTitle = candidateTitle.String
 				bestFunction = candidateFunction.String
@@ -716,6 +716,7 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 				bestSkillOverlapRatio = skillOverlapRatio
 				bestCategoryOverlap = categoryOverlapCount
 				bestSequence = sequenceCount
+				bestExactRoleMatch = exactRoleMatch
 			}
 		}
 
