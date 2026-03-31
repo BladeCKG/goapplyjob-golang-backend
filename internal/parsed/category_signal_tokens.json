@@ -949,6 +949,14 @@
       {
         "token": "patients",
         "weight": 2.07
+      },
+      {
+        "token": "dietitian",
+        "weight": 3.0
+      },
+      {
+        "token": "dietitians",
+        "weight": 3.0
       }
     ]
   },
@@ -1073,6 +1081,14 @@
       {
         "token": "consultants",
         "weight": 3.5
+      },
+      {
+        "token": "advisor",
+        "weight": 3.5
+      },
+      {
+        "token": "advisors",
+        "weight": 3.5
       }
     ]
   },
@@ -1145,6 +1161,14 @@
       {
         "token": "writers",
         "weight": 1.96
+      },
+      {
+        "token": "editor",
+        "weight": 2.2
+      },
+      {
+        "token": "editors",
+        "weight": 2.2
       }
     ]
   },
@@ -2135,6 +2159,30 @@
       {
         "token": "training",
         "weight": 3.5
+      },
+      {
+        "token": "tutor",
+        "weight": 3.5
+      },
+      {
+        "token": "tutors",
+        "weight": 3.5
+      },
+      {
+        "token": "coach",
+        "weight": 3.5
+      },
+      {
+        "token": "coaches",
+        "weight": 3.5
+      },
+      {
+        "token": "librarian",
+        "weight": 3.2
+      },
+      {
+        "token": "librarians",
+        "weight": 3.2
       }
     ]
   },
@@ -3868,6 +3916,18 @@
       {
         "token": "translators",
         "weight": 4.7
+      },
+      {
+        "token": "transcriber",
+        "weight": 4.0
+      },
+      {
+        "token": "transcribers",
+        "weight": 3.7
+      },
+      {
+        "token": "transcription",
+        "weight": 3.5
       }
     ]
   },
@@ -3940,15 +4000,15 @@
     "tokens": [
       {
         "token": "editor",
-        "weight": 2.8
+        "weight": 1.9
       },
       {
         "token": "editors",
-        "weight": 2.8
+        "weight": 1.9
       },
       {
         "token": "video",
-        "weight": 2.2
+        "weight": 3.1
       }
     ]
   },

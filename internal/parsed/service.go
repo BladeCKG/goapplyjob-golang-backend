@@ -561,19 +561,42 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 	categorySignalCatalog := s.categorySignalCatalog
 
 	catalogTokenSet := map[string]struct{}{}
-	for _, terms := range categorySignalCatalog {
+	categoryByToken := map[string]map[string]struct{}{}
+	for categoryKey, terms := range categorySignalCatalog {
 		for token := range terms.tokens {
 			catalogTokenSet[token] = struct{}{}
+			categories := categoryByToken[token]
+			if categories == nil {
+				categories = map[string]struct{}{}
+				categoryByToken[token] = categories
+			}
+			categories[categoryKey] = struct{}{}
 		}
 	}
 	filteredSequenceTokens := make([]string, 0, len(sourceSequenceTokens))
+	filteredCategorySet := map[string]struct{}{}
 	for _, token := range sourceSequenceTokens {
 		if _, ok := catalogTokenSet[token]; ok {
 			filteredSequenceTokens = append(filteredSequenceTokens, token)
+			for category := range categoryByToken[token] {
+				filteredCategorySet[category] = struct{}{}
+			}
 		}
 	}
 	if len(filteredSequenceTokens) == 0 {
 		filteredSequenceTokens = sourceSequenceTokens
+		filteredCategorySet = map[string]struct{}{}
+		for _, token := range filteredSequenceTokens {
+			if categories, ok := categoryByToken[token]; ok {
+				for category := range categories {
+					filteredCategorySet[category] = struct{}{}
+				}
+			}
+		}
+	}
+	filteredCategories := make([]string, 0, len(filteredCategorySet))
+	for category := range filteredCategorySet {
+		filteredCategories = append(filteredCategories, strings.ToLower(category))
 	}
 
 	roleTokenList := make([]string, 0, len(sourceTokens))
@@ -581,7 +604,7 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 		roleTokenList = append(roleTokenList, token)
 	}
 
-	findAllTokensMatch := func(tokens []string, applySkillFilter bool) (string, string, bool, error) {
+	findAllTokensMatch := func(tokens []string, applySkillFilter bool, applyCategoryFilter bool) (string, string, bool, error) {
 		if len(tokens) == 0 {
 			return "", "", false, nil
 		}
@@ -593,6 +616,10 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 			  AND p.categorized_job_title IS NOT NULL
 			  AND p.categorized_job_function IS NOT NULL`
 		args := []any{sourceRemoteRocketship}
+		if applyCategoryFilter && len(filteredCategories) > 0 {
+			query += ` AND LOWER(p.categorized_job_title) = ANY(?::text[])`
+			args = append(args, filteredCategories)
+		}
 		for _, token := range tokens {
 			query += ` AND LOWER(p.role_title) LIKE '%' || ? || '%'`
 			args = append(args, token)
@@ -699,7 +726,7 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 		return "", "", false, nil
 	}
 
-	title, function, ok, err := findAllTokensMatch(roleTokenList, true)
+	title, function, ok, err := findAllTokensMatch(roleTokenList, true, false)
 	if err != nil {
 		return "Any", "Any", err
 	}
@@ -707,7 +734,7 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 		return title, function, nil
 	}
 
-	title, function, ok, err = findAllTokensMatch(filteredSequenceTokens, true)
+	title, function, ok, err = findAllTokensMatch(filteredSequenceTokens, true, true)
 	if err != nil {
 		return "Any", "Any", err
 	}
