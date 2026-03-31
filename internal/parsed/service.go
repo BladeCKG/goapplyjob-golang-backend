@@ -1162,45 +1162,6 @@ func (s *Service) resolveJobFunctionForCategory(ctx context.Context, category st
 	return strings.TrimSpace(jobFunction.String), nil
 }
 
-func (s *Service) findExactNormalizedCategoryMatch(ctx context.Context, normalizedRoleTitle string, normalizedSkillValues []string, applySkillFilter bool) (string, string, error) {
-	query := `SELECT p.role_title, p.categorized_job_title, p.categorized_job_function
-		FROM parsed_jobs p
-		JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
-		WHERE r.source = ? AND p.role_title IS NOT NULL AND p.categorized_job_title IS NOT NULL`
-	args := []any{sourceRemoteRocketship}
-	if applySkillFilter && len(normalizedSkillValues) > 0 {
-		query += ` AND EXISTS (
-			SELECT 1
-			FROM jsonb_array_elements_text(COALESCE(p.tech_stack, '[]'::jsonb)) AS skill
-			WHERE LOWER(skill) = ANY(?::text[])
-		)`
-		args = append(args, normalizedSkillValues)
-	}
-	query += " ORDER BY p.updated_at DESC, p.id DESC"
-	rows, err := s.DB.SQL.QueryContext(ctx, query, args...)
-	if err != nil {
-		return "", "", err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var roleTitle, title, function sql.NullString
-		if err := rows.Scan(&roleTitle, &title, &function); err != nil {
-			return "", "", err
-		}
-		if roleTitle.String == "" || title.String == "" {
-			continue
-		}
-		if normalizeRoleTitleForExactMatch(roleTitle.String) == normalizedRoleTitle {
-			return title.String, function.String, nil
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return "", "", err
-	}
-	return "Any", "Any", nil
-}
-
 func isGenericCategoryToken(token string) bool {
 	_, ok := genericCategoryMatchTokens[token]
 	return ok
