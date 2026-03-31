@@ -853,6 +853,102 @@ func TestNormalizeJobURLForMatchKeepsMeaningfulQueryParams(t *testing.T) {
 	}
 }
 
+func TestNormalizeJobURLForMatchKeepsMeaningfulQueryParamsWithIgnoredTracking(t *testing.T) {
+	base := "https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=a158e395-baec-4e08-8f75-7d0702e34f73&jobId=588193"
+	withTracking := "https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?utm_source=dailyremote&ref=newsletter&cid=a158e395-baec-4e08-8f75-7d0702e34f73&jobId=588193"
+	if normalizeJobURLForMatch(base) != normalizeJobURLForMatch(withTracking) {
+		t.Fatalf("expected ignored tracking params to be dropped while preserving meaningful params")
+	}
+}
+
+func TestFindDuplicateCrossSourceParsedJobMatchesMeaningfulQueryParamsIgnoringCompanyID(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_duplicate_meaningful_query_ignore_company"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(context.Background(),
+		`INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
+		 VALUES (1, 'dailyremote', 'https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=a158e395-baec-4e08-8f75-7d0702e34f73&jobId=588193', ?, true, false, true, 0, '{}'),
+		        (2, 'builtin', 'https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?utm_source=builtin&cid=a158e395-baec-4e08-8f75-7d0702e34f73&jobId=588193', ?, true, false, false, 0, '{}')`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(),
+		`INSERT INTO parsed_companies (id, external_company_id, name, updated_at)
+		 VALUES (101, 'company-101', 'Company 101', ?),
+		        (202, 'company-202', 'Company 202', ?)`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(),
+		`INSERT INTO parsed_jobs (raw_us_job_id, company_id, url, role_title, updated_at)
+		 VALUES (1, 101, 'https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=a158e395-baec-4e08-8f75-7d0702e34f73&jobId=588193', 'Backend Engineer', ?)`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(Config{}, db)
+	payload := map[string]any{
+		"url": "https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?utm_source=builtin&cid=a158e395-baec-4e08-8f75-7d0702e34f73&jobId=588193",
+	}
+	duplicateID, isDuplicate, err := svc.findDuplicateCrossSourceParsedJob(context.Background(), 2, "builtin", payload, int64(202))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isDuplicate || duplicateID <= 0 {
+		t.Fatalf("expected duplicate by base URL and meaningful query params, got duplicate=%v id=%d", isDuplicate, duplicateID)
+	}
+}
+
+func TestFindDuplicateCrossSourceParsedJobDoesNotMatchDifferentMeaningfulQueryParams(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_duplicate_meaningful_query_mismatch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(context.Background(),
+		`INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
+		 VALUES (1, 'dailyremote', 'https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=a158e395-baec-4e08-8f75-7d0702e34f73&jobId=588193', ?, true, false, true, 0, '{}'),
+		        (2, 'builtin', 'https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=90ee0c52-4563-4bbb-a44d-0a6cd6964c61&jobId=588193', ?, true, false, false, 0, '{}')`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(),
+		`INSERT INTO parsed_jobs (raw_us_job_id, url, role_title, updated_at)
+		 VALUES (1, 'https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=a158e395-baec-4e08-8f75-7d0702e34f73&jobId=588193', 'Backend Engineer', ?)`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(Config{}, db)
+	payload := map[string]any{
+		"url": "https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=90ee0c52-4563-4bbb-a44d-0a6cd6964c61&jobId=588193",
+	}
+	duplicateID, isDuplicate, err := svc.findDuplicateCrossSourceParsedJob(context.Background(), 2, "builtin", payload, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isDuplicate || duplicateID != 0 {
+		t.Fatalf("expected different meaningful query params to avoid duplicate match, got duplicate=%v id=%d", isDuplicate, duplicateID)
+	}
+}
+
 func TestProcessPendingRemoterocketshipDuplicateReplacementKeepsCreatedAtSource(t *testing.T) {
 	db, err := database.Open(testDatabaseURL(t, "test_parsed_remoterocketship_duplicate_keep_created_at_source"))
 	if err != nil {

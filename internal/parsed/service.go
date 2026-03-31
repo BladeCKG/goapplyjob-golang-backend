@@ -2454,16 +2454,32 @@ func (s *Service) upsertCompanyFromPayload(ctx context.Context, payload map[stri
 }
 
 func normalizeJobURLForMatch(rawURL string) string {
-	trimmed := strings.TrimSpace(rawURL)
-	if trimmed == "" {
+	parts := parseJobURLForMatch(rawURL)
+	if !parts.valid {
 		return ""
 	}
-	if isEmailApplyTarget(trimmed) {
-		return ""
+	normalized := parts.registrableHost + parts.path
+	if len(parts.queryPairs) > 0 {
+		normalized += "?" + strings.Join(parts.queryPairs, "&")
+	}
+	return normalized
+}
+
+type jobURLMatchParts struct {
+	valid           bool
+	registrableHost string
+	path            string
+	queryPairs      []string
+}
+
+func parseJobURLForMatch(rawURL string) jobURLMatchParts {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" || isEmailApplyTarget(trimmed) {
+		return jobURLMatchParts{}
 	}
 	parsed, err := url.Parse(trimmed)
 	if err != nil {
-		return ""
+		return jobURLMatchParts{}
 	}
 	host := strings.ToLower(parsed.Hostname())
 	host = strings.TrimPrefix(host, "www.")
@@ -2475,19 +2491,23 @@ func normalizeJobURLForMatch(rawURL string) string {
 	if path == "" {
 		path = "/"
 	}
-	queryValues := parsed.Query()
 	filteredQuery := url.Values{}
-	for key, values := range queryValues {
+	for key, values := range parsed.Query() {
 		if shouldIgnoreJobURLQueryParam(key) {
 			continue
 		}
 		filteredQuery[key] = values
 	}
-	normalized := strings.ToLower(host + path)
+	queryPairs := []string{}
 	if encoded := filteredQuery.Encode(); encoded != "" {
-		normalized += "?" + strings.ToLower(encoded)
+		queryPairs = strings.Split(strings.ToLower(encoded), "&")
 	}
-	return normalized
+	return jobURLMatchParts{
+		valid:           true,
+		registrableHost: host,
+		path:            strings.ToLower(path),
+		queryPairs:      queryPairs,
+	}
 }
 
 func shouldIgnoreJobURLQueryParam(key string) bool {
@@ -2533,27 +2553,52 @@ func (s *Service) findDuplicateCrossSourceParsedJob(ctx context.Context, rawJobI
 	if sourceURLNorm == "" {
 		return 0, false, nil
 	}
-	urlHost := sourceURLNorm
-	if slashIdx := strings.Index(urlHost, "/"); slashIdx > 0 {
-		urlHost = urlHost[:slashIdx]
+	sourceURLParts := parseJobURLForMatch(stringValue(payload["url"]))
+	if !sourceURLParts.valid {
+		return 0, false, nil
 	}
 
-	// First pass: ignore company_id and match by normalized URL only.
-	{
+	buildDuplicateURLPrefilter := func(ignoreCompanyID bool) (string, []any) {
 		query := `SELECT p.id, p.url
 		   FROM parsed_jobs p
 		   JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
 		  WHERE r.source <> ?
 		    AND p.url IS NOT NULL
 		    AND LOWER(p.url) LIKE ?
-		    AND p.raw_us_job_id <> ?
-		  ORDER BY p.updated_at DESC, p.id DESC
-		  LIMIT 200`
+		    AND LOWER(p.url) LIKE ?
+		    AND p.raw_us_job_id <> ?`
 		args := []any{
 			source,
-			"%" + strings.ToLower(sourceURLNorm) + "%",
+			"%" + sourceURLParts.registrableHost + "%",
+			"%" + sourceURLParts.path + "%",
 			rawJobID,
 		}
+		for _, pair := range sourceURLParts.queryPairs {
+			query += ` AND LOWER(p.url) LIKE ?`
+			args = append(args, "%"+pair+"%")
+		}
+		if !ignoreCompanyID {
+			query += `
+			AND (?::bigint IS NULL OR p.company_id = ?::bigint)`
+			companyIDInt, companyIDOK := companyID.(int64)
+			var companyIDFilter any
+			if companyIDOK {
+				companyIDFilter = companyIDInt
+			}
+			args = append(args, companyIDFilter, companyIDFilter)
+		}
+		query += ` ORDER BY p.updated_at DESC, p.id DESC`
+		if ignoreCompanyID {
+			query += ` LIMIT 200`
+		} else {
+			query += ` LIMIT 1000`
+		}
+		return query, args
+	}
+
+	// First pass: ignore company_id and match by normalized URL only.
+	{
+		query, args := buildDuplicateURLPrefilter(true)
 		rows, err := s.DB.SQL.QueryContext(ctx, query, args...)
 		if err != nil {
 			return 0, false, err
@@ -2577,27 +2622,13 @@ func (s *Service) findDuplicateCrossSourceParsedJob(ctx context.Context, rawJobI
 		rows.Close()
 	}
 
-	companyIDInt, companyIDOK := companyID.(int64)
-	var companyIDFilter any
-	if companyIDOK {
-		companyIDFilter = companyIDInt
-	}
 	// var lowerBound any
 	// var upperBound any
 	// if sourceCreatedAt != nil {
 	// 	lowerBound = sourceCreatedAt.UTC().Add(-maxDuplicatePostDateDiff)
 	// 	upperBound = sourceCreatedAt.UTC().Add(maxDuplicatePostDateDiff)
 	// }
-	query := `SELECT p.id, p.url
-	   FROM parsed_jobs p
-	   JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
-	  WHERE r.source <> ?
-	    AND p.url IS NOT NULL
-	    AND LOWER(p.url) LIKE ?
-	    AND p.raw_us_job_id <> ?
-		AND (?::bigint IS NULL OR p.company_id = ?::bigint)
-	  ORDER BY p.updated_at DESC, p.id DESC
-	  LIMIT 1000`
+	query, args := buildDuplicateURLPrefilter(false)
 
 	// AND (
 	// 	?::timestamptz IS NULL
@@ -2607,17 +2638,6 @@ func (s *Service) findDuplicateCrossSourceParsedJob(ctx context.Context, rawJobI
 	// 		AND p.created_at_source <= ?::timestamptz
 	// 	)
 	// )
-
-	args := []any{
-		source,
-		"%" + strings.ToLower(urlHost) + "%",
-		rawJobID,
-		companyIDFilter,
-		companyIDFilter,
-		// lowerBound,
-		// lowerBound,
-		// upperBound,
-	}
 	rows, err := s.DB.SQL.QueryContext(ctx, query, args...)
 	if err != nil {
 		return 0, false, err
