@@ -263,7 +263,7 @@ func TestCategorySignalWeightBoostsSalesForSalespersonTitles(t *testing.T) {
 }
 
 func TestCategorySignalWeightUsesConfiguredCategoryTokens(t *testing.T) {
-	score := categorySignalWeightFromCatalog(getCategorySignalCatalog(""), "sales software project managing engineer", "Any", "Sales")
+	score := categorySignalWeightFromCatalog(getCategorySignalCatalog(""), "sales software project managing engineer", "Sales", "Sales")
 	if score <= 0 {
 		t.Fatalf("expected positive category signal score from configured category tokens, got %v", score)
 	}
