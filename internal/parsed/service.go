@@ -2475,7 +2475,35 @@ func normalizeJobURLForMatch(rawURL string) string {
 	if path == "" {
 		path = "/"
 	}
-	return strings.ToLower(host + path)
+	queryValues := parsed.Query()
+	filteredQuery := url.Values{}
+	for key, values := range queryValues {
+		if shouldIgnoreJobURLQueryParam(key) {
+			continue
+		}
+		filteredQuery[key] = values
+	}
+	normalized := strings.ToLower(host + path)
+	if encoded := filteredQuery.Encode(); encoded != "" {
+		normalized += "?" + strings.ToLower(encoded)
+	}
+	return normalized
+}
+
+func shouldIgnoreJobURLQueryParam(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	if normalized == "" {
+		return false
+	}
+	if strings.HasPrefix(normalized, "utm_") {
+		return true
+	}
+	switch normalized {
+	case "ref", "source", "src", "fbclid", "gclid", "mc_cid", "mc_eid", "msclkid", "dclid", "refId", "trackingId":
+		return true
+	default:
+		return false
+	}
 }
 
 func isEmailApplyTarget(value string) bool {

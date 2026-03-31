@@ -839,9 +839,17 @@ func TestNormalizeJobURLForMatchKeepsURLsContainingAtSymbol(t *testing.T) {
 
 func TestNormalizeJobURLForMatchStripsTrackingQueryParams(t *testing.T) {
 	base := "https://jobs.lever.co/coupa/3cac0beb-8734-489f-b67c-b37a0ae74ca8"
-	withTracking := base + "?ref=dailyremote&utm_source=dailyremote.com&utm_campaign=dailyremote.com&utm_medium=dailyremote.com"
-	if normalizeJobURLForMatch(base) != normalizeJobURLForMatch(withTracking) {
+	base1 := "https://jobs.lever.co/coupa/3cac0beb-8734-489f-b67c-b37a0ae74ca8?ref=dailyremote&utm_source=dailyremote.com&utm_campaign=dailyremote.com&utm_medium=dailyremote.com"
+	if normalizeJobURLForMatch(base) != normalizeJobURLForMatch(base1) {
 		t.Fatalf("expected tracking params to be ignored for job URL match")
+	}
+}
+
+func TestNormalizeJobURLForMatchKeepsMeaningfulQueryParams(t *testing.T) {
+	base := "https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=a158e395-baec-4e08-8f75-7d0702e34f73&jobId=588193"
+	other := "https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=90ee0c52-4563-4bbb-a44d-0a6cd6964c61&jobId=588193"
+	if normalizeJobURLForMatch(base) == normalizeJobURLForMatch(other) {
+		t.Fatalf("expected meaningful query params to be preserved for job URL match")
 	}
 }
 
