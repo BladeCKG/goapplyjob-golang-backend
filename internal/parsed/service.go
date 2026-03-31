@@ -560,11 +560,30 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 	}
 	categorySignalCatalog := s.categorySignalCatalog
 
-	// Fast exact-title path.
-	if strings.TrimSpace(roleTitle) != "" {
-		roleTokenList := make([]string, 0, len(sourceTokens))
-		for token := range sourceTokens {
-			roleTokenList = append(roleTokenList, token)
+	catalogTokenSet := map[string]struct{}{}
+	for _, terms := range categorySignalCatalog {
+		for token := range terms.tokens {
+			catalogTokenSet[token] = struct{}{}
+		}
+	}
+	filteredSequenceTokens := make([]string, 0, len(sourceSequenceTokens))
+	for _, token := range sourceSequenceTokens {
+		if _, ok := catalogTokenSet[token]; ok {
+			filteredSequenceTokens = append(filteredSequenceTokens, token)
+		}
+	}
+	if len(filteredSequenceTokens) == 0 {
+		filteredSequenceTokens = sourceSequenceTokens
+	}
+
+	roleTokenList := make([]string, 0, len(sourceTokens))
+	for token := range sourceTokens {
+		roleTokenList = append(roleTokenList, token)
+	}
+
+	findAllTokensMatch := func(tokens []string, applySkillFilter bool) (string, string, bool, error) {
+		if len(tokens) == 0 {
+			return "", "", false, nil
 		}
 		query := `SELECT p.role_title, p.categorized_job_title, p.categorized_job_function, COALESCE(p.tech_stack::text, '[]')
 			FROM parsed_jobs p
@@ -574,14 +593,11 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 			  AND p.categorized_job_title IS NOT NULL
 			  AND p.categorized_job_function IS NOT NULL`
 		args := []any{sourceRemoteRocketship}
-		if len(roleTokenList) > 0 {
-			for _, token := range roleTokenList {
-				query += ` AND LOWER(p.role_title) LIKE '%' || ? || '%'`
-				args = append(args, token)
-			}
+		for _, token := range tokens {
+			query += ` AND LOWER(p.role_title) LIKE '%' || ? || '%'`
+			args = append(args, token)
 		}
-
-		if len(sourceSkillValues) > 0 {
+		if applySkillFilter && len(sourceSkillValues) > 0 {
 			query += ` AND EXISTS (
 				SELECT 1
 				FROM jsonb_array_elements_text(COALESCE(p.tech_stack, '[]'::jsonb)) AS skill
@@ -589,29 +605,29 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 			)`
 			args = append(args, sourceSkillValues)
 		}
-
 		query += ` ORDER BY p.updated_at DESC, p.id DESC LIMIT 100`
 
 		rows, err := s.DB.SQL.QueryContext(ctx, query, args...)
 		if err != nil {
-			return "", "", err
+			return "", "", false, err
 		}
 		defer rows.Close()
 
-		bestExactSet := false
-		bestExactTitle := ""
-		bestExactFunction := ""
-		bestExactSkillOverlapCount := -1
-		bestExactSkillOverlapRatio := -1.0
-		bestExactCategoryOverlap := -1
-		bestExactSequence := -1
+		bestSet := false
+		bestTitle := ""
+		bestFunction := ""
+		bestSignalWeight := -1.0
+		bestSkillOverlapCount := -1
+		bestSkillOverlapRatio := -1.0
+		bestCategoryOverlap := -1
+		bestSequence := -1
 
 		for rows.Next() {
 			var candidateRoleTitle, candidateTitle sql.NullString
 			var candidateFunction sql.NullString
 			var candidateTechStackRaw sql.NullString
 			if err := rows.Scan(&candidateRoleTitle, &candidateTitle, &candidateFunction, &candidateTechStackRaw); err != nil {
-				return "", "", err
+				return "", "", false, err
 			}
 
 			titleTokens := tokenizeTextForSequence(candidateTitle.String)
@@ -620,7 +636,6 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 				titleTokenSet[token] = struct{}{}
 			}
 
-			// Avoid collapsing a specific source title onto a single generic bucket like "Engineer".
 			skipCandidate := false
 			if sourceHasSpecificTokens && len(titleTokenSet) == 1 {
 				for token := range titleTokenSet {
@@ -656,44 +671,50 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 				sequenceCount = functionSeq
 			}
 
-			if !bestExactSet ||
-				skillOverlapCount > bestExactSkillOverlapCount ||
-				(skillOverlapCount == bestExactSkillOverlapCount && skillOverlapRatio > bestExactSkillOverlapRatio) ||
-				(skillOverlapCount == bestExactSkillOverlapCount && skillOverlapRatio == bestExactSkillOverlapRatio && categoryOverlapCount > bestExactCategoryOverlap) ||
-				(skillOverlapCount == bestExactSkillOverlapCount && skillOverlapRatio == bestExactSkillOverlapRatio && categoryOverlapCount == bestExactCategoryOverlap && sequenceCount > bestExactSequence) {
-				bestExactSet = true
-				bestExactTitle = candidateTitle.String
-				bestExactFunction = candidateFunction.String
-				bestExactSkillOverlapCount = skillOverlapCount
-				bestExactSkillOverlapRatio = skillOverlapRatio
-				bestExactCategoryOverlap = categoryOverlapCount
-				bestExactSequence = sequenceCount
+			signalWeight := categorySignalWeightFromCatalog(categorySignalCatalog, sourceNormalizedTitle, candidateTitle.String, candidateFunction.String)
+
+			if !bestSet ||
+				signalWeight > bestSignalWeight ||
+				(signalWeight == bestSignalWeight && skillOverlapCount > bestSkillOverlapCount) ||
+				(signalWeight == bestSignalWeight && skillOverlapCount == bestSkillOverlapCount && skillOverlapRatio > bestSkillOverlapRatio) ||
+				(signalWeight == bestSignalWeight && skillOverlapCount == bestSkillOverlapCount && skillOverlapRatio == bestSkillOverlapRatio && categoryOverlapCount > bestCategoryOverlap) ||
+				(signalWeight == bestSignalWeight && skillOverlapCount == bestSkillOverlapCount && skillOverlapRatio == bestSkillOverlapRatio && categoryOverlapCount == bestCategoryOverlap && sequenceCount > bestSequence) {
+				bestSet = true
+				bestTitle = candidateTitle.String
+				bestFunction = candidateFunction.String
+				bestSignalWeight = signalWeight
+				bestSkillOverlapCount = skillOverlapCount
+				bestSkillOverlapRatio = skillOverlapRatio
+				bestCategoryOverlap = categoryOverlapCount
+				bestSequence = sequenceCount
 			}
 		}
 
 		if err := rows.Err(); err != nil {
-			return "", "", err
+			return "", "", false, err
 		}
-		if bestExactTitle != "" {
-			return bestExactTitle, bestExactFunction, nil
+		if bestTitle != "" {
+			return bestTitle, bestFunction, true, nil
 		}
+		return "", "", false, nil
 	}
 
-	catalogTokenSet := map[string]struct{}{}
-	for _, terms := range categorySignalCatalog {
-		for token := range terms.tokens {
-			catalogTokenSet[token] = struct{}{}
-		}
+	title, function, ok, err := findAllTokensMatch(roleTokenList, true)
+	if err != nil {
+		return "Any", "Any", err
 	}
-	filteredSequenceTokens := make([]string, 0, len(sourceSequenceTokens))
-	for _, token := range sourceSequenceTokens {
-		if _, ok := catalogTokenSet[token]; ok {
-			filteredSequenceTokens = append(filteredSequenceTokens, token)
-		}
+	if ok {
+		return title, function, nil
 	}
-	if len(filteredSequenceTokens) == 0 {
-		filteredSequenceTokens = sourceSequenceTokens
+
+	title, function, ok, err = findAllTokensMatch(filteredSequenceTokens, true)
+	if err != nil {
+		return "Any", "Any", err
 	}
+	if ok {
+		return title, function, nil
+	}
+
 	queryTokens := buildSimilarityQueryTokens(filteredSequenceTokens)
 
 	type matchRank struct {
