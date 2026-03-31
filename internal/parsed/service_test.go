@@ -837,6 +837,14 @@ func TestNormalizeJobURLForMatchKeepsURLsContainingAtSymbol(t *testing.T) {
 	}
 }
 
+func TestNormalizeJobURLForMatchStripsTrackingQueryParams(t *testing.T) {
+	base := "https://jobs.lever.co/coupa/3cac0beb-8734-489f-b67c-b37a0ae74ca8"
+	withTracking := base + "?ref=dailyremote&utm_source=dailyremote.com&utm_campaign=dailyremote.com&utm_medium=dailyremote.com"
+	if normalizeJobURLForMatch(base) != normalizeJobURLForMatch(withTracking) {
+		t.Fatalf("expected tracking params to be ignored for job URL match")
+	}
+}
+
 func TestProcessPendingRemoterocketshipDuplicateReplacementKeepsCreatedAtSource(t *testing.T) {
 	db, err := database.Open(testDatabaseURL(t, "test_parsed_remoterocketship_duplicate_keep_created_at_source"))
 	if err != nil {

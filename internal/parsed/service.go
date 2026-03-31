@@ -2509,6 +2509,46 @@ func (s *Service) findDuplicateCrossSourceParsedJob(ctx context.Context, rawJobI
 	if slashIdx := strings.Index(urlHost, "/"); slashIdx > 0 {
 		urlHost = urlHost[:slashIdx]
 	}
+
+	// First pass: ignore company_id and match by normalized URL only.
+	{
+		query := `SELECT p.id, p.url
+		   FROM parsed_jobs p
+		   JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
+		  WHERE r.source <> ?
+		    AND p.url IS NOT NULL
+		    AND LOWER(p.url) LIKE ?
+		    AND p.raw_us_job_id <> ?
+		  ORDER BY p.updated_at DESC, p.id DESC
+		  LIMIT 200`
+		args := []any{
+			source,
+			"%" + strings.ToLower(sourceURLNorm) + "%",
+			rawJobID,
+		}
+		rows, err := s.DB.SQL.QueryContext(ctx, query, args...)
+		if err != nil {
+			return 0, false, err
+		}
+		for rows.Next() {
+			var duplicateID int64
+			var candidateURL sql.NullString
+			if scanErr := rows.Scan(&duplicateID, &candidateURL); scanErr != nil {
+				rows.Close()
+				return 0, false, scanErr
+			}
+			if normalizeJobURLForMatch(candidateURL.String) == sourceURLNorm {
+				rows.Close()
+				return duplicateID, true, nil
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return 0, false, err
+		}
+		rows.Close()
+	}
+
 	companyIDInt, companyIDOK := companyID.(int64)
 	var companyIDFilter any
 	if companyIDOK {
