@@ -137,7 +137,7 @@
     "tokens": [
       {
         "token": "accounting",
-        "weight": 3.88
+        "weight": 3.1
       },
       {
         "token": "manager",
@@ -235,7 +235,7 @@
     "tokens": [
       {
         "token": "affiliate",
-        "weight": 3.88
+        "weight": 3.1
       },
       {
         "token": "manager",
@@ -252,7 +252,7 @@
     "tokens": [
       {
         "token": "ai",
-        "weight": 3.88
+        "weight": 3.1
       },
       {
         "token": "engineer",
@@ -303,7 +303,7 @@
     "tokens": [
       {
         "token": "analytics",
-        "weight": 3.88
+        "weight": 3.1
       },
       {
         "token": "engineer",
@@ -320,7 +320,7 @@
     "tokens": [
       {
         "token": "android",
-        "weight": 3.88
+        "weight": 3.1
       },
       {
         "token": "developer",
@@ -340,7 +340,7 @@
       },
       {
         "token": "mobile",
-        "weight": 3.76
+        "weight": 3.1
       }
     ]
   },
@@ -358,7 +358,7 @@
     "tokens": [
       {
         "token": "application",
-        "weight": 5.51
+        "weight": 2.79
       },
       {
         "token": "developer",
@@ -413,7 +413,7 @@
     "tokens": [
       {
         "token": "art",
-        "weight": 3.88
+        "weight": 3.1
       },
       {
         "token": "director",
@@ -500,6 +500,10 @@
         "weight": 1.9
       },
       {
+        "token": "development",
+        "weight": 1.8
+      },
+      {
         "token": "engineer",
         "weight": 1.96
       },
@@ -539,7 +543,7 @@
     "tokens": [
       {
         "token": "billing",
-        "weight": 3.88
+        "weight": 3.1
       },
       {
         "token": "specialist",
@@ -556,7 +560,7 @@
     "tokens": [
       {
         "token": "blockchain",
-        "weight": 3.88
+        "weight": 3.1
       },
       {
         "token": "engineer",
@@ -624,7 +628,7 @@
     "tokens": [
       {
         "token": "brand",
-        "weight": 3.88
+        "weight": 3.1
       },
       {
         "token": "manager",
@@ -649,7 +653,7 @@
       },
       {
         "token": "business",
-        "weight": 3.88
+        "weight": 3.1
       }
     ]
   },
@@ -751,7 +755,7 @@
     "tokens": [
       {
         "token": "capture",
-        "weight": 3.88
+        "weight": 3.1
       },
       {
         "token": "manager",
@@ -844,7 +848,7 @@
     "tokens": [
       {
         "token": "civil",
-        "weight": 3.88
+        "weight": 3.1
       },
       {
         "token": "engineer",
@@ -861,7 +865,7 @@
     "tokens": [
       {
         "token": "claims",
-        "weight": 3.88
+        "weight": 3.1
       },
       {
         "token": "specialist",
@@ -990,7 +994,7 @@
     "tokens": [
       {
         "token": "cloud",
-        "weight": 3.88
+        "weight": 3.1
       },
       {
         "token": "engineer",
@@ -1029,7 +1033,7 @@
     "tokens": [
       {
         "token": "community",
-        "weight": 3.88
+        "weight": 3.1
       },
       {
         "token": "manager",
@@ -1114,7 +1118,7 @@
     "tokens": [
       {
         "token": "content",
-        "weight": 3.88
+        "weight": 3.1
       },
       {
         "token": "manager",
@@ -1447,7 +1451,7 @@
       },
       {
         "token": "database",
-        "weight": 3.88
+        "weight": 3.1
       }
     ]
   },
@@ -1579,7 +1583,7 @@
     "tokens": [
       {
         "token": "electrical",
-        "weight": 3.88
+        "weight": 3.1
       },
       {
         "token": "engineer",
@@ -1713,7 +1717,7 @@
       },
       {
         "token": "field",
-        "weight": 3.88
+        "weight": 3.1
       }
     ]
   },
@@ -1726,7 +1730,7 @@
       },
       {
         "token": "financial",
-        "weight": 2.5
+        "weight": 1.67
       }
     ]
   },
@@ -1757,6 +1761,10 @@
       {
         "token": "developer",
         "weight": 1.9
+      },
+      {
+        "token": "development",
+        "weight": 1.8
       },
       {
         "token": "developers",
@@ -1846,7 +1854,7 @@
       },
       {
         "token": "game",
-        "weight": 3.88
+        "weight": 3.1
       }
     ]
   },
@@ -1938,7 +1946,7 @@
       },
       {
         "token": "hardware",
-        "weight": 3.88
+        "weight": 3.1
       }
     ]
   },
@@ -2027,7 +2035,7 @@
       },
       {
         "token": "infrastructure",
-        "weight": 3.88
+        "weight": 3.3
       }
     ]
   },
@@ -2074,11 +2082,11 @@
       },
       {
         "token": "ios",
-        "weight": 3.88
+        "weight": 3.3
       },
       {
         "token": "mobile",
-        "weight": 3.76
+        "weight": 3.1
       }
     ]
   },
@@ -2149,6 +2157,10 @@
         "weight": 3.5
       },
       {
+        "token": "teaching",
+        "weight": 2.8
+      },
+      {
         "token": "trainer",
         "weight": 3.5
       },
@@ -2216,7 +2228,7 @@
       },
       {
         "token": "llm",
-        "weight": 3.88
+        "weight": 3.1
       }
     ]
   },
@@ -2292,7 +2304,7 @@
       },
       {
         "token": "marketing",
-        "weight": 4.0
+        "weight": 2.8
       }
     ]
   },
@@ -2322,7 +2334,7 @@
       },
       {
         "token": "mechanical",
-        "weight": 3.88
+        "weight": 3.1
       }
     ]
   },
@@ -2335,6 +2347,10 @@
       },
       {
         "token": "coding",
+        "weight": 1.67
+      },
+      {
+        "token": "coder",
         "weight": 1.67
       },
       {
@@ -2356,7 +2372,7 @@
       },
       {
         "token": "medical",
-        "weight": 3.88
+        "weight": 3.1
       }
     ]
   },
@@ -2411,7 +2427,7 @@
       },
       {
         "token": "network",
-        "weight": 3.88
+        "weight": 3.1
       }
     ]
   },
@@ -2441,7 +2457,7 @@
       },
       {
         "token": "nlp",
-        "weight": 3.88
+        "weight": 3.1
       }
     ]
   },
@@ -2459,7 +2475,7 @@
     "tokens": [
       {
         "token": "onboarding",
-        "weight": 3.88
+        "weight": 3.1
       },
       {
         "token": "specialist",
@@ -2562,11 +2578,11 @@
       },
       {
         "token": "infrastructure",
-        "weight": 3.76
+        "weight": 3.1
       },
       {
         "token": "platform",
-        "weight": 3.88
+        "weight": 3.3
       }
     ]
   },
@@ -2604,7 +2620,7 @@
       },
       {
         "token": "pricing",
-        "weight": 3.88
+        "weight": 3.1
       }
     ]
   },
@@ -2664,7 +2680,7 @@
       },
       {
         "token": "product",
-        "weight": 3.88
+        "weight": 3.1
       }
     ]
   },
@@ -2710,7 +2726,7 @@
       },
       {
         "token": "product",
-        "weight": 3.88
+        "weight": 3.1
       }
     ]
   },
@@ -2745,7 +2761,7 @@
     "tokens": [
       {
         "token": "product",
-        "weight": 3.88
+        "weight": 3.1
       },
       {
         "token": "specialist",
@@ -2770,7 +2786,7 @@
       },
       {
         "token": "production",
-        "weight": 3.88
+        "weight": 3.1
       }
     ]
   },
@@ -2787,7 +2803,7 @@
       },
       {
         "token": "program",
-        "weight": 3.88
+        "weight": 3.1
       }
     ]
   },
@@ -2833,7 +2849,7 @@
       },
       {
         "token": "proposal",
-        "weight": 3.88
+        "weight": 3.1
       }
     ]
   },
@@ -2883,7 +2899,7 @@
       },
       {
         "token": "qa",
-        "weight": 1.26
+        "weight": 2.36
       },
       {
         "token": "quality",
@@ -2928,7 +2944,7 @@
       },
       {
         "token": "quality",
-        "weight": 2.41
+        "weight": 1.28
       },
       {
         "token": "test",
@@ -3217,7 +3233,7 @@
       },
       {
         "token": "salesforce",
-        "weight": 3.88
+        "weight": 3.1
       }
     ]
   },
@@ -3477,28 +3493,24 @@
     "category": "Software Engineer",
     "tokens": [
       {
-        "token": "coder",
-        "weight": 3.19
-      },
-      {
         "token": "developer",
-        "weight": 1.9
+        "weight": 1.91
       },
       {
         "token": "developers",
-        "weight": 1.9
+        "weight": 1.91
       },
       {
         "token": "development",
-        "weight": 1.9
+        "weight": 1.91
       },
       {
         "token": "engineer",
-        "weight": 1.96
+        "weight": 1.97
       },
       {
         "token": "engineers",
-        "weight": 1.96
+        "weight": 1.97
       },
       {
         "token": "programmer",
@@ -3511,6 +3523,10 @@
       {
         "token": "software",
         "weight": 2.79
+      },
+      {
+        "token": "application",
+        "weight": 2.5
       }
     ]
   },

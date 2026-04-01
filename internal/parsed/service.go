@@ -686,18 +686,18 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 			sequenceCount := orderedTokenMatchCount(sourceSequenceNormalizedTokens, candidateRoleSequenceTokens)
 			exactRoleMatch := candidateNormalizedRole != "" && candidateNormalizedRole == sourceNormalizedTitle
 
-			skipCandidate := false
-			if sourceHasSpecificTokens && len(titleTokenSet) == 1 && !exactRoleMatch {
-				for token := range titleTokenSet {
-					if isGenericCategoryToken(token) {
-						skipCandidate = true
-						break
-					}
-				}
-			}
-			if skipCandidate {
-				continue
-			}
+			// skipCandidate := false
+			// if sourceHasSpecificTokens && len(titleTokenSet) == 1 && !exactRoleMatch {
+			// 	for token := range titleTokenSet {
+			// 		if isGenericCategoryToken(token) {
+			// 			skipCandidate = true
+			// 			break
+			// 		}
+			// 	}
+			// }
+			// if skipCandidate {
+			// 	continue
+			// }
 
 			signalWeight := categorySignalWeightFromCatalog(categorySignalCatalog, sourceNormalizedTitle, candidateTitle.String, candidateFunction.String)
 
@@ -728,28 +728,25 @@ func (s *Service) findSimilarRemoteRoekctshipCategories(ctx context.Context, rol
 		}
 		return "", "", false, nil
 	}
-
-	title, function, ok, err := findAllTokensMatch(roleTokenList, true, false)
-	if err != nil {
-		return "Any", "Any", err
-	}
-	if ok {
-		return title, function, nil
+	tokenListArrays := [][]string{roleTokenList}
+	if len(roleTokenList) != len(filteredSequenceTokens) {
+		tokenListArrays = append(tokenListArrays, filteredSequenceTokens)
 	}
 
-	title, function, ok, err = findAllTokensMatch(filteredSequenceTokens, true, true)
-	if err != nil {
-		return "Any", "Any", err
-	}
-	if ok {
-		return title, function, nil
-	}
-	title, function, ok, err = findAllTokensMatch(filteredSequenceTokens, false, true)
-	if err != nil {
-		return "Any", "Any", err
-	}
-	if ok {
-		return title, function, nil
+	for _, tokenList := range tokenListArrays {
+		for _, applyFilterSkill := range []bool{true, false} {
+			for _, applyFilterCategory := range []bool{true, false} {
+				// Implementation for each combination of filters
+
+				title, function, ok, err := findAllTokensMatch(tokenList, applyFilterSkill, applyFilterCategory)
+				if err != nil {
+					return "Any", "Any", err
+				}
+				if ok {
+					return title, function, nil
+				}
+			}
+		}
 	}
 
 	queryTokens := buildSimilarityQueryTokens(filteredSequenceTokens)
