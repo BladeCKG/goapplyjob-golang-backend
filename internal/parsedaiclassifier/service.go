@@ -143,6 +143,7 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, roleRequirem
 		if len(providers) == 0 {
 			providers = []string{defaultAIClassifierProvider}
 		}
+		var lastProviderErr error
 		for _, provider := range providers {
 			var providerCategory string
 			var providerSkills []string
@@ -209,7 +210,15 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, roleRequirem
 				}
 			}
 			if err != nil {
-				return "", "", nil, err
+				log.Printf(
+					WorkerLogPrefix+" %s_failed role_title=%q error=%v",
+					provider,
+					roleTitle,
+					err,
+				)
+				lastProviderErr = err
+				err = nil
+				continue
 			}
 			if providerCategory == "" {
 				continue
@@ -236,6 +245,9 @@ func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, roleRequirem
 				)
 			}
 			break
+		}
+		if categorizedTitle == "" && lastProviderErr != nil {
+			return "", "", nil, lastProviderErr
 		}
 	}
 
