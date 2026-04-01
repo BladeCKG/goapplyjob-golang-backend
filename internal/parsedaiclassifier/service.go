@@ -8,6 +8,10 @@ import (
 	"goapplyjob-golang-backend/internal/constants"
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/normalize/techstacknorm"
+	cerebrasprovider "goapplyjob-golang-backend/internal/parsedaiclassifier/providers/cerebras"
+	groqprovider "goapplyjob-golang-backend/internal/parsedaiclassifier/providers/groq"
+	ollamaprovider "goapplyjob-golang-backend/internal/parsedaiclassifier/providers/ollama"
+	openaiprovider "goapplyjob-golang-backend/internal/parsedaiclassifier/providers/openai"
 	"goapplyjob-golang-backend/internal/sources/plugins"
 	"log"
 	"strings"
@@ -27,13 +31,41 @@ type Service struct {
 	Classify       ClassifyFunc
 	EnabledSources map[string]struct{}
 	Config         Config
+	Providers      []string
 }
 
 type Config struct {
-	BatchSize           int
-	PollSeconds         float64
-	RunOnce             bool
-	ErrorBackoffSeconds int
+	BatchSize            int
+	PollSeconds          float64
+	RunOnce              bool
+	ErrorBackoffSeconds  int
+	Provider             string
+	Providers            string
+	GroqAPIKey           string
+	GroqAPIKeys          string
+	GroqModel            string
+	GroqModels           string
+	GroqBaseURL          string
+	GroqPromptSource     string
+	OllamaConfigured     bool
+	OllamaBaseURL        string
+	OllamaModel          string
+	OllamaModels         string
+	OllamaAPIKey         string
+	OllamaAPIKeys        string
+	OllamaPromptSource   string
+	CerebrasAPIKey       string
+	CerebrasAPIKeys      string
+	CerebrasModel        string
+	CerebrasModels       string
+	CerebrasBaseURL      string
+	CerebrasPromptSource string
+	OpenAIAPIKey         string
+	OpenAIAPIKeys        string
+	OpenAIModel          string
+	OpenAIModels         string
+	OpenAIBaseURL        string
+	OpenAIPromptSource   string
 }
 
 func nullStringValue(value sql.NullString) string {
@@ -45,8 +77,9 @@ func nullStringValue(value sql.NullString) string {
 
 func New(cfg Config, db *database.DB) *Service {
 	return &Service{
-		DB:     db,
-		Config: cfg,
+		DB:        db,
+		Config:    cfg,
+		Providers: NewFactory(cfg).ResolveProviders(),
 	}
 }
 
@@ -92,52 +125,117 @@ func (s *Service) classify(ctx context.Context, roleRequirements, roleTitle, rol
 	return s.SuggestCategoryWithTechStack(ctx, roleRequirements, roleTitle, roleDescription, nil, false)
 }
 
-func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, roleRequirements, roleTitle, roleDescription string, techStack any, overrideTechStack bool) (string, string, []string, error) {
+func (s *Service) SuggestCategoryWithTechStack(ctx context.Context, roleRequirements, roleTitle, roleDescription string, techStack any, forceAiClassification bool) (string, string, []string, error) {
 	normalizedTechStack := techstacknorm.Normalize(techStack)
 	categorizedTitle := ""
 	categorizedFunction := ""
 
-	if len(normalizedTechStack) == 0 || overrideTechStack {
+	if len(normalizedTechStack) == 0 || forceAiClassification {
 		allowedCategories, categoryFunctions, err := s.loadAllowedJobCategoriesAndFunctions(ctx)
 		if err != nil {
 			return "", "", nil, err
 		}
-		if shouldUseGroqClassification(roleTitle) {
-			groqCategory, groqRequiredSkills, err := classifyJobTitleWithGroqSync(
-				roleTitle,
-				groqClassifierDescription(roleDescription, roleRequirements),
-				allowedCategories,
-			)
+		description := groqClassifierDescription(roleDescription, roleRequirements)
+		classifyWithSkills := shouldInferCategoryWithSkills(roleTitle)
+		titlePromptContent := loadClassifierPromptContent(s.Config.GroqPromptSource)
+		categoryPromptContent := loadCategoryPromptContent("")
+		providers := s.Providers
+		if len(providers) == 0 {
+			providers = []string{defaultAIClassifierProvider}
+		}
+		for _, provider := range providers {
+			var providerCategory string
+			var providerSkills []string
+			switch provider {
+			case "openai":
+				classifier := &openaiprovider.Classifier{Config: openaiprovider.Config{
+					APIKey:                s.Config.OpenAIAPIKey,
+					APIKeys:               s.Config.OpenAIAPIKeys,
+					Model:                 s.Config.OpenAIModel,
+					Models:                s.Config.OpenAIModels,
+					BaseURL:               s.Config.OpenAIBaseURL,
+					PromptContent:         loadPromptContent(s.Config.OpenAIPromptSource, titlePromptContent),
+					CategoryPromptContent: categoryPromptContent,
+				}}
+				if classifyWithSkills {
+					providerCategory, providerSkills, err = classifier.ClassifySync(ctx, roleTitle, description, allowedCategories)
+				} else {
+					providerCategory, err = classifier.ClassifyCategoryOnlySync(ctx, roleTitle, allowedCategories)
+				}
+			case "cerebras":
+				classifier := &cerebrasprovider.Classifier{Config: cerebrasprovider.Config{
+					APIKey:                s.Config.CerebrasAPIKey,
+					APIKeys:               s.Config.CerebrasAPIKeys,
+					Model:                 s.Config.CerebrasModel,
+					Models:                s.Config.CerebrasModels,
+					BaseURL:               s.Config.CerebrasBaseURL,
+					PromptContent:         loadPromptContent(s.Config.CerebrasPromptSource, titlePromptContent),
+					CategoryPromptContent: categoryPromptContent,
+				}}
+				if classifyWithSkills {
+					providerCategory, providerSkills, err = classifier.ClassifySync(ctx, roleTitle, description, allowedCategories)
+				} else {
+					providerCategory, err = classifier.ClassifyCategoryOnlySync(ctx, roleTitle, allowedCategories)
+				}
+			case "ollama":
+				classifier := &ollamaprovider.Classifier{Config: ollamaprovider.Config{
+					BaseURL:               s.Config.OllamaBaseURL,
+					Model:                 s.Config.OllamaModel,
+					Models:                s.Config.OllamaModels,
+					APIKey:                s.Config.OllamaAPIKey,
+					APIKeys:               s.Config.OllamaAPIKeys,
+					PromptContent:         loadPromptContent(s.Config.OllamaPromptSource, titlePromptContent),
+					CategoryPromptContent: categoryPromptContent,
+				}}
+				if classifyWithSkills {
+					providerCategory, providerSkills, err = classifier.ClassifySync(ctx, roleTitle, description, allowedCategories)
+				} else {
+					providerCategory, err = classifier.ClassifyCategoryOnlySync(ctx, roleTitle, allowedCategories)
+				}
+			default:
+				classifier := &groqprovider.Classifier{Config: groqprovider.Config{
+					APIKey:                s.Config.GroqAPIKey,
+					APIKeys:               s.Config.GroqAPIKeys,
+					Model:                 s.Config.GroqModel,
+					Models:                s.Config.GroqModels,
+					BaseURL:               s.Config.GroqBaseURL,
+					PromptContent:         titlePromptContent,
+					CategoryPromptContent: categoryPromptContent,
+				}}
+				if classifyWithSkills {
+					providerCategory, providerSkills, err = classifier.ClassifySync(ctx, roleTitle, description, allowedCategories)
+				} else {
+					providerCategory, err = classifier.ClassifyCategoryOnlySync(ctx, roleTitle, allowedCategories)
+				}
+			}
 			if err != nil {
 				return "", "", nil, err
 			}
-			if groqCategory != "" {
-				categorizedTitle = groqCategory
-				categorizedFunction = categoryFunctions[groqCategory]
+			if providerCategory == "" {
+				continue
+			}
+			categorizedTitle = providerCategory
+			categorizedFunction = categoryFunctions[providerCategory]
+			if classifyWithSkills {
+				normalizedTechStack = techstacknorm.Normalize(providerSkills)
 				log.Printf(
-					WorkerLogPrefix+" groq_inferred role_title=%q category=%q function=%q required_skills_len=%d",
+					WorkerLogPrefix+" %s_inferred role_title=%q category=%q function=%q required_skills_len=%d",
+					provider,
 					roleTitle,
 					categorizedTitle,
 					categorizedFunction,
-					len(groqRequiredSkills),
+					len(providerSkills),
 				)
-				normalizedTechStack = techstacknorm.Normalize(groqRequiredSkills)
-			}
-		} else {
-			groqCategory, err := classifyJobCategoryWithGroqSync(roleTitle, allowedCategories)
-			if err != nil {
-				return "", "", nil, err
-			}
-			if groqCategory != "" {
-				categorizedTitle = groqCategory
-				categorizedFunction = categoryFunctions[groqCategory]
+			} else {
 				log.Printf(
-					WorkerLogPrefix+" groq_inferred role_title=%q category=%q function=%q",
+					WorkerLogPrefix+" %s_inferred role_title=%q category=%q function=%q",
+					provider,
 					roleTitle,
 					categorizedTitle,
 					categorizedFunction,
 				)
 			}
+			break
 		}
 	}
 
