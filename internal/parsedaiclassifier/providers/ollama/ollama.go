@@ -151,7 +151,7 @@ keyAttempts:
 			}
 			reqPayload["model"] = model
 			body, _ := json.Marshal(reqPayload)
-			req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/chat", bytes.NewReader(body))
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/chat/completions", bytes.NewReader(body))
 			if err != nil {
 				return "", err
 			}

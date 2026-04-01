@@ -29,7 +29,7 @@ func TestClassifySyncUsesHostedServer(t *testing.T) {
 		},
 		HTTPClient: &http.Client{
 			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-				if req.URL.String() != "https://ollama.example.com/api/chat" {
+				if req.URL.String() != "https://ollama.example.com/v1/chat/completions" {
 					t.Fatalf("unexpected ollama url %q", req.URL.String())
 				}
 				if got := req.Header.Get("Authorization"); got != "Bearer test-key" {
