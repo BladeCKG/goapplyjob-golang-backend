@@ -1518,6 +1518,8 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	processRow := func(ctx context.Context, row rawRow) (int, int, error) {
 		processedInc := 0
 		skippedInc := 0
+		var retries int
+		var retryDelay time.Duration
 		payload := map[string]any{}
 		if !row.rawJSON.Valid || row.rawJSON.String == "" {
 			if _, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true WHERE id = ?`, row.id); err != nil {
@@ -1531,6 +1533,12 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			}
 			return 1, 1, nil
 		}
+		var existingParsedID int64
+		err := s.DB.SQL.QueryRowContext(ctx, `SELECT id FROM parsed_jobs WHERE raw_us_job_id = ? LIMIT 1`, row.id).Scan(&existingParsedID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return processedInc, skippedInc, err
+		}
+		hasExistingParsedForRawID := err == nil && existingParsedID > 0
 		log.Printf("parsed-job-worker upsert_start raw_job_id=%d source=%s", row.id, row.source)
 		sourceCreatedAt := parseDT(payload["created_at"])
 		normalizedTechStack := normalizeTechStack(payload["techStack"])
@@ -1548,10 +1556,17 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			return processedInc, skippedInc + 1, nil
 		}
 		createdAtSourceValue := formatNullableTime(sourceCreatedAt)
-		duplicateID, isDuplicate, duplicateErr := s.findDuplicateCrossSourceParsedJob(ctx, row.id, row.source, payload, companyID)
-		if duplicateErr != nil {
-			log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, duplicateErr)
-			return processedInc, skippedInc + 1, nil
+		var (
+			duplicateID  int64
+			isDuplicate  bool
+			duplicateErr error
+		)
+		if !hasExistingParsedForRawID {
+			duplicateID, isDuplicate, duplicateErr = s.findDuplicateCrossSourceParsedJob(ctx, row.id, row.source, payload, companyID)
+			if duplicateErr != nil {
+				log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, duplicateErr)
+				return processedInc, skippedInc + 1, nil
+			}
 		}
 
 		// isRemoteRocketshipDuplicate := false
@@ -1589,7 +1604,14 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			}
 		}
 
-		inferCategories := !isNonRemoterocketshipDuplicate && plugin.InferCategories
+		mergeIntoExistingParsedID := int64(0)
+		if isNonRemoterocketshipDuplicate {
+			mergeIntoExistingParsedID = duplicateID
+		} else if hasExistingParsedForRawID {
+			mergeIntoExistingParsedID = existingParsedID
+		}
+
+		inferCategories := mergeIntoExistingParsedID == 0 && plugin.InferCategories
 		categorizedTitle := stringFromPayload(payload["categorizedJobTitle"])
 		categorizedFunction := stringFromPayload(payload["categorizedJobFunction"])
 		if inferCategories && categorizedTitle == nil {
@@ -1633,7 +1655,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		}
 		normalizedTechStackJSON := jsonStringOrNil(normalizedTechStack)
 
-		if isNonRemoterocketshipDuplicate {
+		if mergeIntoExistingParsedID != 0 {
 			retries, retryDelay := parsedLockRetryConfig()
 			if err := database.RetryLocked(retries, retryDelay, func() error {
 				_, execErr := s.DB.SQL.ExecContext(
@@ -1750,27 +1772,39 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 					_normalizeNullStringToNone(mapValue(payload, "salaryRange", "maxSalaryAsUSD")),
 					_normalizeNullStringToNone(mapValue(payload, "salaryRange", "salaryHumanReadableText")),
 					time.Now().UTC().Format(time.RFC3339Nano),
-					duplicateID,
+					mergeIntoExistingParsedID,
 				)
 				return execErr
 			}); err != nil {
 				log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
 				return processedInc, skippedInc + 1, nil
 			}
-			log.Printf("parsed-job-worker duplicate_cross_source_merge raw_job_id=%d source=%s duplicate_parsed_job_id=%d", row.id, row.source, duplicateID)
-			retries, retryDelay = parsedLockRetryConfig()
-			if err := database.RetryLocked(retries, retryDelay, func() error {
-				_, execErr := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true, is_skippable = true, raw_json = NULL WHERE id = ?`, row.id)
-				return execErr
-			}); err != nil {
-				log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
-				return processedInc, skippedInc + 1, nil
+			if isNonRemoterocketshipDuplicate {
+				log.Printf("parsed-job-worker duplicate_cross_source_merge raw_job_id=%d source=%s duplicate_parsed_job_id=%d", row.id, row.source, duplicateID)
+				retries, retryDelay = parsedLockRetryConfig()
+				if err := database.RetryLocked(retries, retryDelay, func() error {
+					_, execErr := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true, is_skippable = true, raw_json = NULL WHERE id = ?`, row.id)
+					return execErr
+				}); err != nil {
+					log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
+					return processedInc, skippedInc + 1, nil
+				}
+			} else {
+				log.Printf("parsed-job-worker existing_raw_merge raw_job_id=%d source=%s parsed_job_id=%d", row.id, row.source, existingParsedID)
+				retries, retryDelay = parsedLockRetryConfig()
+				if err := database.RetryLocked(retries, retryDelay, func() error {
+					_, execErr := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true WHERE id = ?`, row.id)
+					return execErr
+				}); err != nil {
+					log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
+					return processedInc, skippedInc + 1, nil
+				}
 			}
 			return processedInc + 1, skippedInc, nil
 		}
 
-		retries, retryDelay := parsedLockRetryConfig()
-		err := database.RetryLocked(retries, retryDelay, func() error {
+		retries, retryDelay = parsedLockRetryConfig()
+		err = database.RetryLocked(retries, retryDelay, func() error {
 			_, execErr := s.DB.SQL.ExecContext(
 				ctx,
 				`INSERT INTO parsed_jobs (

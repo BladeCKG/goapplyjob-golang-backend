@@ -390,22 +390,6 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 				}
 				continue
 			}
-			if hasParsed {
-				var parsedJobID int64
-				err := tx.QueryRow(`SELECT id FROM parsed_jobs WHERE raw_us_job_id = ? LIMIT 1`, candidate.existingID).Scan(&parsedJobID)
-				if err == nil {
-					if _, err := tx.Exec(`DELETE FROM user_job_actions WHERE parsed_job_id = ?`, parsedJobID); err != nil {
-						failedDB++
-						failedRows[candidate.url] = candidate.row
-						continue
-					}
-				}
-				if _, err := tx.Exec(`DELETE FROM parsed_jobs WHERE raw_us_job_id = ?`, candidate.existingID); err != nil {
-					failedDB++
-					failedRows[candidate.url] = candidate.row
-					continue
-				}
-			}
 			if _, err := tx.Exec(
 				`UPDATE raw_us_jobs
 				 SET source = ?,

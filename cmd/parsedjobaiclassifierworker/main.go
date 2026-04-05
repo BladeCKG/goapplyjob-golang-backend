@@ -15,6 +15,10 @@ func main() {
 		log.Fatal(err)
 	}
 	defer func() { _ = closeLogFile() }()
+	if !config.GetenvBool("PARSED_JOB_AI_CLASSIFIER_ENABLED", false) {
+		log.Printf("parsed-job-ai-classifier-worker disabled")
+		return
+	}
 
 	cfg := config.Load()
 	db, err := database.Open(cfg.DatabaseURL)

@@ -98,6 +98,7 @@ func main() {
 
 		runChain := func() {
 			for {
+				parsedAIClassifierEnabled := config.GetenvBool("PARSED_JOB_AI_CLASSIFIER_ENABLED", false)
 				watcherSvc := watcher.New(watcher.Config{
 					Enabled:                          config.GetenvBool("WATCH_ENABLED", true),
 					RemoteRocketshipUSJobSitemapURLs: defaultRemoteRocketshipURLs,
@@ -160,40 +161,43 @@ func main() {
 					TechStackCatalogURL:     cfg.TechStackCatalogURL,
 				}, db)
 				parsedSvc.EnabledSources = enabledSources
-				parsedAIClassifierSvc := parsedaiclassifier.New(parsedaiclassifier.Config{
-					BatchSize:            config.GetenvInt("PARSED_JOB_AI_CLASSIFIER_BATCH_SIZE", 200),
-					PollSeconds:          config.GetenvFloat("PARSED_JOB_AI_CLASSIFIER_POLL_SECONDS", 5),
-					RunOnce:              true,
-					ErrorBackoffSeconds:  errorBackoffSeconds,
-					Provider:             cfg.AIClassifierProvider,
-					Providers:            cfg.AIClassifierProviders,
-					GroqAPIKey:           cfg.GroqAPIKey,
-					GroqAPIKeys:          cfg.GroqAPIKeys,
-					GroqModel:            cfg.GroqModel,
-					GroqModels:           cfg.GroqModels,
-					GroqBaseURL:          cfg.GroqBaseURL,
-					GroqPromptSource:     cfg.GroqClassifierPromptSource,
-					OllamaConfigured:     cfg.OllamaConfigured,
-					OllamaBaseURL:        cfg.OllamaBaseURL,
-					OllamaModel:          cfg.OllamaModel,
-					OllamaModels:         cfg.OllamaModels,
-					OllamaAPIKey:         cfg.OllamaAPIKey,
-					OllamaAPIKeys:        cfg.OllamaAPIKeys,
-					OllamaPromptSource:   cfg.OllamaClassifierPromptSource,
-					CerebrasAPIKey:       cfg.CerebrasAPIKey,
-					CerebrasAPIKeys:      cfg.CerebrasAPIKeys,
-					CerebrasModel:        cfg.CerebrasModel,
-					CerebrasModels:       cfg.CerebrasModels,
-					CerebrasBaseURL:      cfg.CerebrasBaseURL,
-					CerebrasPromptSource: cfg.CerebrasClassifierPromptSource,
-					OpenAIAPIKey:         cfg.OpenAIAPIKey,
-					OpenAIAPIKeys:        cfg.OpenAIAPIKeys,
-					OpenAIModel:          cfg.OpenAIModel,
-					OpenAIModels:         cfg.OpenAIModels,
-					OpenAIBaseURL:        cfg.OpenAIBaseURL,
-					OpenAIPromptSource:   cfg.OpenAIClassifierPromptSource,
-				}, db)
-				parsedAIClassifierSvc.EnabledSources = enabledSources
+				var parsedAIClassifierSvc *parsedaiclassifier.Service
+				if parsedAIClassifierEnabled {
+					parsedAIClassifierSvc = parsedaiclassifier.New(parsedaiclassifier.Config{
+						BatchSize:            config.GetenvInt("PARSED_JOB_AI_CLASSIFIER_BATCH_SIZE", 200),
+						PollSeconds:          config.GetenvFloat("PARSED_JOB_AI_CLASSIFIER_POLL_SECONDS", 5),
+						RunOnce:              true,
+						ErrorBackoffSeconds:  errorBackoffSeconds,
+						Provider:             cfg.AIClassifierProvider,
+						Providers:            cfg.AIClassifierProviders,
+						GroqAPIKey:           cfg.GroqAPIKey,
+						GroqAPIKeys:          cfg.GroqAPIKeys,
+						GroqModel:            cfg.GroqModel,
+						GroqModels:           cfg.GroqModels,
+						GroqBaseURL:          cfg.GroqBaseURL,
+						GroqPromptSource:     cfg.GroqClassifierPromptSource,
+						OllamaConfigured:     cfg.OllamaConfigured,
+						OllamaBaseURL:        cfg.OllamaBaseURL,
+						OllamaModel:          cfg.OllamaModel,
+						OllamaModels:         cfg.OllamaModels,
+						OllamaAPIKey:         cfg.OllamaAPIKey,
+						OllamaAPIKeys:        cfg.OllamaAPIKeys,
+						OllamaPromptSource:   cfg.OllamaClassifierPromptSource,
+						CerebrasAPIKey:       cfg.CerebrasAPIKey,
+						CerebrasAPIKeys:      cfg.CerebrasAPIKeys,
+						CerebrasModel:        cfg.CerebrasModel,
+						CerebrasModels:       cfg.CerebrasModels,
+						CerebrasBaseURL:      cfg.CerebrasBaseURL,
+						CerebrasPromptSource: cfg.CerebrasClassifierPromptSource,
+						OpenAIAPIKey:         cfg.OpenAIAPIKey,
+						OpenAIAPIKeys:        cfg.OpenAIAPIKeys,
+						OpenAIModel:          cfg.OpenAIModel,
+						OpenAIModels:         cfg.OpenAIModels,
+						OpenAIBaseURL:        cfg.OpenAIBaseURL,
+						OpenAIPromptSource:   cfg.OpenAIClassifierPromptSource,
+					}, db)
+					parsedAIClassifierSvc.EnabledSources = enabledSources
+				}
 				parsedAvailabilitySvc := parsedjobavailability.New(parsedjobavailability.Config{
 					BatchSize:           config.GetenvInt("PARSED_JOB_AVAILABILITY_BATCH_SIZE", 200),
 					PollSeconds:         config.GetenvFloat("PARSED_JOB_AVAILABILITY_POLL_SECONDS", 5),
@@ -242,6 +246,11 @@ func main() {
 					results <- stepResult{name: constants.WorkerNameParsed, count: count, err: err}
 				}()
 				go func() {
+					if !parsedAIClassifierEnabled || parsedAIClassifierSvc == nil {
+						log.Printf("worker-chain parsed_ai_classifier_disabled")
+						results <- stepResult{name: constants.WorkerNameParsedAIClassifier, count: 0, err: nil}
+						return
+					}
 					count, err := runCountStepWithTimeout(stepTimeout, func(ctx context.Context) (int, error) {
 						return parsedAIClassifierSvc.RunOnce(ctx)
 					})

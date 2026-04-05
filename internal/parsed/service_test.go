@@ -1191,7 +1191,7 @@ func TestProcessPendingCrossSourceDuplicateMergesEmptyFieldsAndSkipsRawRow(t *te
 	}
 }
 
-func TestProcessPendingUpsertOverwritesExistingParsedRowColumns(t *testing.T) {
+func TestProcessPendingUpsertMergesExistingParsedRowColumns(t *testing.T) {
 	db, err := database.Open(testDatabaseURL(t, "test_parsed_upsert_overwrite_existing"))
 	if err != nil {
 		t.Fatal(err)
@@ -1268,29 +1268,29 @@ func TestProcessPendingUpsertOverwritesExistingParsedRowColumns(t *testing.T) {
 	).Scan(&roleTitle, &roleDescription, &slug, &salaryCurrencyCode, &roleTitleBrazil, &locationUSStates, &techStack); err != nil {
 		t.Fatal(err)
 	}
-	if roleTitle.String != "New Title" {
-		t.Fatalf("expected role_title to be overwritten, got %q", roleTitle.String)
+	if roleTitle.String != "Old Title" {
+		t.Fatalf("expected role_title to be preserved, got %q", roleTitle.String)
 	}
-	if roleDescription.String != "New Description" {
-		t.Fatalf("expected role_description to be overwritten, got %q", roleDescription.String)
+	if roleDescription.String != "Old Description" {
+		t.Fatalf("expected role_description to be preserved, got %q", roleDescription.String)
 	}
-	if slug.String != "new-slug" {
-		t.Fatalf("expected slug to be overwritten, got %q", slug.String)
+	if slug.String != "old-slug" {
+		t.Fatalf("expected slug to be preserved, got %q", slug.String)
 	}
-	if salaryCurrencyCode.String != "USD" {
-		t.Fatalf("expected salary_currency_code to be overwritten, got %q", salaryCurrencyCode.String)
+	if salaryCurrencyCode.String != "EUR" {
+		t.Fatalf("expected salary_currency_code to be preserved, got %q", salaryCurrencyCode.String)
 	}
-	if roleTitleBrazil.String != "Novo Titulo" {
-		t.Fatalf("expected role_title_brazil to be overwritten, got %q", roleTitleBrazil.String)
+	if roleTitleBrazil.String != "Titulo Antigo" {
+		t.Fatalf("expected role_title_brazil to be preserved, got %q", roleTitleBrazil.String)
 	}
-	if locationUSStates.String != "[\"NY\"]" {
-		t.Fatalf("expected location_us_states to be overwritten, got %q", locationUSStates.String)
+	if locationUSStates.String != "[\"CA\"]" {
+		t.Fatalf("expected location_us_states to be preserved, got %q", locationUSStates.String)
 	}
 	var techValues []string
 	if err := json.Unmarshal([]byte(techStack.String), &techValues); err != nil {
 		t.Fatalf("failed to parse tech_stack json: %v", err)
 	}
-	if len(techValues) != 2 || techValues[0] != "Go" || techValues[1] != "PostgreSQL" {
-		t.Fatalf("expected normalized tech_stack overwrite, got %#v", techValues)
+	if len(techValues) != 1 || techValues[0] != "Ruby" {
+		t.Fatalf("expected existing tech_stack to be preserved, got %#v", techValues)
 	}
 }
