@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"runtime"
 	"strings"
 	"time"
 
@@ -105,6 +106,24 @@ func accessLog() gin.HandlerFunc {
 		statusCode := http.StatusInternalServerError
 		defer func() {
 			durationMS := time.Since(start).Milliseconds()
+			if c.Request.URL.Path == "/health" || c.Request.URL.Path == "/db/health" {
+				var mem runtime.MemStats
+				runtime.ReadMemStats(&mem)
+				log.Printf(
+					"request method=%s path=%s status_code=%d duration_ms=%d mem_alloc_mb=%.2f mem_heap_alloc_mb=%.2f mem_sys_mb=%.2f mem_stack_inuse_mb=%.2f mem_num_gc=%d goroutines=%d",
+					c.Request.Method,
+					c.Request.URL.Path,
+					statusCode,
+					durationMS,
+					float64(mem.Alloc)/(1024*1024),
+					float64(mem.HeapAlloc)/(1024*1024),
+					float64(mem.Sys)/(1024*1024),
+					float64(mem.StackInuse)/(1024*1024),
+					mem.NumGC,
+					runtime.NumGoroutine(),
+				)
+				return
+			}
 			log.Printf("request method=%s path=%s status_code=%d duration_ms=%d", c.Request.Method, c.Request.URL.Path, statusCode, durationMS)
 		}()
 		c.Next()
