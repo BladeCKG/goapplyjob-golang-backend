@@ -861,6 +861,98 @@ func TestNormalizeJobURLForMatchKeepsMeaningfulQueryParamsWithIgnoredTracking(t 
 	}
 }
 
+func TestExtractDuplicateJobURLSignaturesLeverApplyMatchesBasePosting(t *testing.T) {
+	rules := getDuplicateJobURLRuleSet("")
+	base := extractDuplicateJobURLSignatures("https://jobs.lever.co/coupa/3cac0beb-8734-489f-b67c-b37a0ae74ca8", rules)
+	apply := extractDuplicateJobURLSignatures("https://jobs.lever.co/coupa/3cac0beb-8734-489f-b67c-b37a0ae74ca8/apply?utm_source=dailyremote", rules)
+	if len(base) == 0 || len(apply) == 0 {
+		t.Fatalf("expected lever signatures to be extracted")
+	}
+	if base[0].key != apply[0].key {
+		t.Fatalf("expected lever apply and base URLs to share duplicate signature, got %q vs %q", base[0].key, apply[0].key)
+	}
+}
+
+func TestExtractDuplicateJobURLSignaturesADPUsesCIDAndJobIDPair(t *testing.T) {
+	rules := getDuplicateJobURLRuleSet("")
+	base := extractDuplicateJobURLSignatures("https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=a158e395-baec-4e08-8f75-7d0702e34f73&jobId=588193", rules)
+	withTracking := extractDuplicateJobURLSignatures("https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?utm_source=dailyremote&ref=newsletter&cid=a158e395-baec-4e08-8f75-7d0702e34f73&jobId=588193", rules)
+	otherJob := extractDuplicateJobURLSignatures("https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=a158e395-baec-4e08-8f75-7d0702e34f73&jobId=999999", rules)
+	if len(base) == 0 || len(withTracking) == 0 || len(otherJob) == 0 {
+		t.Fatalf("expected adp signatures to be extracted")
+	}
+	if base[0].key != withTracking[0].key {
+		t.Fatalf("expected ADP signature to ignore tracking params")
+	}
+	if base[0].key == otherJob[0].key {
+		t.Fatalf("expected ADP signature to change when jobId changes")
+	}
+}
+
+func TestExtractDuplicateJobURLSignaturesTaleoUsesJobQueryParam(t *testing.T) {
+	rules := getDuplicateJobURLRuleSet("")
+	direct := extractDuplicateJobURLSignatures("https://example.taleo.net/careersection/jobdetail.ftl?job=12345", rules)
+	withTracking := extractDuplicateJobURLSignatures("https://example.taleo.net/careersection/jobdetail.ftl?utm_source=dailyremote&job=12345", rules)
+	other := extractDuplicateJobURLSignatures("https://example.taleo.net/careersection/jobdetail.ftl?job=67890", rules)
+	if len(direct) == 0 || len(withTracking) == 0 || len(other) == 0 {
+		t.Fatalf("expected taleo signatures to be extracted")
+	}
+	if direct[0].key != withTracking[0].key {
+		t.Fatalf("expected taleo signature to be driven by job query param")
+	}
+	if direct[0].key == other[0].key {
+		t.Fatalf("expected taleo signature to change when job query changes")
+	}
+}
+
+func TestExtractDuplicateJobURLSignaturesBreezyUsesPostingToken(t *testing.T) {
+	rules := getDuplicateJobURLRuleSet("")
+	base := extractDuplicateJobURLSignatures("https://company.breezy.hr/p/4f3e1c2d9ab8-senior-backend-engineer", rules)
+	withExtraPath := extractDuplicateJobURLSignatures("https://company.breezy.hr/p/4f3e1c2d9ab8-senior-backend-engineer/apply?utm_source=dailyremote", rules)
+	other := extractDuplicateJobURLSignatures("https://company.breezy.hr/p/9a8b7c6d5e4f-platform-engineer", rules)
+	if len(base) == 0 || len(withExtraPath) == 0 || len(other) == 0 {
+		t.Fatalf("expected breezy signatures to be extracted")
+	}
+	if base[0].key != withExtraPath[0].key {
+		t.Fatalf("expected breezy signature to ignore extra path/query noise")
+	}
+	if base[0].key == other[0].key {
+		t.Fatalf("expected breezy signature to change when posting token changes")
+	}
+}
+
+func TestExtractDuplicateJobURLSignaturesAppleMatchesDetailsAndApply(t *testing.T) {
+	rules := getDuplicateJobURLRuleSet("")
+	details := extractDuplicateJobURLSignatures("https://jobs.apple.com/en-us/details/200612345/software-engineer", rules)
+	apply := extractDuplicateJobURLSignatures("https://jobs.apple.com/en-us/app/software-engineer/apply/200612345", rules)
+	otherLocale := extractDuplicateJobURLSignatures("https://jobs.apple.com/fr-fr/details/200612345/software-engineer", rules)
+	if len(details) == 0 || len(apply) == 0 || len(otherLocale) == 0 {
+		t.Fatalf("expected apple signatures to be extracted")
+	}
+	if details[0].key != apply[0].key {
+		t.Fatalf("expected apple details and apply URLs to share signature")
+	}
+	if details[0].key == otherLocale[0].key {
+		t.Fatalf("expected apple signature to include locale")
+	}
+}
+
+func TestExtractDuplicateJobURLSignaturesOracleCloudUsesHostAndPostingID(t *testing.T) {
+	rules := getDuplicateJobURLRuleSet("")
+	preview := extractDuplicateJobURLSignatures("https://acme.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/requisitions/preview/300000123456789", rules)
+	job := extractDuplicateJobURLSignatures("https://acme.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/300000123456789", rules)
+	otherHost := extractDuplicateJobURLSignatures("https://other.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/300000123456789", rules)
+	if len(preview) == 0 || len(job) == 0 || len(otherHost) == 0 {
+		t.Fatalf("expected oracle cloud signatures to be extracted")
+	}
+	if preview[0].key != job[0].key {
+		t.Fatalf("expected oracle cloud preview and job URLs to share signature")
+	}
+	if preview[0].key == otherHost[0].key {
+		t.Fatalf("expected oracle cloud signature to include host")
+	}
+}
+
 func TestFindDuplicateCrossSourceParsedJobMatchesMeaningfulQueryParamsIgnoringCompanyID(t *testing.T) {
 	db, err := database.Open(testDatabaseURL(t, "test_parsed_duplicate_meaningful_query_ignore_company"))
 	if err != nil {
@@ -907,6 +999,46 @@ func TestFindDuplicateCrossSourceParsedJobMatchesMeaningfulQueryParamsIgnoringCo
 	}
 	if !isDuplicate || duplicateID <= 0 {
 		t.Fatalf("expected duplicate by base URL and meaningful query params, got duplicate=%v id=%d", isDuplicate, duplicateID)
+	}
+}
+
+func TestFindDuplicateCrossSourceParsedJobMatchesGreenhouseGHJIDAcrossDomains(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_duplicate_by_greenhouse_gh_jid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = db.SQL.ExecContext(context.Background(),
+		`INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
+		 VALUES (1, 'dailyremote', 'https://company.example.com/careers/open-role?gh_jid=4676811005&utm_source=dailyremote', ?, true, false, true, 0, '{}'),
+		        (2, 'builtin', 'https://jobs.example.net/apply/software-engineer?gh_jid=4676811005', ?, true, false, false, 0, '{}')`,
+		now,
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(),
+		`INSERT INTO parsed_jobs (raw_us_job_id, url, role_title, updated_at)
+		 VALUES (1, 'https://company.example.com/careers/open-role?gh_jid=4676811005&utm_source=dailyremote', 'Backend Engineer', ?)`,
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(Config{}, db)
+	payload := map[string]any{
+		"url": "https://jobs.example.net/apply/software-engineer?gh_jid=4676811005",
+	}
+	duplicateID, isDuplicate, err := svc.findDuplicateCrossSourceParsedJob(context.Background(), 2, "builtin", payload, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isDuplicate || duplicateID <= 0 {
+		t.Fatalf("expected duplicate by greenhouse gh_jid signature, got duplicate=%v id=%d", isDuplicate, duplicateID)
 	}
 }
 

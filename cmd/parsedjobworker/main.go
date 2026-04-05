@@ -29,6 +29,7 @@ func main() {
 		ErrorBackoffSeconds:     config.GetenvInt("WORKER_ERROR_BACKOFF_SECONDS", 10),
 		WorkerCount:             config.GetenvInt("PARSED_JOB_WORKER_COUNT", 1),
 		CategorySignalTokensURL: cfg.CategorySignalTokensURL,
+		DuplicateJobURLRulesURL: cfg.DuplicateJobURLRulesURL,
 		TechStackCatalogURL:     cfg.TechStackCatalogURL,
 	}, db)
 	svc.EnabledSources = config.GetenvCSVSet("ENABLED_SOURCES", "remoterocketship")

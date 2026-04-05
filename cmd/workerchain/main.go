@@ -158,6 +158,7 @@ func main() {
 					ErrorBackoffSeconds:     errorBackoffSeconds,
 					WorkerCount:             config.GetenvInt("PARSED_JOB_WORKER_COUNT", 1),
 					CategorySignalTokensURL: cfg.CategorySignalTokensURL,
+					DuplicateJobURLRulesURL: cfg.DuplicateJobURLRulesURL,
 					TechStackCatalogURL:     cfg.TechStackCatalogURL,
 				}, db)
 				parsedSvc.EnabledSources = enabledSources

@@ -165,6 +165,7 @@ type Service struct {
 	EnabledSources        map[string]struct{}
 	Config                Config
 	categorySignalCatalog map[string]categorySignalTerms
+	duplicateJobURLRules  *duplicateJobURLRuleSet
 	techStackExtractor    techstack.Extractor
 }
 
@@ -175,6 +176,7 @@ type Config struct {
 	ErrorBackoffSeconds     int
 	WorkerCount             int
 	CategorySignalTokensURL string
+	DuplicateJobURLRulesURL string
 	TechStackCatalogURL     string
 }
 
@@ -183,6 +185,7 @@ func New(cfg Config, db *database.DB) *Service {
 		DB:                    db,
 		Config:                cfg,
 		categorySignalCatalog: getCategorySignalCatalog(cfg.CategorySignalTokensURL),
+		duplicateJobURLRules:  getDuplicateJobURLRuleSet(cfg.DuplicateJobURLRulesURL),
 		techStackExtractor:    techstack.NewExtractor(cfg.TechStackCatalogURL),
 	}
 }
@@ -2579,14 +2582,97 @@ func (s *Service) findDuplicateCrossSourceParsedJob(ctx context.Context, rawJobI
 	if ok && !plugin.RunDuplicateCheck {
 		return 0, false, nil
 	}
+	sourceURL := stringValue(payload["url"])
 	// sourceCreatedAt := parseDT(payload["created_at"])
-	sourceURLNorm := normalizeJobURLForMatch(stringValue(payload["url"]))
+	sourceURLNorm := normalizeJobURLForMatch(sourceURL)
 	if sourceURLNorm == "" {
 		return 0, false, nil
 	}
-	sourceURLParts := parseJobURLForMatch(stringValue(payload["url"]))
+	sourceURLParts := parseJobURLForMatch(sourceURL)
 	if !sourceURLParts.valid {
 		return 0, false, nil
+	}
+	sourceURLSignatures := extractDuplicateJobURLSignatures(sourceURL, s.duplicateJobURLRules)
+
+	buildDuplicateSignaturePrefilter := func(signature duplicateJobURLSignature, ignoreCompanyID bool) (string, []any) {
+		query := `SELECT p.id, p.url
+		   FROM parsed_jobs p
+		   JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
+		  WHERE r.source <> ?
+		    AND p.url IS NOT NULL
+		    AND p.raw_us_job_id <> ?`
+		args := []any{
+			source,
+			rawJobID,
+		}
+		for _, term := range signature.prefilterTerms {
+			if strings.TrimSpace(term) == "" {
+				continue
+			}
+			query += ` AND LOWER(p.url) LIKE ?`
+			args = append(args, "%"+strings.ToLower(term)+"%")
+		}
+		if !ignoreCompanyID {
+			query += `
+			AND (?::bigint IS NULL OR p.company_id = ?::bigint)`
+			companyIDInt, companyIDOK := companyID.(int64)
+			var companyIDFilter any
+			if companyIDOK {
+				companyIDFilter = companyIDInt
+			}
+			args = append(args, companyIDFilter, companyIDFilter)
+		}
+		query += ` ORDER BY p.updated_at DESC, p.id DESC`
+		if ignoreCompanyID {
+			query += ` LIMIT 200`
+		} else {
+			query += ` LIMIT 500`
+		}
+		return query, args
+	}
+
+	findDuplicateByURLSignatures := func(ignoreCompanyID bool) (int64, bool, error) {
+		for _, signature := range sourceURLSignatures {
+			query, args := buildDuplicateSignaturePrefilter(signature, ignoreCompanyID)
+			rows, err := s.DB.SQL.QueryContext(ctx, query, args...)
+			if err != nil {
+				return 0, false, err
+			}
+			for rows.Next() {
+				var duplicateID int64
+				var candidateURL sql.NullString
+				if scanErr := rows.Scan(&duplicateID, &candidateURL); scanErr != nil {
+					rows.Close()
+					return 0, false, scanErr
+				}
+				candidateSignatures := extractDuplicateJobURLSignatures(candidateURL.String, s.duplicateJobURLRules)
+				for _, candidateSignature := range candidateSignatures {
+					if candidateSignature.key == signature.key {
+						rows.Close()
+						return duplicateID, true, nil
+					}
+				}
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return 0, false, err
+			}
+			rows.Close()
+		}
+		return 0, false, nil
+	}
+
+	if len(sourceURLSignatures) > 0 {
+		if duplicateID, isDuplicate, err := findDuplicateByURLSignatures(true); err != nil {
+			return 0, false, err
+		} else if isDuplicate {
+			return duplicateID, true, nil
+		}
+		if duplicateID, isDuplicate, err := findDuplicateByURLSignatures(false); err != nil {
+			return 0, false, err
+		} else if isDuplicate {
+			return duplicateID, true, nil
+		}
 	}
 
 	buildDuplicateURLPrefilter := func(ignoreCompanyID bool) (string, []any) {

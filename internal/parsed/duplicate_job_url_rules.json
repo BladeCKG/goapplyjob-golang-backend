@@ -1,0 +1,481 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "name": "greenhouse",
+      "description": "Greenhouse URLs are best identified by company slug plus job id, with gh_jid as a fallback for embedded links.",
+      "hostSuffixes": ["greenhouse.io"],
+      "allowWithoutHost": true,
+      "signatures": [
+        {
+          "name": "company_job_path",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/([^/]+)/jobs/(\\d+)(?:/.*)?$", "group": 1, "label": "company" },
+            { "type": "path_regex", "pattern": "^/([^/]+)/jobs/(\\d+)(?:/.*)?$", "group": 2, "label": "job_id" }
+          ]
+        },
+        {
+          "name": "gh_jid_only",
+          "parts": [
+            { "type": "query_param", "key": "gh_jid", "label": "gh_jid" }
+          ]
+        },
+        {
+          "name": "job_path_id",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/(?:[^/]+/)?jobs/(\\d+)(?:/.*)?$", "group": 1, "label": "job_id" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "lever",
+      "description": "Lever duplicates are best identified by company path segment plus posting id, including /apply variants.",
+      "hostSuffixes": ["lever.co"],
+      "signatures": [
+        {
+          "name": "posting_id",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/([^/]+)/([0-9a-f-]{8,})(?:/apply)?/?$", "group": 1, "label": "company" },
+            { "type": "path_regex", "pattern": "^/([^/]+)/([0-9a-f-]{8,})(?:/apply)?/?$", "group": 2, "label": "posting_id" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "workable",
+      "description": "Workable duplicates are anchored by company path segment plus /j/{id}.",
+      "hostSuffixes": ["workable.com"],
+      "signatures": [
+        {
+          "name": "job_id",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/([^/]+)/.*?/([a-z0-9-]+)(?:/.*)?$", "group": 1, "label": "company" },
+            { "type": "path_regex", "pattern": "^/[^/]+/.*/([a-z0-9-]+)(?:/.*)?$", "group": 1, "label": "job_id" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "smartrecruiters",
+      "description": "SmartRecruiters usually carries company + publication id, especially in oneclick paths.",
+      "hostSuffixes": ["smartrecruiters.com"],
+      "signatures": [
+        {
+          "name": "oneclick_company_publication",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/oneclick-ui/company/([^/]+)/[^/]+/([^/?]+)", "group": 1, "label": "company" },
+            { "type": "path_regex", "pattern": "^/oneclick-ui/company/([^/]+)/[^/]+/([^/?]+)", "group": 2, "label": "publication" }
+          ]
+        },
+        {
+          "name": "posting_id",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/([^/]+)/([0-9]{6,})(?:-[^/]+)?/?$", "group": 1, "label": "company" },
+            { "type": "path_regex", "pattern": "^/([^/]+)/([0-9]{6,})(?:-[^/]+)?/?$", "group": 2, "label": "posting_id" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "jobvite",
+      "description": "Jobvite duplicates are best keyed by company + /job/{id}.",
+      "hostSuffixes": ["jobvite.com"],
+      "signatures": [
+        {
+          "name": "job_id",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/([^/]+)/job/([a-z0-9]+)(?:/.*)?$", "group": 1, "label": "company" },
+            { "type": "path_regex", "pattern": "^/([^/]+)/job/([a-z0-9]+)(?:/.*)?$", "group": 2, "label": "job_id" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "bamboohr",
+      "description": "BambooHR duplicates should include the company subdomain alongside the posting token.",
+      "hostSuffixes": ["bamboohr.com"],
+      "signatures": [
+        {
+          "name": "career_id",
+          "parts": [
+            { "type": "host_label", "key": "0", "label": "company" },
+            { "type": "path_regex", "pattern": "^/careers/(\\d+)(?:/.*)?$", "group": 1, "label": "career_id" }
+          ]
+        },
+        {
+          "name": "jobs_view_id",
+          "parts": [
+            { "type": "host_label", "key": "0", "label": "company" },
+            { "type": "path_regex", "pattern": "^/jobs/view/(\\d+)(?:/.*)?$", "group": 1, "label": "career_id" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "icims",
+      "description": "iCIMS duplicates should use the company host prefix plus the job id when available.",
+      "hostSuffixes": ["icims.com"],
+      "signatures": [
+        {
+          "name": "careers_host_job_path",
+          "parts": [
+            { "type": "host_label", "key": "0", "label": "tenant" },
+            { "type": "path_regex", "pattern": "^/jobs/(\\d+)(?:/.*)?$", "group": 1, "label": "job" }
+          ]
+        },
+        {
+          "name": "job_query",
+          "parts": [
+            { "type": "host_label", "key": "0", "label": "tenant" },
+            { "type": "query_param", "key": "job", "label": "job" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "adp_workforcenow",
+      "description": "ADP identities are usually company/context plus reqId or cid+jobId, matching the autofill config.",
+      "hostSuffixes": ["adp.com"],
+      "signatures": [
+        {
+          "name": "cid_job_id",
+          "parts": [
+            { "type": "query_param", "key": "cid", "label": "cid" },
+            { "type": "query_param", "key": "jobId", "label": "job_id" }
+          ]
+        },
+        {
+          "name": "company_req_id",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/([^/]+)/cx(?:/.*)?$", "group": 1, "label": "company" },
+            { "type": "query_param", "key": "reqId", "label": "req_id" }
+          ]
+        },
+        {
+          "name": "context_req_id",
+          "parts": [
+            { "type": "query_param", "key": "c", "label": "context" },
+            { "type": "query_param", "key": "reqId", "label": "req_id" }
+          ]
+        },
+        {
+          "name": "ncsp_req_id",
+          "parts": [
+            { "type": "query_param", "key": "ncsp", "label": "context" },
+            { "type": "query_param", "key": "reqId", "label": "req_id" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "workday",
+      "description": "Workday duplicates are more reliable when keyed by company segment plus the final jobNameAndId slug.",
+      "hostSuffixes": ["myworkdayjobs.com"],
+      "signatures": [
+        {
+          "name": "company_job_path",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/.*/([^/]+)/job(?:/[^/]+)?/([^/]+?)(?:/apply)?/?$", "group": 1, "label": "company" },
+            { "type": "path_regex", "pattern": "^/.*/([^/]+)/job(?:/[^/]+)?/([^/]+?)(?:/apply)?/?$", "group": 2, "label": "job_name_id" }
+          ]
+        },
+        {
+          "name": "company_details_path",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/.*/([^/]+)/details/([^/]+?)(?:/apply)?/?$", "group": 1, "label": "company" },
+            { "type": "path_regex", "pattern": "^/.*/([^/]+)/details/([^/]+?)(?:/apply)?/?$", "group": 2, "label": "job_name_id" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "teamtailor",
+      "description": "Teamtailor tends to use tenant + numeric job id or slug under /jobs/.",
+      "hostSuffixes": ["teamtailor.com"],
+      "signatures": [
+        {
+          "name": "job_slug",
+          "parts": [
+            { "type": "host_label", "key": "0", "label": "tenant" },
+            { "type": "path_regex", "pattern": "^/jobs/([a-z0-9-]+)(?:/.*)?$", "group": 1, "label": "job_slug" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "personio",
+      "description": "Personio job pages commonly expose the job slug in /job/.",
+      "hostSuffixes": ["personio.com"],
+      "signatures": [
+        {
+          "name": "job_slug",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/(?:job|career)/([a-z0-9-]+)(?:/.*)?$", "group": 1, "label": "job_slug" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ashby",
+      "description": "Ashby duplicates are best identified by company path segment plus job token.",
+      "hostSuffixes": ["ashbyhq.com"],
+      "signatures": [
+        {
+          "name": "job_token",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/([^/]+)/([0-9a-f-]{8,})/?$", "group": 1, "label": "company" },
+            { "type": "path_regex", "pattern": "^/([^/]+)/([0-9a-f-]{8,})/?$", "group": 2, "label": "job_token" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "amazon_jobs",
+      "description": "Amazon Jobs URLs expose a stable locale + jobs/{jobId} identity.",
+      "hostSuffixes": ["amazon.jobs"],
+      "signatures": [
+        {
+          "name": "locale_job_id",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/([^/]+)/jobs/(\\d+)(?:/.*)?$", "group": 1, "label": "locale" },
+            { "type": "path_regex", "pattern": "^/([^/]+)/jobs/(\\d+)(?:/.*)?$", "group": 2, "label": "job_id" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "apple_jobs",
+      "description": "Apple Careers uses locale + job id across details/apply pages.",
+      "hostSuffixes": ["apple.com"],
+      "signatures": [
+        {
+          "name": "locale_apply_job_id",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/([^/]+)/app(?:/[^/]+)?/apply/([^/]+)(?:/.*)?$", "group": 1, "label": "locale" },
+            { "type": "path_regex", "pattern": "^/([^/]+)/app(?:/[^/]+)?/apply/([^/]+)(?:/.*)?$", "group": 2, "label": "job_id" }
+          ]
+        },
+        {
+          "name": "locale_details_job_id",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/([^/]+)/details/([^/]+)(?:/.*)?$", "group": 1, "label": "locale" },
+            { "type": "path_regex", "pattern": "^/([^/]+)/details/([^/]+)(?:/.*)?$", "group": 2, "label": "job_id" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "breezy",
+      "description": "Breezy duplicates should include the tenant subdomain with the /p/ token.",
+      "hostSuffixes": ["breezy.hr"],
+      "signatures": [
+        {
+          "name": "posting_token",
+          "parts": [
+            { "type": "host_label", "key": "0", "label": "tenant" },
+            { "type": "path_regex", "pattern": "^/p/([a-z0-9]+)(?:-[^/]+)?(?:/.*)?$", "group": 1, "label": "posting_token" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "dayforcehcm",
+      "description": "Dayforce Candidate Portal URLs use company slug + job id.",
+      "hostSuffixes": ["dayforcehcm.com"],
+      "signatures": [
+        {
+          "name": "company_job_id",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/[^/]+/[^/]+/([^/]+)/CANDIDATEPORTAL/jobs/([^/]+)(?:/.*)?$", "group": 1, "label": "company" },
+            { "type": "path_regex", "pattern": "^/[^/]+/[^/]+/([^/]+)/CANDIDATEPORTAL/jobs/([^/]+)(?:/.*)?$", "group": 2, "label": "job_id" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "jazzhr",
+      "description": "JazzHR ApplyToJob duplicates should include the tenant subdomain and apply token.",
+      "hostSuffixes": ["applytojob.com"],
+      "signatures": [
+        {
+          "name": "apply_token",
+          "parts": [
+            { "type": "host_label", "key": "0", "label": "tenant" },
+            { "type": "path_regex", "pattern": "^/apply/([a-z0-9]+)/?.*$", "group": 1, "label": "apply_token" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "jobscore",
+      "description": "JobScore often exposes a final job id or job_id query parameter.",
+      "hostSuffixes": ["jobscore.com"],
+      "signatures": [
+        {
+          "name": "job_token",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/careers/.*/jobs/.*-([a-z0-9]+)(?:/.*)?$", "group": 1, "label": "job_token" }
+          ]
+        },
+        {
+          "name": "job_query",
+          "parts": [
+            { "type": "query_param", "key": "job_id", "label": "job_id" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rippling",
+      "description": "Rippling ATS duplicates should include tenant/company plus the stable job token.",
+      "hostSuffixes": ["rippling.com", "rippling-ats.com"],
+      "signatures": [
+        {
+          "name": "job_token",
+          "parts": [
+            { "type": "host_label", "key": "0", "label": "tenant" },
+            { "type": "path_regex", "pattern": "^/job/([a-z0-9-]{6,})(?:/.*)?$", "group": 1, "label": "job_token" }
+          ]
+        },
+        {
+          "name": "company_job_token",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/([^/]+)/jobs/([a-z0-9-]{6,})(?:/.*)?$", "group": 1, "label": "company" },
+            { "type": "path_regex", "pattern": "^/([^/]+)/jobs/([a-z0-9-]{6,})(?:/.*)?$", "group": 2, "label": "job_token" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pinpoint",
+      "description": "Pinpoint posting pages expose the stable id under /postings/.",
+      "hostSuffixes": ["pinpointhq.com"],
+      "signatures": [
+        {
+          "name": "posting_id",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/(?:en/)?postings/([a-z0-9-]{8,})(?:/.*)?$", "group": 1, "label": "posting_id" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "taleo",
+      "description": "Taleo duplicates should include tenant plus req/job identifiers when present.",
+      "hostSuffixes": ["taleo.net"],
+      "signatures": [
+        {
+          "name": "job_query",
+          "parts": [
+            { "type": "host_label", "key": "0", "label": "tenant" },
+            { "type": "query_param", "key": "job", "label": "job" }
+          ]
+        },
+        {
+          "name": "req_no_query",
+          "parts": [
+            { "type": "host_label", "key": "0", "label": "tenant" },
+            { "type": "query_param", "key": "reqNo", "label": "req_no" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "avature",
+      "description": "Avature duplicates should include tenant plus jobId/folderId, matching the autofill tracked object config.",
+      "hostSuffixes": ["avature.net"],
+      "signatures": [
+        {
+          "name": "tenant_job_id",
+          "parts": [
+            { "type": "host_label", "key": "0", "label": "tenant" },
+            { "type": "query_param", "key": "jobId", "label": "job_id" }
+          ]
+        },
+        {
+          "name": "tenant_folder_id",
+          "parts": [
+            { "type": "host_label", "key": "0", "label": "tenant" },
+            { "type": "query_param", "key": "folderId", "label": "folder_id" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "join",
+      "description": "JOIN job links expose a stable final jobs path token.",
+      "hostSuffixes": ["join.com"],
+      "signatures": [
+        {
+          "name": "job_token",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/(?:companies/[^/]+/)?jobs/([a-z0-9-]{6,})(?:/.*)?$", "group": 1, "label": "job_token" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "jobylon",
+      "description": "Jobylon hosted pages usually carry a numeric posting id in the final slug.",
+      "hostSuffixes": ["jobylon.com"],
+      "signatures": [
+        {
+          "name": "posting_id",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/jobs/.*-(\\d+)(?:/.*)?$", "group": 1, "label": "posting_id" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "oraclecloud",
+      "description": "Oracle Cloud candidate experience URLs expose full host + posting id.",
+      "hostSuffixes": ["oraclecloud.com"],
+      "signatures": [
+        {
+          "name": "host_preview_posting",
+          "parts": [
+            { "type": "full_host", "label": "host" },
+            { "type": "path_regex", "pattern": "^/.*/preview/([^/]+)(?:/.*)?$", "group": 1, "label": "posting_id" }
+          ]
+        },
+        {
+          "name": "host_job_posting",
+          "parts": [
+            { "type": "full_host", "label": "host" },
+            { "type": "path_regex", "pattern": "^/.*/job/([^/]+)(?:/.*)?$", "group": 1, "label": "posting_id" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "recruitee",
+      "description": "Recruitee tracked identity uses the tenant subdomain plus stable offer token.",
+      "hostSuffixes": ["recruitee.com"],
+      "signatures": [
+        {
+          "name": "posting_token",
+          "parts": [
+            { "type": "host_label", "key": "0", "label": "tenant" },
+            { "type": "path_regex", "pattern": "^/o/.*-([0-9a-f]{8,})(?:/.*)?$", "group": 1, "label": "posting_token" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ultipro_ukg",
+      "description": "Ultipro and UKG hosted job boards usually expose company slug + opportunityId.",
+      "hostSuffixes": ["ultipro.com", "ultipro.ca", "rec.pro.ukg.net"],
+      "signatures": [
+        {
+          "name": "company_opportunity_id",
+          "parts": [
+            { "type": "path_regex", "pattern": "^/([^/]+)/JobBoard/[^/]+(?:/.*)?$", "group": 1, "label": "company" },
+            { "type": "query_param", "key": "opportunityId", "label": "opportunity_id" }
+          ]
+        }
+      ]
+    }
+  ]
+}

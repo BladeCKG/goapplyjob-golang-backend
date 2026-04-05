@@ -13,6 +13,7 @@ type Config struct {
 	GinMode                        string
 	GinTrustedProxies              string
 	CategorySignalTokensURL        string
+	DuplicateJobURLRulesURL        string
 	TechStackCatalogURL            string
 	DatabaseURL                    string
 	AuthCodeTTLMinutes             int
@@ -119,6 +120,7 @@ func Load() Config {
 		GinMode:                        getenv("GIN_MODE", "release"),
 		GinTrustedProxies:              getenv("GIN_TRUSTED_PROXIES", ""),
 		CategorySignalTokensURL:        getenv("CATEGORY_SIGNAL_TOKENS_URL", ""),
+		DuplicateJobURLRulesURL:        getenv("DUPLICATE_JOB_URL_RULES_URL", ""),
 		TechStackCatalogURL:            getenv("TECH_STACK_CATALOG_URL", ""),
 		DatabaseURL:                    normalizeDatabaseURL(getenv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable")),
 		AuthCodeTTLMinutes:             getenvInt("AUTH_CODE_TTL_MINUTES", 10),
