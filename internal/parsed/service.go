@@ -1560,11 +1560,21 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		}
 		createdAtSourceValue := formatNullableTime(sourceCreatedAt)
 		var (
-			duplicateID  int64
-			isDuplicate  bool
-			duplicateErr error
+			duplicateID                    int64
+			isDuplicate                    bool
+			duplicateErr                   error
+			sameSourceExternalDuplicateID  int64
+			isSameSourceExternalDuplicate  bool
+			sameSourceExternalDuplicateErr error
 		)
 		if !hasExistingParsedForRawID {
+			sameSourceExternalDuplicateID, isSameSourceExternalDuplicate, sameSourceExternalDuplicateErr = s.findDuplicateSameSourceParsedJobByExternalJobID(ctx, row.id, row.source, payload)
+			if sameSourceExternalDuplicateErr != nil {
+				log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, sameSourceExternalDuplicateErr)
+				return processedInc, skippedInc + 1, nil
+			}
+		}
+		if !hasExistingParsedForRawID && !isSameSourceExternalDuplicate {
 			duplicateID, isDuplicate, duplicateErr = s.findDuplicateCrossSourceParsedJob(ctx, row.id, row.source, payload, companyID)
 			if duplicateErr != nil {
 				log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, duplicateErr)
@@ -1574,11 +1584,16 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 
 		// isRemoteRocketshipDuplicate := false
 		isNonRemoterocketshipDuplicate := false
+		if isSameSourceExternalDuplicate {
+			isNonRemoterocketshipDuplicate = true
+			duplicateID = sameSourceExternalDuplicateID
+		}
 		if isDuplicate {
 			if strings.EqualFold(row.source, sourceRemoteRocketship) {
 				// isRemoteRocketshipDuplicate = true
+				var legacyRawJobID int64
 				var previousCreatedAt sql.NullTime
-				if err := s.DB.SQL.QueryRowContext(ctx, `SELECT created_at_source FROM parsed_jobs WHERE id = ? LIMIT 1`, duplicateID).Scan(&previousCreatedAt); err != nil {
+				if err := s.DB.SQL.QueryRowContext(ctx, `SELECT raw_us_job_id, created_at_source FROM parsed_jobs WHERE id = ? LIMIT 1`, duplicateID).Scan(&legacyRawJobID, &previousCreatedAt); err != nil {
 					log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
 					return processedInc, skippedInc + 1, nil
 				}
@@ -1600,6 +1615,24 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				}); err != nil {
 					log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
 					return processedInc, skippedInc + 1, nil
+				}
+				if legacyRawJobID > 0 && legacyRawJobID != row.id {
+					retries, retryDelay = parsedLockRetryConfig()
+					if err := database.RetryLocked(retries, retryDelay, func() error {
+						_, execErr := s.DB.SQL.ExecContext(
+							ctx,
+							`UPDATE raw_us_jobs
+							 SET is_parsed = true,
+							     is_skippable = true,
+							     raw_json = NULL
+							 WHERE id = ?`,
+							legacyRawJobID,
+						)
+						return execErr
+					}); err != nil {
+						log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, err)
+						return processedInc, skippedInc + 1, nil
+					}
 				}
 				log.Printf("parsed-job-worker duplicate_replaced existing_parsed_id=%d raw_job_id=%d source=%s", duplicateID, row.id, row.source)
 			} else {
@@ -1783,7 +1816,11 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				return processedInc, skippedInc + 1, nil
 			}
 			if isNonRemoterocketshipDuplicate {
-				log.Printf("parsed-job-worker duplicate_cross_source_merge raw_job_id=%d source=%s duplicate_parsed_job_id=%d", row.id, row.source, duplicateID)
+				if isSameSourceExternalDuplicate {
+					log.Printf("parsed-job-worker duplicate_same_source_external_job_id_merge raw_job_id=%d source=%s duplicate_parsed_job_id=%d", row.id, row.source, duplicateID)
+				} else {
+					log.Printf("parsed-job-worker duplicate_cross_source_merge raw_job_id=%d source=%s duplicate_parsed_job_id=%d", row.id, row.source, duplicateID)
+				}
 				retries, retryDelay = parsedLockRetryConfig()
 				if err := database.RetryLocked(retries, retryDelay, func() error {
 					_, execErr := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true, is_skippable = true, raw_json = NULL WHERE id = ?`, row.id)
@@ -2774,6 +2811,35 @@ func (s *Service) findDuplicateCrossSourceParsedJob(ctx context.Context, rawJobI
 		return 0, false, err
 	}
 	return 0, false, nil
+}
+
+func (s *Service) findDuplicateSameSourceParsedJobByExternalJobID(ctx context.Context, rawJobID int64, source string, payload map[string]any) (int64, bool, error) {
+	externalJobID := strings.TrimSpace(stringValue(payload["id"]))
+	if externalJobID == "" {
+		return 0, false, nil
+	}
+	var duplicateID int64
+	err := s.DB.SQL.QueryRowContext(
+		ctx,
+		`SELECT p.id
+		   FROM parsed_jobs p
+		   JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
+		  WHERE r.source = ?
+		    AND p.raw_us_job_id <> ?
+		    AND COALESCE(p.external_job_id, '') = ?
+		  ORDER BY p.updated_at DESC, p.id DESC
+		  LIMIT 1`,
+		source,
+		rawJobID,
+		externalJobID,
+	).Scan(&duplicateID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return duplicateID, duplicateID > 0, nil
 }
 
 func normalizedJSONText(value any) any {

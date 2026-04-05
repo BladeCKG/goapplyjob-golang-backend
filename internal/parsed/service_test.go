@@ -1165,6 +1165,21 @@ func TestProcessPendingRemoterocketshipDuplicateReplacementKeepsCreatedAtSource(
 	if !createdAtSource.Time.UTC().Equal(originalCreatedAtSource) {
 		t.Fatalf("expected created_at_source=%s, got %s", originalCreatedAtSource.Format(time.RFC3339Nano), createdAtSource.Time.UTC().Format(time.RFC3339Nano))
 	}
+
+	var legacyIsParsed, legacyIsSkippable bool
+	var legacyRawJSON sql.NullString
+	if err := db.SQL.QueryRowContext(
+		context.Background(),
+		`SELECT is_parsed, is_skippable, raw_json FROM raw_us_jobs WHERE id = 1`,
+	).Scan(&legacyIsParsed, &legacyIsSkippable, &legacyRawJSON); err != nil {
+		t.Fatal(err)
+	}
+	if !legacyIsParsed || !legacyIsSkippable {
+		t.Fatalf("expected legacy raw row marked parsed+skippable after replacement, got is_parsed=%t is_skippable=%t", legacyIsParsed, legacyIsSkippable)
+	}
+	if legacyRawJSON.Valid && strings.TrimSpace(legacyRawJSON.String) != "" {
+		t.Fatalf("expected legacy raw row raw_json cleared after replacement, got %q", legacyRawJSON.String)
+	}
 }
 
 func TestProcessPendingReturnsZeroWhenNoEnabledSources(t *testing.T) {
@@ -1320,6 +1335,97 @@ func TestProcessPendingCrossSourceDuplicateMergesEmptyFieldsAndSkipsRawRow(t *te
 	}
 	if parsedCount != 1 {
 		t.Fatalf("expected no new parsed rows for duplicate skip, got count=%d", parsedCount)
+	}
+}
+
+func TestProcessPendingSameSourceExternalJobIDDuplicateSkipsNewParsedRow(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_same_source_external_job_id_duplicate"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
+		 VALUES (1, 'remoterocketship', 'https://remote.example/jobs/first', ?, true, false, true, 0, '{}'),
+		        (2, 'remoterocketship', 'https://remote.example/jobs/second', ?, true, false, false, 0, '{}')`,
+		now,
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO parsed_companies (id, external_company_id, name, updated_at)
+		 VALUES (77, 'company-77', 'Acme', ?)`,
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO parsed_jobs (id, raw_us_job_id, company_id, external_job_id, url, role_title, role_description, updated_at)
+		 VALUES (1, 1, 77, 'rr-123', 'https://remote.example/jobs/shared', 'Backend Engineer', '', ?)`,
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"id":              "rr-123",
+		"url":             "https://remote.example/jobs/shared",
+		"roleTitle":       "Backend Engineer",
+		"roleDescription": "Filled from same source duplicate",
+		"company": map[string]any{
+			"id":   "company-77",
+			"name": "Acme",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `UPDATE raw_us_jobs SET raw_json = ? WHERE id = 2`, string(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(Config{}, db)
+	svc.EnabledSources = map[string]struct{}{"remoterocketship": {}}
+	processed, err := svc.ProcessPending(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected processed=1 for same-source duplicate skip path, got %d", processed)
+	}
+
+	var isParsed, isSkippable bool
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT is_parsed, is_skippable FROM raw_us_jobs WHERE id = 2`).Scan(&isParsed, &isSkippable); err != nil {
+		t.Fatal(err)
+	}
+	if !isParsed || !isSkippable {
+		t.Fatalf("expected same-source duplicate raw row marked parsed+skippable, got is_parsed=%t is_skippable=%t", isParsed, isSkippable)
+	}
+
+	var roleDescription sql.NullString
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT role_description FROM parsed_jobs WHERE id = 1`).Scan(&roleDescription); err != nil {
+		t.Fatal(err)
+	}
+	if roleDescription.String != "Filled from same source duplicate" {
+		t.Fatalf("expected role_description to be merged from same-source duplicate, got %q", roleDescription.String)
+	}
+
+	var parsedCount int
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM parsed_jobs`).Scan(&parsedCount); err != nil {
+		t.Fatal(err)
+	}
+	if parsedCount != 1 {
+		t.Fatalf("expected no new parsed rows for same-source external_job_id duplicate, got count=%d", parsedCount)
 	}
 }
 
