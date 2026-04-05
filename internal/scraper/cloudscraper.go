@@ -63,52 +63,29 @@ func (f *CloudscraperFetcher) ReadHTMLWithLimit(ctx context.Context, targetURL s
 	if maxBytes <= 0 {
 		maxBytes = 5 * 1024 * 1024
 	}
-
-	type result struct {
-		body   string
-		status int
-		err    error
+	if err := ctx.Err(); err != nil {
+		return "", -1, err
 	}
-	ch := make(chan result, 1)
-	go func() {
-		resp, err := f.client.Get(targetURL)
-		if err != nil {
-			ch <- result{body: "", status: -1, err: err}
-			return
-		}
-		if resp.Body == nil {
-			ch <- result{body: "", status: -1, err: nil}
-			return
-		}
-		defer resp.Body.Close()
-		rawBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
-		if readErr != nil {
-			ch <- result{body: "", status: -1, err: readErr}
-			return
-		}
-		decoded, decodeErr := decodeCompressedBody(resp.Header.Get("Content-Encoding"), rawBody, maxBytes)
-		if decodeErr != nil {
-			ch <- result{body: "", status: -1, err: decodeErr}
-			return
-		}
-		ch <- result{body: string(decoded), status: resp.StatusCode, err: nil}
-	}()
-
-	timeout := f.timeout
-	if timeout <= 0 {
-		timeout = 30 * time.Second
+	resp, err := f.client.Get(targetURL)
+	if err != nil {
+		return "", -1, err
 	}
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
-	select {
-	case <-ctx.Done():
-		return "", -1, ctx.Err()
-	case <-timer.C:
-		return "", -1, context.DeadlineExceeded
-	case res := <-ch:
-		return res.body, res.status, res.err
+	if resp.Body == nil {
+		return "", -1, nil
 	}
+	defer resp.Body.Close()
+	rawBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+	if readErr != nil {
+		return "", -1, readErr
+	}
+	decoded, decodeErr := decodeCompressedBody(resp.Header.Get("Content-Encoding"), rawBody, maxBytes)
+	if decodeErr != nil {
+		return "", -1, decodeErr
+	}
+	if err := ctx.Err(); err != nil {
+		return "", -1, err
+	}
+	return string(decoded), resp.StatusCode, nil
 }
 
 func decodeCompressedBody(encoding string, raw []byte, maxBytes int64) ([]byte, error) {
@@ -159,47 +136,26 @@ func (f *CloudscraperFetcher) ResolveFinalURL(ctx context.Context, targetURL str
 	if ctx == nil {
 		ctx = context.Background()
 	}
-
-	type result struct {
-		url    string
-		status int
-		err    error
+	if err := ctx.Err(); err != nil {
+		return "", -1, err
 	}
-	ch := make(chan result, 1)
-	go func() {
-		resp, err := f.client.Get(targetURL)
-		if err != nil {
-			ch <- result{url: "", status: -1, err: err}
-			return
-		}
-		if resp.Body == nil {
-			ch <- result{url: "", status: -1, err: nil}
-			return
-		}
-		defer resp.Body.Close()
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
-		finalURL := targetURL
-		if resp.Request != nil && resp.Request.URL != nil {
-			finalURL = resp.Request.URL.String()
-		}
-		ch <- result{url: finalURL, status: resp.StatusCode, err: nil}
-	}()
-
-	timeout := f.timeout
-	if timeout <= 0 {
-		timeout = 30 * time.Second
+	resp, err := f.client.Get(targetURL)
+	if err != nil {
+		return "", -1, err
 	}
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
-	select {
-	case <-ctx.Done():
-		return "", -1, ctx.Err()
-	case <-timer.C:
-		return "", -1, context.DeadlineExceeded
-	case res := <-ch:
-		return res.url, res.status, res.err
+	if resp.Body == nil {
+		return "", -1, nil
 	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+	finalURL := targetURL
+	if resp.Request != nil && resp.Request.URL != nil {
+		finalURL = resp.Request.URL.String()
+	}
+	if err := ctx.Err(); err != nil {
+		return "", -1, err
+	}
+	return finalURL, resp.StatusCode, nil
 }
 
 func (f *CloudscraperFetcher) ReadHTMLWith429Retry(ctx context.Context, targetURL string, max429Retries int, retryDelay time.Duration) (string, int, error) {
