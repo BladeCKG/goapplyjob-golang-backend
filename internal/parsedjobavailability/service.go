@@ -19,6 +19,7 @@ const (
 	workerStateLastCheckedParsedJobIDKey = "last_checked_parsed_job_id"
 	defaultBatchSize                     = 200
 	defaultWorkerCount                   = 4
+	defaultFetchTimeout                  = 30 * time.Second
 	WorkerLogPrefix                      = "job-availability-worker"
 )
 
@@ -30,6 +31,7 @@ type Config struct {
 	RunOnce             bool
 	ErrorBackoffSeconds int
 	WorkerCount         int
+	FetchTimeoutSeconds int
 }
 
 type Service struct {
@@ -91,6 +93,13 @@ func (s *Service) RunOnce(ctx context.Context) (int, error) {
 		batchSize = defaultBatchSize
 	}
 	return s.ProcessPending(ctx, batchSize)
+}
+
+func (s *Service) fetchTimeout() time.Duration {
+	if s.Config.FetchTimeoutSeconds < 1 {
+		return defaultFetchTimeout
+	}
+	return time.Duration(s.Config.FetchTimeoutSeconds) * time.Second
 }
 
 func (s *Service) loadLastParsedJobID(ctx context.Context) (int64, error) {
@@ -267,7 +276,11 @@ func (s *Service) processRow(ctx context.Context, row parsedJobRow) processResul
 		return processResult{id: row.id}
 	}
 	log.Printf(WorkerLogPrefix+" check_start parsed_job_id=%d source=%s url=%q", row.id, row.source, row.url)
-	bodyText, statusCode, err := s.ReadHTMLForSource(ctx, row.source, row.url)
+	// Bound each availability fetch independently so one stalled site cannot pin
+	// all workers until the broader workerchain step timeout fires.
+	fetchCtx, cancel := context.WithTimeout(ctx, s.fetchTimeout())
+	defer cancel()
+	bodyText, statusCode, err := s.ReadHTMLForSource(fetchCtx, row.source, row.url)
 	if err != nil {
 		log.Printf(WorkerLogPrefix+" check_failed parsed_job_id=%d source=%s error=%v", row.id, row.source, err)
 		return processResult{id: row.id, err: err}

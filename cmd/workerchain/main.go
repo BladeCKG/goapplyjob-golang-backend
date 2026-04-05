@@ -205,6 +205,7 @@ func main() {
 					RunOnce:             true,
 					ErrorBackoffSeconds: errorBackoffSeconds,
 					WorkerCount:         config.GetenvInt("PARSED_JOB_AVAILABILITY_WORKER_COUNT", 4),
+					FetchTimeoutSeconds: cfg.ParsedJobAvailabilityFetchTimeoutSeconds,
 				}, db)
 				parsedAvailabilitySvc.EnabledSources = enabledSources
 				readHTMLForSource := makeReadHTMLForSourceWith429Retry(retries429, time.Duration(retryDelaySeconds)*time.Second)

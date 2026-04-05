@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"goapplyjob-golang-backend/internal/config"
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/parsedjobavailability"
@@ -44,6 +43,7 @@ func main() {
 		RunOnce:             config.GetenvBool("PARSED_JOB_AVAILABILITY_RUN_ONCE", false),
 		ErrorBackoffSeconds: config.GetenvInt("WORKER_ERROR_BACKOFF_SECONDS", 10),
 		WorkerCount:         config.GetenvInt("PARSED_JOB_AVAILABILITY_WORKER_COUNT", 4),
+		FetchTimeoutSeconds: cfg.ParsedJobAvailabilityFetchTimeoutSeconds,
 	}, db)
 	svc.EnabledSources = config.GetenvCSVSet("ENABLED_SOURCES", "remoterocketship")
 	readHTMLForSource := makeReadHTMLForSourceWith429Retry(retries429, time.Duration(retryDelaySeconds)*time.Second)
@@ -62,11 +62,11 @@ func makeReadHTMLForSourceWith429Retry(max429Retries int, retryDelay time.Durati
 	})
 	if err != nil {
 		log.Printf("parsed-job-availability-worker cloudscraper init failed: %v", err)
-		return func(ctx context.Context, _ string, _ string) (string, int, error) {
+		return func(ctx context.Context, _ string, targetURL string) (string, int, error) {
 			if ctx == nil {
 				ctx = context.Background()
 			}
-			return "", -1, errors.New("cloudscraper unavailable")
+			return "", -1, err
 		}
 	}
 	tlsFetcher, tlsErr := scraper.NewTLSClientFetcher(scraper.TLSClientConfig{Timeout: 30 * time.Second})
