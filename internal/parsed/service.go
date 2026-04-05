@@ -20,6 +20,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/net/publicsuffix"
 )
@@ -1273,7 +1274,7 @@ func normalizeStateName(value any) string {
 	if !ok {
 		return ""
 	}
-	normalized := strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(text, " "))
+	normalized := sanitizeUTF8String(regexp.MustCompile(`\s+`).ReplaceAllString(text, " "))
 	if normalized == "" {
 		return ""
 	}
@@ -1285,9 +1286,17 @@ func normalizeStateName(value any) string {
 		if part == "" {
 			continue
 		}
-		parts[idx] = strings.ToUpper(part[:1]) + part[1:]
+		parts[idx] = titleCaseWordSafe(part)
 	}
 	return strings.Join(parts, " ")
+}
+
+func titleCaseWordSafe(value string) string {
+	runes := []rune(value)
+	if len(runes) == 0 {
+		return ""
+	}
+	return strings.ToUpper(string(runes[0])) + string(runes[1:])
 }
 
 func normalizeLocationFields(rawLocation, rawCity, rawStates any) (any, any, any) {
@@ -1402,7 +1411,7 @@ func jsonStringOrNil(values []string) any {
 	if err != nil {
 		return "[]"
 	}
-	return string(encoded)
+	return sanitizeUTF8String(string(encoded))
 }
 
 func normalizeLocationCountries(values any) any {
@@ -2855,7 +2864,7 @@ func normalizedJSONText(value any) any {
 		if err != nil {
 			return "[]"
 		}
-		return string(body)
+		return sanitizeUTF8String(string(body))
 	case []string:
 		if len(item) == 0 {
 			return "[]"
@@ -2864,7 +2873,7 @@ func normalizedJSONText(value any) any {
 		if err != nil {
 			return "[]"
 		}
-		return string(body)
+		return sanitizeUTF8String(string(body))
 	case map[string]any:
 		if len(item) == 0 {
 			return "{}"
@@ -2873,7 +2882,7 @@ func normalizedJSONText(value any) any {
 		if err != nil {
 			return "{}"
 		}
-		return string(body)
+		return sanitizeUTF8String(string(body))
 	default:
 		return nil
 	}
@@ -2892,7 +2901,7 @@ func normalizedJSONArrayText(value any) any {
 		if err != nil {
 			return "[]"
 		}
-		return string(body)
+		return sanitizeUTF8String(string(body))
 	case []string:
 		if len(item) == 0 {
 			return "[]"
@@ -2901,9 +2910,9 @@ func normalizedJSONArrayText(value any) any {
 		if err != nil {
 			return "[]"
 		}
-		return string(body)
+		return sanitizeUTF8String(string(body))
 	case string:
-		trimmed := strings.TrimSpace(item)
+		trimmed := sanitizeUTF8String(item)
 		if trimmed == "" || strings.EqualFold(trimmed, "null") {
 			return "[]"
 		}
@@ -2923,7 +2932,7 @@ func formatNullableTime(value *time.Time) any {
 
 func _normalizeNullStringToNone(value any) any {
 	if text, ok := value.(string); ok {
-		trimmed := strings.TrimSpace(text)
+		trimmed := sanitizeUTF8String(text)
 		if strings.EqualFold(trimmed, "null") {
 			return nil
 		}
@@ -2943,7 +2952,7 @@ func mapValue(payload map[string]any, key, nestedKey string) any {
 func stringFromPayload(value any) any {
 	switch item := value.(type) {
 	case string:
-		normalized := strings.TrimSpace(item)
+		normalized := sanitizeUTF8String(item)
 		if normalized == "" || strings.EqualFold(normalized, "null") {
 			return nil
 		}
@@ -2961,5 +2970,18 @@ func stringFromPayload(value any) any {
 
 func stringValue(value any) string {
 	text, _ := value.(string)
-	return strings.TrimSpace(text)
+	return sanitizeUTF8String(text)
+}
+
+// sanitizeUTF8String ensures payload-derived text is safe to bind into Postgres
+// text columns even when upstream source content contains invalid byte sequences.
+func sanitizeUTF8String(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	if utf8.ValidString(trimmed) {
+		return trimmed
+	}
+	return strings.ToValidUTF8(trimmed, "")
 }

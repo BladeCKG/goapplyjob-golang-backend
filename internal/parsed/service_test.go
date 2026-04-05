@@ -4,11 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/sources/plugins"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestSourceOlderThanPostDateReturnsTrue(t *testing.T) {
@@ -16,6 +21,372 @@ func TestSourceOlderThanPostDateReturnsTrue(t *testing.T) {
 	postDate := time.Date(2026, 2, 12, 10, 0, 0, 0, time.UTC)
 	if !isSourceOlderThanPostDate(&sourceCreatedAt, &postDate) {
 		t.Fatal("expected source to be older than post date")
+	}
+}
+
+func TestNormalizeLocationFieldsKeepsNonASCIIUnicodeCityValid(t *testing.T) {
+	country, city, states := normalizeLocationFields("Japan", "横浜市", nil)
+
+	if country != nil {
+		t.Fatalf("expected nil country for plain non-segmented location input, got %#v", country)
+	}
+	if got, ok := city.(string); !ok || got != "横浜市" {
+		t.Fatalf("expected city 横浜市, got %#v", city)
+	}
+	if got, ok := states.(string); !ok || got != "[]" {
+		t.Fatalf("expected empty states json, got %#v", states)
+	}
+}
+
+func TestFixtureRawJSONContainsOnlyValidUTF8Strings(t *testing.T) {
+	for _, relativePath := range []string{
+		filepath.Join("test-extract", "remoterocketship", "raw-json-1.json"),
+		filepath.Join("test-extract", "workable", "raw-json-1.json"),
+		filepath.Join("test-extract", "workable", "raw-json-2.json"),
+	} {
+		relativePath := relativePath
+		t.Run(filepath.ToSlash(relativePath), func(t *testing.T) {
+			body, err := os.ReadFile(parsedFixturePath(t, relativePath))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var payload map[string]any
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("unmarshal fixture: %v", err)
+			}
+
+			assertParsedFixtureUTF8(t, relativePath, "payload", payload)
+		})
+	}
+}
+
+func TestProcessPendingWithFixtureRawJSONs(t *testing.T) {
+	cases := []struct {
+		name         string
+		source       string
+		fixturePath  string
+		rawURL       string
+		roleTitleKey string
+	}{
+		{
+			name:         "remoterocketship_raw_json_1",
+			source:       "remoterocketship",
+			fixturePath:  filepath.Join("test-extract", "remoterocketship", "raw-json-1.json"),
+			rawURL:       "https://www.remoterocketship.com/company/sgs/jobs/ai-hybrid",
+			roleTitleKey: "roleTitle",
+		},
+		{
+			name:         "workable_raw_json_1",
+			source:       "workable",
+			fixturePath:  filepath.Join("test-extract", "workable", "raw-json-1.json"),
+			rawURL:       "https://jobs.workable.com/view/9axVwP295CRkysSH12WeRD/remote-polish-speaking-customer-service-agent---work-in-sofia---fully-paid-relocation-in-%C5%82%C3%B3d%C5%BA-at-patrique-mercier-recruitment-by-nellie",
+			roleTitleKey: "roleTitle",
+		},
+		{
+			name:         "workable_raw_json_2",
+			source:       "workable",
+			fixturePath:  filepath.Join("test-extract", "workable", "raw-json-2.json"),
+			rawURL:       "https://jobs.workable.com/view/acFhKm7FnqhfvbQ68ew3T4/remote-slovak-speaking-customer-service-agent---work-in-sofia---fully-paid-relocation-in-%C5%BEilina-at-patrique-mercier-recruitment-by-nellie",
+			roleTitleKey: "roleTitle",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			db, err := database.Open(testDatabaseURL(t, "test_parsed_fixture_process_"+tc.name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+
+			body, err := os.ReadFile(parsedFixturePath(t, tc.fixturePath))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var payload map[string]any
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("unmarshal fixture: %v", err)
+			}
+
+			_, err = db.SQL.ExecContext(
+				context.Background(),
+				`INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
+				 VALUES (1, ?, ?, ?, true, false, false, 0, ?)`,
+				tc.source,
+				tc.rawURL,
+				time.Now().UTC().Format(time.RFC3339Nano),
+				string(body),
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			svc := New(Config{}, db)
+			svc.EnabledSources = map[string]struct{}{tc.source: {}}
+			processed, err := svc.ProcessPending(context.Background(), 10)
+			if err != nil {
+				t.Fatalf("ProcessPending failed: %v", err)
+			}
+			if processed != 1 {
+				t.Fatalf("expected processed=1, got %d", processed)
+			}
+
+			var isParsed bool
+			if err := db.SQL.QueryRowContext(context.Background(), `SELECT is_parsed FROM raw_us_jobs WHERE id = 1`).Scan(&isParsed); err != nil {
+				t.Fatal(err)
+			}
+			if !isParsed {
+				t.Fatal("expected raw row to be marked parsed")
+			}
+
+			var parsedCount int
+			if err := db.SQL.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM parsed_jobs WHERE raw_us_job_id = 1`).Scan(&parsedCount); err != nil {
+				t.Fatal(err)
+			}
+			if parsedCount != 1 {
+				t.Fatalf("expected one parsed job row, got %d", parsedCount)
+			}
+
+			var storedRoleTitle sql.NullString
+			if err := db.SQL.QueryRowContext(context.Background(), `SELECT role_title FROM parsed_jobs WHERE raw_us_job_id = 1`).Scan(&storedRoleTitle); err != nil {
+				t.Fatal(err)
+			}
+			expectedRoleTitle := strings.TrimSpace(stringValue(payload[tc.roleTitleKey]))
+			if expectedRoleTitle != "" && storedRoleTitle.String != expectedRoleTitle {
+				t.Fatalf("expected role_title %q, got %q", expectedRoleTitle, storedRoleTitle.String)
+			}
+		})
+	}
+}
+
+func TestUpsertCompanyFromFixtureRawJSONs(t *testing.T) {
+	cases := []struct {
+		name        string
+		source      string
+		fixturePath string
+	}{
+		{
+			name:        "remoterocketship_raw_json_1",
+			source:      "remoterocketship",
+			fixturePath: filepath.Join("test-extract", "remoterocketship", "raw-json-1.json"),
+		},
+		{
+			name:        "workable_raw_json_1",
+			source:      "workable",
+			fixturePath: filepath.Join("test-extract", "workable", "raw-json-1.json"),
+		},
+		{
+			name:        "workable_raw_json_2",
+			source:      "workable",
+			fixturePath: filepath.Join("test-extract", "workable", "raw-json-2.json"),
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			db, err := database.Open(testDatabaseURL(t, "test_parsed_fixture_company_"+tc.name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+
+			body, err := os.ReadFile(parsedFixturePath(t, tc.fixturePath))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var payload map[string]any
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatalf("unmarshal fixture: %v", err)
+			}
+
+			svc := New(Config{}, db)
+			plugin, ok := plugins.Get(tc.source)
+			if !ok {
+				t.Fatalf("missing plugin for source %q", tc.source)
+			}
+
+			if _, err := svc.upsertCompanyFromPayload(context.Background(), payload, plugin); err != nil {
+				t.Fatalf("upsertCompanyFromPayload failed: %v", err)
+			}
+		})
+	}
+}
+
+func TestParsedJobInsertArgsFromFixtureAreUTF8Safe(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_fixture_insert_args_utf8"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	body, err := os.ReadFile(parsedFixturePath(t, filepath.Join("test-extract", "remoterocketship", "raw-json-1.json")))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+
+	svc := New(Config{}, db)
+	plugin, ok := plugins.Get("remoterocketship")
+	if !ok {
+		t.Fatal("missing remoterocketship plugin")
+	}
+
+	normalizedTechStack := normalizeTechStack(payload["techStack"])
+	_, normalizedLocationCity, normalizedUSStates := normalizeLocationFields(
+		payload["location"],
+		payload["locationCity"],
+		payload["locationUSStates"],
+	)
+	normalizedLocationCountries := normalizeLocationCountries(payload["locationCountries"])
+	companyID, err := svc.upsertCompanyFromPayload(context.Background(), payload, plugin)
+	if err != nil {
+		t.Fatalf("upsertCompanyFromPayload failed: %v", err)
+	}
+	categorizedTitle := stringFromPayload(payload["categorizedJobTitle"])
+	categorizedFunction := stringFromPayload(payload["categorizedJobFunction"])
+	normalizedTechStack = extractManualTechStackIfNeeded(
+		svc.techStackExtractor,
+		stringValue(payload["roleDescription"]),
+		stringValue(payload["roleRequirements"]),
+		normalizedTechStack,
+		plugin.UseManualTechStackExtraction,
+		stringValue(categorizedTitle),
+		stringValue(categorizedFunction),
+	)
+	normalizedTechStackJSON := jsonStringOrNil(normalizedTechStack)
+
+	argNames := []string{
+		"raw_us_job_id", "company_id", "external_job_id", "created_at_source", "valid_until_date", "date_deleted", "description_language",
+		"role_title", "role_description", "role_requirements", "benefits", "job_description_summary", "two_line_job_description_summary",
+		"role_title_brazil", "role_description_brazil", "role_requirements_brazil", "benefits_brazil", "slug_brazil", "job_description_summary_brazil", "two_line_job_description_summary_brazil",
+		"role_title_france", "role_description_france", "role_requirements_france", "benefits_france", "slug_france", "job_description_summary_france", "two_line_job_description_summary_france",
+		"role_title_germany", "role_description_germany", "role_requirements_germany", "benefits_germany", "slug_germany", "job_description_summary_germany", "two_line_job_description_summary_germany",
+		"url", "slug", "employment_type", "location_type", "location_city",
+		"categorized_job_title", "categorized_job_function", "education_requirements_credential_category",
+		"experience_in_place_of_education", "experience_requirements_months",
+		"is_on_linkedin", "is_promoted", "is_entry_level", "is_junior", "is_mid_level", "is_senior", "is_lead",
+		"required_languages", "location_us_states", "location_countries", "tech_stack",
+		"salary_min", "salary_max", "salary_type", "salary_currency_code", "salary_currency_symbol", "salary_min_usd", "salary_max_usd", "salary_human_text",
+		"updated_at",
+	}
+
+	args := []any{
+		int64(1),
+		companyID,
+		stringFromPayload(payload["id"]),
+		formatNullableTime(parseDT(payload["created_at"])),
+		formatNullableTime(parseDT(payload["validUntilDate"])),
+		formatNullableTime(parseDT(payload["dateDeleted"])),
+		stringFromPayload(payload["descriptionLanguage"]),
+		stringFromPayload(payload["roleTitle"]),
+		stringFromPayload(payload["roleDescription"]),
+		stringFromPayload(payload["roleRequirements"]),
+		stringFromPayload(payload["benefits"]),
+		stringFromPayload(payload["jobDescriptionSummary"]),
+		stringFromPayload(payload["twoLineJobDescriptionSummary"]),
+		stringFromPayload(payload["roleTitleBrazil"]),
+		stringFromPayload(payload["roleDescriptionBrazil"]),
+		stringFromPayload(payload["roleRequirementsBrazil"]),
+		stringFromPayload(payload["benefitsBrazil"]),
+		stringFromPayload(payload["slugBrazil"]),
+		stringFromPayload(payload["jobDescriptionSummaryBrazil"]),
+		stringFromPayload(payload["twoLineJobDescriptionSummaryBrazil"]),
+		stringFromPayload(payload["roleTitleFrance"]),
+		stringFromPayload(payload["roleDescriptionFrance"]),
+		stringFromPayload(payload["roleRequirementsFrance"]),
+		stringFromPayload(payload["benefitsFrance"]),
+		stringFromPayload(payload["slugFrance"]),
+		stringFromPayload(payload["jobDescriptionSummaryFrance"]),
+		stringFromPayload(payload["twoLineJobDescriptionSummaryFrance"]),
+		stringFromPayload(payload["roleTitleGermany"]),
+		stringFromPayload(payload["roleDescriptionGermany"]),
+		stringFromPayload(payload["roleRequirementsGermany"]),
+		stringFromPayload(payload["benefitsGermany"]),
+		stringFromPayload(payload["slugGermany"]),
+		stringFromPayload(payload["jobDescriptionSummaryGermany"]),
+		stringFromPayload(payload["twoLineJobDescriptionSummaryGermany"]),
+		stringFromPayload(payload["url"]),
+		stringFromPayload(payload["slug"]),
+		normalizeEmploymentTypeValue(payload["employmentType"]),
+		stringFromPayload(payload["locationType"]),
+		normalizedLocationCity,
+		categorizedTitle,
+		categorizedFunction,
+		normalizeEducationCredentialCategory(payload["educationRequirementsCredentialCategory"]),
+		_normalizeNullStringToNone(payload["experienceInPlaceOfEducation"]),
+		_normalizeNullStringToNone(payload["experienceRequirementsMonthsOfExperience"]),
+		_normalizeNullStringToNone(payload["isOnLinkedIn"]),
+		_normalizeNullStringToNone(payload["isPromoted"]),
+		_normalizeNullStringToNone(payload["isEntryLevel"]),
+		_normalizeNullStringToNone(payload["isJunior"]),
+		_normalizeNullStringToNone(payload["isMidLevel"]),
+		_normalizeNullStringToNone(payload["isSenior"]),
+		_normalizeNullStringToNone(payload["isLead"]),
+		normalizedJSONArrayText(_normalizeNullStringToNone(payload["requiredLanguages"])),
+		normalizedUSStates,
+		normalizedLocationCountries,
+		normalizedTechStackJSON,
+		_normalizeNullStringToNone(mapValue(payload, "salaryRange", "min")),
+		_normalizeNullStringToNone(mapValue(payload, "salaryRange", "max")),
+		_normalizeNullStringToNone(mapValue(payload, "salaryRange", "salaryType")),
+		_normalizeNullStringToNone(mapValue(payload, "salaryRange", "currencyCode")),
+		_normalizeNullStringToNone(mapValue(payload, "salaryRange", "currencySymbol")),
+		_normalizeNullStringToNone(mapValue(payload, "salaryRange", "minSalaryAsUSD")),
+		_normalizeNullStringToNone(mapValue(payload, "salaryRange", "maxSalaryAsUSD")),
+		_normalizeNullStringToNone(mapValue(payload, "salaryRange", "salaryHumanReadableText")),
+		time.Now().UTC().Format(time.RFC3339Nano),
+	}
+
+	for idx, arg := range args {
+		if idx >= len(argNames) {
+			break
+		}
+		text, ok := arg.(string)
+		if !ok || text == "" {
+			continue
+		}
+		if _, err := db.SQL.ExecContext(context.Background(), `SELECT ?::text`, text); err != nil {
+			t.Fatalf("arg %d (%s) failed text probe: %v", idx+1, argNames[idx], err)
+		}
+	}
+}
+
+func parsedFixturePath(t *testing.T, relativePath string) string {
+	t.Helper()
+
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve current file")
+	}
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", ".."))
+	return filepath.Join(repoRoot, relativePath)
+}
+
+func assertParsedFixtureUTF8(t *testing.T, fixtureName, path string, value any) {
+	t.Helper()
+
+	switch item := value.(type) {
+	case string:
+		if !utf8.ValidString(item) {
+			t.Fatalf("%s has invalid UTF-8 at %s", fixtureName, path)
+		}
+	case []any:
+		for idx, child := range item {
+			assertParsedFixtureUTF8(t, fixtureName, fmt.Sprintf("%s[%d]", path, idx), child)
+		}
+	case map[string]any:
+		for key, child := range item {
+			assertParsedFixtureUTF8(t, fixtureName, fmt.Sprintf("%s.%s", path, key), child)
+		}
 	}
 }
 
