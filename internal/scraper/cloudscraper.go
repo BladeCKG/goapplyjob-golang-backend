@@ -11,6 +11,7 @@ import (
 	"time"
 
 	cloudscraper "github.com/Advik-B/cloudscraper/lib"
+	"github.com/Advik-B/cloudscraper/lib/stealth"
 	useragent "github.com/Advik-B/cloudscraper/lib/user_agent"
 )
 
@@ -34,6 +35,20 @@ func NewCloudscraperFetcher(cfg CloudscraperConfig) (*CloudscraperFetcher, error
 			Desktop: true,
 			Mobile:  false,
 		}),
+		// Keep challenge handling lightweight for worker fetches. The upstream
+		// library can otherwise spend multiple 4s sleeps and 403 refresh retries
+		// inside a single Get() call, which makes raw-job workers look stuck for
+		// minutes even though our outer fetch context has already expired.
+		cloudscraper.WithStealth(stealth.Options{
+			Enabled:          true,
+			HumanLikeDelays:  false,
+			RandomizeHeaders: true,
+			BrowserQuirks:    true,
+		}),
+		cloudscraper.WithSessionConfig(false, time.Hour, 0),
+		func(o *cloudscraper.Options) {
+			o.MaxRetries = 1
+		},
 	)
 	if err != nil {
 		return nil, err
