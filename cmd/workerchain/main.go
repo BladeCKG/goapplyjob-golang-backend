@@ -99,6 +99,7 @@ func main() {
 		runChain := func() {
 			for {
 				parsedAIClassifierEnabled := config.GetenvBool("PARSED_JOB_AI_CLASSIFIER_ENABLED", false)
+				parsedJobAvailabilityEnabled := cfg.ParsedJobAvailabilityEnabled
 				watcherSvc := watcher.New(watcher.Config{
 					Enabled:                          config.GetenvBool("WATCH_ENABLED", true),
 					RemoteRocketshipUSJobSitemapURLs: defaultRemoteRocketshipURLs,
@@ -199,18 +200,21 @@ func main() {
 					}, db)
 					parsedAIClassifierSvc.EnabledSources = enabledSources
 				}
-				parsedAvailabilitySvc := parsedjobavailability.New(parsedjobavailability.Config{
-					BatchSize:           config.GetenvInt("PARSED_JOB_AVAILABILITY_BATCH_SIZE", 200),
-					PollSeconds:         config.GetenvFloat("PARSED_JOB_AVAILABILITY_POLL_SECONDS", 5),
-					RunOnce:             true,
-					ErrorBackoffSeconds: errorBackoffSeconds,
-					WorkerCount:         config.GetenvInt("PARSED_JOB_AVAILABILITY_WORKER_COUNT", 4),
-					FetchTimeoutSeconds: cfg.ParsedJobAvailabilityFetchTimeoutSeconds,
-				}, db)
-				parsedAvailabilitySvc.EnabledSources = enabledSources
-				readHTMLForSource := makeReadHTMLForSourceWith429Retry(retries429, time.Duration(retryDelaySeconds)*time.Second)
-				parsedAvailabilitySvc.ReadHTMLForSource = func(ctx context.Context, source, targetURL string) (string, int, error) {
-					return readHTMLForSource(ctx, source, targetURL)
+				var parsedAvailabilitySvc *parsedjobavailability.Service
+				if parsedJobAvailabilityEnabled {
+					parsedAvailabilitySvc = parsedjobavailability.New(parsedjobavailability.Config{
+						BatchSize:           config.GetenvInt("PARSED_JOB_AVAILABILITY_BATCH_SIZE", 200),
+						PollSeconds:         config.GetenvFloat("PARSED_JOB_AVAILABILITY_POLL_SECONDS", 5),
+						RunOnce:             true,
+						ErrorBackoffSeconds: errorBackoffSeconds,
+						WorkerCount:         config.GetenvInt("PARSED_JOB_AVAILABILITY_WORKER_COUNT", 4),
+						FetchTimeoutSeconds: cfg.ParsedJobAvailabilityFetchTimeoutSeconds,
+					}, db)
+					parsedAvailabilitySvc.EnabledSources = enabledSources
+					readHTMLForSource := makeReadHTMLForSourceWith429Retry(retries429, time.Duration(retryDelaySeconds)*time.Second)
+					parsedAvailabilitySvc.ReadHTMLForSource = func(ctx context.Context, source, targetURL string) (string, int, error) {
+						return readHTMLForSource(ctx, source, targetURL)
+					}
 				}
 
 				hadError := false
@@ -259,6 +263,11 @@ func main() {
 					results <- stepResult{name: constants.WorkerNameParsedAIClassifier, count: count, err: err}
 				}()
 				go func() {
+					if !parsedJobAvailabilityEnabled || parsedAvailabilitySvc == nil {
+						log.Printf("worker-chain parsed_job_availability_disabled")
+						results <- stepResult{name: constants.WorkerNameParsedAvailability, count: 0, err: nil}
+						return
+					}
 					count, err := runCountStepWithTimeout(stepTimeout, func(ctx context.Context) (int, error) {
 						return parsedAvailabilitySvc.RunOnce(ctx)
 					})

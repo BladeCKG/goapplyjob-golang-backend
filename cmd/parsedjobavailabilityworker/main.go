@@ -22,6 +22,10 @@ func main() {
 	defer func() { _ = closeLogFile() }()
 
 	cfg := config.Load()
+	if !cfg.ParsedJobAvailabilityEnabled {
+		log.Printf("parsed-job-availability-worker disabled")
+		return
+	}
 	db, err := database.Open(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatal(err)

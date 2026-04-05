@@ -84,6 +84,7 @@ type Config struct {
 	NowPaymentsCurrencyCandidates            string
 	NowPaymentsIPNSecret                     string
 	SkippableRecheckBatchSize                int
+	ParsedJobAvailabilityEnabled             bool
 	ParsedJobAvailabilityFetchTimeoutSeconds int
 	AIClassifierProvider                     string
 	AIClassifierProviders                    string
@@ -192,6 +193,7 @@ func Load() Config {
 		NowPaymentsCurrencyCandidates:            getenv("NOWPAYMENTS_CURRENCY_CANDIDATES", "btc,eth,ltc,usdttrc20,usdterc20,usdtbsc,usdc"),
 		NowPaymentsIPNSecret:                     getenv("NOWPAYMENTS_IPN_SECRET", ""),
 		SkippableRecheckBatchSize:                getenvInt("SKIPPABLE_RECHECK_BATCH_SIZE", 100),
+		ParsedJobAvailabilityEnabled:             getenvBool("PARSED_JOB_AVAILABILITY_ENABLED", false),
 		ParsedJobAvailabilityFetchTimeoutSeconds: getenvInt("PARSED_JOB_AVAILABILITY_FETCH_TIMEOUT_SECONDS", 30),
 		AIClassifierProvider:                     getenv("AI_CLASSIFIER_PROVIDER", "auto"),
 		AIClassifierProviders:                    getenv("AI_CLASSIFIER_PROVIDERS", ""),
