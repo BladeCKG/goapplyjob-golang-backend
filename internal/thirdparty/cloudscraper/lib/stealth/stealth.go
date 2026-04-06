@@ -1,6 +1,7 @@
 package stealth
 
 import (
+	"context"
 	"math/rand"
 	"net/http"
 	"time"
@@ -46,7 +47,7 @@ func (s *Mode) Apply(req *http.Request, browser string) {
 		return
 	}
 
-	s.applyDelay()
+	s.applyDelay(req.Context())
 
 	if s.opts.RandomizeHeaders {
 		s.randomizeHeaders(req.Header)
@@ -60,13 +61,21 @@ func (s *Mode) Apply(req *http.Request, browser string) {
 	s.lastRequestTime = time.Now()
 }
 
-func (s *Mode) applyDelay() {
+func (s *Mode) applyDelay(ctx context.Context) {
 	if s.requestCount == 0 {
 		return
 	}
 	if s.opts.HumanLikeDelays {
 		delay := s.opts.MinDelay + time.Duration(rand.Int63n(int64(s.opts.MaxDelay-s.opts.MinDelay)))
-		time.Sleep(delay)
+		if ctx == nil {
+			time.Sleep(delay)
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
 	}
 }
 

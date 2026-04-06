@@ -1,11 +1,13 @@
 package captcha
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -29,7 +31,7 @@ func NewTwoCaptchaSolver(apiKey string) *TwoCaptchaSolver {
 }
 
 // Solve sends a captcha to 2captcha and polls for the result.
-func (s *TwoCaptchaSolver) Solve(captchaType, pageURL, siteKey string) (string, error) {
+func (s *TwoCaptchaSolver) Solve(ctx context.Context, captchaType, pageURL, siteKey string) (string, error) {
 	// Map cloudscraper types to 2captcha method names
 	method := ""
 	switch captchaType {
@@ -51,29 +53,37 @@ func (s *TwoCaptchaSolver) Solve(captchaType, pageURL, siteKey string) (string, 
 	form.Add("pageurl", pageURL)
 	form.Add("json", "1")
 
-	resp, err := s.Client.PostForm("https://2captcha.com/in.php", form)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://2captcha.com/in.php", strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", fmt.Errorf("2captcha: failed to build submission request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := s.Client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("2captcha: failed to submit job: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	var req twoCaptchaRequest
-	if err := json.Unmarshal(body, &req); err != nil {
+	var submitResp twoCaptchaRequest
+	if err := json.Unmarshal(body, &submitResp); err != nil {
 		return "", fmt.Errorf("2captcha: failed to parse submission response: %s", string(body))
 	}
 
-	if req.Status != 1 {
-		return "", fmt.Errorf("2captcha: submission failed: %s", req.Request)
+	if submitResp.Status != 1 {
+		return "", fmt.Errorf("2captcha: submission failed: %s", submitResp.Request)
 	}
 
-	jobID := req.Request
+	jobID := submitResp.Request
 
 	// 2. Poll for the result
-	return s.pollForResult(jobID)
+	return s.pollForResult(ctx, jobID)
 }
 
-func (s *TwoCaptchaSolver) pollForResult(jobID string) (string, error) {
+func (s *TwoCaptchaSolver) pollForResult(ctx context.Context, jobID string) (string, error) {
 	u, _ := url.Parse("https://2captcha.com/res.php")
 	q := u.Query()
 	q.Set("key", s.APIKey)
@@ -84,9 +94,17 @@ func (s *TwoCaptchaSolver) pollForResult(jobID string) (string, error) {
 
 	// Poll for 180 seconds with 5-second intervals
 	for i := 0; i < 36; i++ {
-		time.Sleep(5 * time.Second)
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
 
-		resp, err := s.Client.Get(u.String())
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+		if err != nil {
+			return "", fmt.Errorf("2captcha: failed to build polling request: %w", err)
+		}
+		resp, err := s.Client.Do(req)
 		if err != nil {
 			continue // Retry on network error
 		}

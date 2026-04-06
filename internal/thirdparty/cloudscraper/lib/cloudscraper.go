@@ -168,7 +168,7 @@ func (s *Scraper) PostWithContext(ctx context.Context, url, contentType string, 
 func (s *Scraper) do(req *http.Request) (*http.Response, error) {
 	s.mu.Lock()
 	if s.shouldRefreshSession() {
-		if err := s.refreshSession(req.URL); err != nil {
+		if err := s.refreshSession(req.Context(), req.URL); err != nil {
 			s.logger.Printf("Warning: session refresh failed: %v\n", err)
 		}
 	}
@@ -260,7 +260,7 @@ func (s *Scraper) handle403(req *http.Request) (*http.Response, error) {
 
 	for i := 0; i < s.opts.Max403Retries; i++ {
 		s.logger.Printf("Received 403. Refreshing session (attempt %d/%d)...\n", i+1, s.opts.Max403Retries)
-		if err := s.refreshSession(req.URL); err != nil {
+		if err := s.refreshSession(req.Context(), req.URL); err != nil {
 			return nil, fmt.Errorf("failed to refresh session after 403: %w", err)
 		}
 
@@ -277,7 +277,7 @@ func (s *Scraper) shouldRefreshSession() bool {
 	return time.Since(s.sessionStartTime) > s.opts.SessionRefreshInterval
 }
 
-func (s *Scraper) refreshSession(currentURL *url.URL) error {
+func (s *Scraper) refreshSession(ctx context.Context, currentURL *url.URL) error {
 	s.logger.Println("Refreshing session...")
 	s.sessionStartTime = time.Now()
 	atomic.StoreInt32(&s.requestCount, 0)
@@ -299,6 +299,6 @@ func (s *Scraper) refreshSession(currentURL *url.URL) error {
 	}
 
 	rootURL := &url.URL{Scheme: currentURL.Scheme, Host: currentURL.Host}
-	_, err = s.Get(rootURL.String())
+	_, err = s.GetWithContext(ctx, rootURL.String())
 	return err
 }

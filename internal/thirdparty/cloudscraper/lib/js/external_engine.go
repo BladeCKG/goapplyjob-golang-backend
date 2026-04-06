@@ -2,6 +2,7 @@ package js
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -32,7 +33,7 @@ func NewExternalEngine(command string) (*ExternalEngine, error) {
 }
 
 // Run executes a script by piping it to the external runtime's stdin.
-func (e *ExternalEngine) Run(script string) (string, error) {
+func (e *ExternalEngine) Run(ctx context.Context, script string) (string, error) {
 	// Security: Check script size to prevent DoS attacks
 	if err := security.ValidateScriptSize(script, security.MaxExternalScriptSize); err != nil {
 		return "", err
@@ -40,7 +41,10 @@ func (e *ExternalEngine) Run(script string) (string, error) {
 
 	// Security: The `e.Command` field is sanitized in the constructor (NewExternalEngine),
 	// making this call safe from command injection.
-	cmd := exec.Command(e.Command)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := exec.CommandContext(ctx, e.Command)
 	cmd.Stdin = strings.NewReader(script)
 
 	var stdout, stderr bytes.Buffer

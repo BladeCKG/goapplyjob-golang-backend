@@ -1,6 +1,7 @@
 package cloudscraper
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 
@@ -15,7 +16,7 @@ var (
 )
 
 // solveV1Logic prepares and executes the v1 JS challenge using the configured engine.
-func solveV1Logic(body, domain string, engine js.Engine) (string, error) {
+func solveV1Logic(ctx context.Context, body, domain string, engine js.Engine) (string, error) {
 	matches := jsV1ChallengeRegex.FindStringSubmatch(body)
 	if len(matches) < 2 {
 		return "", fmt.Errorf("could not find Cloudflare v1 JS challenge script: %w", errors.ErrChallenge)
@@ -40,5 +41,5 @@ func solveV1Logic(body, domain string, engine js.Engine) (string, error) {
         console.log(result);
     `, safeDomain, finalExpression)
 
-	return engine.Run(fullScript)
+	return engine.Run(ctx, fullScript)
 }

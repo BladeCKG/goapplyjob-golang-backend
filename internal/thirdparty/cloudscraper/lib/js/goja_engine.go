@@ -1,6 +1,7 @@
 package js
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"log"
@@ -25,10 +26,13 @@ func NewGojaEngine() *GojaEngine {
 }
 
 // Run executes a script in goja. It captures output by overriding console.log.
-func (e *GojaEngine) Run(script string) (string, error) {
+func (e *GojaEngine) Run(ctx context.Context, script string) (string, error) {
 	// Security: Check script size to prevent DoS attacks
 	if err := security.ValidateScriptSize(script, security.MaxGojaScriptSize); err != nil {
 		return "", err
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	vm := goja.New()
@@ -75,15 +79,22 @@ func (e *GojaEngine) Run(script string) (string, error) {
 		vm.Interrupt("execution timeout")
 		<-done // Wait for goroutine to finish
 		return "", fmt.Errorf("goja: script execution timed out after %v", maxExecutionTime)
+	case <-ctx.Done():
+		vm.Interrupt(ctx.Err())
+		<-done
+		return "", ctx.Err()
 	}
 }
 
 // SolveV2Challenge uses the original synchronous method to solve v2 challenges,
 // as goja does not support asynchronous operations like setTimeout without additional setup.
-func (e *GojaEngine) SolveV2Challenge(body, domain string, scriptMatches [][]string, logger *log.Logger) (string, error) {
+func (e *GojaEngine) SolveV2Challenge(ctx context.Context, body, domain string, scriptMatches [][]string, logger *log.Logger) (string, error) {
 	// Security: Check total script size
 	if err := security.ValidateTotalScriptSize(scriptMatches, security.MaxGojaScriptSize); err != nil {
 		return "", fmt.Errorf("goja: %w", err)
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	vm := goja.New()
@@ -107,7 +118,11 @@ func (e *GojaEngine) SolveV2Challenge(body, domain string, scriptMatches [][]str
 	}
 
 	// Wait for the script's internal timeouts to complete.
-	time.Sleep(4 * time.Second)
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-time.After(4 * time.Second):
+	}
 
 	// Get the final answer from the 'jschl_answer' field in the dummy document.
 	// Security: This executes a small, controlled script to retrieve a value.

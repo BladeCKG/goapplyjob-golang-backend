@@ -37,9 +37,11 @@ func NewCloudscraperFetcher(cfg CloudscraperConfig) (*CloudscraperFetcher, error
 			RandomizeHeaders: true,
 			BrowserQuirks:    true,
 		}),
-		cloudscraper.WithSessionConfig(false, time.Hour, 0),
+		// Keep retries bounded, but allow a small amount of 403 recovery now
+		// that the vendored scraper path is context-aware.
+		cloudscraper.WithSessionConfig(true, time.Hour, 2),
 		func(o *cloudscraper.Options) {
-			o.MaxRetries = 1
+			o.MaxRetries = 2
 		},
 	)
 	if err != nil {

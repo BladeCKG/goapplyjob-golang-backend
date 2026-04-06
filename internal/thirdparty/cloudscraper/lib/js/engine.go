@@ -1,9 +1,11 @@
 package js
 
+import "context"
+
 // Engine defines the interface for a JavaScript runtime.
 type Engine interface {
 	// Run executes a self-contained JavaScript script and returns the result from stdout.
-	Run(script string) (string, error)
+	Run(ctx context.Context, script string) (string, error)
 }
 
 // Runtime represents the name of a supported JavaScript runtime.

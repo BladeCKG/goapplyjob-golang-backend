@@ -1,6 +1,7 @@
 package cloudscraper
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"regexp"
@@ -14,7 +15,7 @@ import (
 var v2ScriptRegex = regexp.MustCompile(`(?s)<script[^>]*>(.*?window\._cf_chl_opt.*?)<\/script>`)
 
 // solveV2Logic solves modern v2/v3 challenges by delegating to the appropriate JS engine implementation.
-func solveV2Logic(body, domain string, engine js.Engine, logger *log.Logger) (string, error) {
+func solveV2Logic(ctx context.Context, body, domain string, engine js.Engine, logger *log.Logger) (string, error) {
 	scriptMatches := v2ScriptRegex.FindAllStringSubmatch(body, -1)
 	if len(scriptMatches) == 0 {
 		return "", fmt.Errorf("could not find modern JS challenge scripts")
@@ -27,15 +28,15 @@ func solveV2Logic(body, domain string, engine js.Engine, logger *log.Logger) (st
 
 	// Use a special synchronous path for Goja, which can't handle async setTimeout.
 	if gojaEngine, ok := engine.(*js.GojaEngine); ok {
-		return gojaEngine.SolveV2Challenge(body, domain, scriptMatches, logger)
+		return gojaEngine.SolveV2Challenge(ctx, body, domain, scriptMatches, logger)
 	}
 
 	// Use a modern asynchronous path for external runtimes (node, deno, bun).
-	return solveV2WithExternal(domain, scriptMatches, engine)
+	return solveV2WithExternal(ctx, domain, scriptMatches, engine)
 }
 
 // solveV2WithExternal builds a full script with shims and an async callback to solve the challenge.
-func solveV2WithExternal(domain string, scriptMatches [][]string, engine js.Engine) (string, error) {
+func solveV2WithExternal(ctx context.Context, domain string, scriptMatches [][]string, engine js.Engine) (string, error) {
 	// Security: Sanitize domain to prevent injection
 	safeDomain := security.SanitizeDomainForJS(domain)
 	if safeDomain == "" {
@@ -105,5 +106,5 @@ func solveV2WithExternal(domain string, scriptMatches [][]string, engine js.Engi
     `
 	fullScript.WriteString(answerExtractor)
 
-	return engine.Run(fullScript.String())
+	return engine.Run(ctx, fullScript.String())
 }

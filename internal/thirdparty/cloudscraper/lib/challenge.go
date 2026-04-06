@@ -47,7 +47,7 @@ func (s *Scraper) handleChallenge(resp *http.Response) (*http.Response, error) {
 	// Check for classic lib JS challenge
 	if jsV1DetectRegex.MatchString(bodyStr) {
 		s.logger.Printf("Classic (v1) JavaScript challenge detected. Solving with '%s'...\n", s.opts.JSRuntime)
-		return s.solveClassicJSChallenge(resp.Request.URL, bodyStr)
+		return s.solveClassicJSChallenge(resp.Request.Context(), resp.Request.URL, bodyStr)
 	}
 
 	// Check for Captcha/Turnstile
@@ -59,10 +59,14 @@ func (s *Scraper) handleChallenge(resp *http.Response) (*http.Response, error) {
 	return nil, errors.ErrUnknownChallenge
 }
 
-func (s *Scraper) solveClassicJSChallenge(originalURL *url.URL, body string) (*http.Response, error) {
-	time.Sleep(4 * time.Second)
+func (s *Scraper) solveClassicJSChallenge(ctx context.Context, originalURL *url.URL, body string) (*http.Response, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(4 * time.Second):
+	}
 
-	answer, err := solveV1Logic(body, originalURL.Host, s.jsEngine)
+	answer, err := solveV1Logic(ctx, body, originalURL.Host, s.jsEngine)
 	if err != nil {
 		return nil, fmt.Errorf("v1 challenge solver failed: %w", err)
 	}
@@ -88,11 +92,11 @@ func (s *Scraper) solveClassicJSChallenge(originalURL *url.URL, body string) (*h
 		"jschl_answer": {answer},
 	}
 
-	return s.submitChallengeForm(context.Background(), fullSubmitURL.String(), originalURL.String(), formData)
+	return s.submitChallengeForm(ctx, fullSubmitURL.String(), originalURL.String(), formData)
 }
 
 func (s *Scraper) solveModernJSChallenge(resp *http.Response, body string) (*http.Response, error) {
-	answer, err := solveV2Logic(body, resp.Request.URL.Host, s.jsEngine, s.logger)
+	answer, err := solveV2Logic(resp.Request.Context(), body, resp.Request.URL.Host, s.jsEngine, s.logger)
 	if err != nil {
 		return nil, fmt.Errorf("v2 challenge solver failed: %w", err)
 	}
@@ -145,7 +149,7 @@ func (s *Scraper) solveCaptchaChallenge(resp *http.Response, body, siteKey strin
 		return nil, errors.ErrNoCaptchaSolver
 	}
 
-	token, err := s.CaptchaSolver.Solve("turnstile", resp.Request.URL.String(), siteKey)
+	token, err := s.CaptchaSolver.Solve(resp.Request.Context(), "turnstile", resp.Request.URL.String(), siteKey)
 	if err != nil {
 		return nil, fmt.Errorf("captcha solver failed: %w", err)
 	}
