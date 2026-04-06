@@ -1,6 +1,7 @@
 package cloudscraper
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -214,19 +215,22 @@ func (s *Scraper) do(req *http.Request) (*http.Response, error) {
 		resp.Header.Del("Content-Encoding")
 	}
 
-	bodyBytes, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-	resp.Body = io.NopCloser(strings.NewReader(string(bodyBytes)))
-
-	if isChallengeResponse(resp, bodyBytes) {
-		s.logger.Println("Cloudflare protection detected, attempting to bypass...")
-		return s.handleChallenge(resp)
+	if strings.HasPrefix(resp.Header.Get("Server"), "cloudflare") &&
+		(resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusForbidden) {
+		bodyBytes, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read challenge response body: %w", err)
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		if isChallengeResponse(resp, bodyBytes) {
+			s.logger.Println("Cloudflare protection detected, attempting to bypass...")
+			return s.handleChallenge(resp, bodyBytes)
+		}
 	}
 
 	if resp.StatusCode == http.StatusForbidden && s.opts.AutoRefreshOn403 {
+		resp.Body.Close()
 		return s.handle403(req)
 	}
 
@@ -235,6 +239,7 @@ func (s *Scraper) do(req *http.Request) (*http.Response, error) {
 		if err != nil {
 			return resp, nil
 		}
+		resp.Body.Close()
 		redirectReq, _ := http.NewRequestWithContext(req.Context(), "GET", loc.String(), nil)
 		return s.do(redirectReq)
 	}

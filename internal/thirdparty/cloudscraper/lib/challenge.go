@@ -3,7 +3,6 @@ package cloudscraper
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -30,12 +29,7 @@ var (
 	rValueModernRegex  = regexp.MustCompile(`r:\s*'([^']+)'`)
 )
 
-func (s *Scraper) handleChallenge(resp *http.Response) (*http.Response, error) {
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read challenge response body: %w", err)
-	}
+func (s *Scraper) handleChallenge(resp *http.Response, body []byte) (*http.Response, error) {
 	bodyStr := string(body)
 
 	// Check for modern v2/v3 JS VM challenge first
