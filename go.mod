@@ -3,11 +3,12 @@ module goapplyjob-golang-backend
 go 1.24.1
 
 require (
-	github.com/Advik-B/cloudscraper v0.0.0-20251210084613-9c027088bf03
+	github.com/andybalholm/brotli v1.2.0
 	github.com/bogdanfinn/fhttp v0.6.8
 	github.com/bogdanfinn/tls-client v1.14.0
 	github.com/caarlos0/env/v8 v8.0.0
 	github.com/dodopayments/dodopayments-go v1.87.1
+	github.com/dop251/goja v0.0.0-20251008123653-cf18d89f3cf6
 	github.com/exaring/otelpgx v0.9.3
 	github.com/gin-gonic/gin v1.10.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
@@ -30,7 +31,6 @@ require (
 tool gotest.tools/gotestsum
 
 require (
-	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/bdandy/go-errors v1.2.2 // indirect
 	github.com/bdandy/go-socks4 v1.2.3 // indirect
 	github.com/bitfield/gotestdox v0.2.2 // indirect
@@ -43,7 +43,6 @@ require (
 	github.com/cloudwego/base64x v0.1.5 // indirect
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/dnephin/pflag v1.0.7 // indirect
-	github.com/dop251/goja v0.0.0-20251008123653-cf18d89f3cf6 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/fsnotify/fsnotify v1.8.0 // indirect

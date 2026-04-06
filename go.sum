@@ -1,5 +1,3 @@
-github.com/Advik-B/cloudscraper v0.0.0-20251210084613-9c027088bf03 h1:OQ/09U+CI8NPIhu+X7WuGkTnAthU+qf56g8ApXp0JZo=
-github.com/Advik-B/cloudscraper v0.0.0-20251210084613-9c027088bf03/go.mod h1:Iqmn1s490v/dlil4f2YAajMysRHUUuGd9GcAgmB/amM=
 github.com/Azure/go-ansiterm v0.0.0-20230124172434-306776ec8161 h1:L/gRVlceqvL25UVaW/CKtUDjefjrs0SPonmDGUVOYP0=
 github.com/Azure/go-ansiterm v0.0.0-20230124172434-306776ec8161/go.mod h1:xomTg63KZ2rFqZQzSB4Vz2SUXa1BpHTVz9L5PTmPC4E=
 github.com/Masterminds/semver/v3 v3.2.1 h1:RN9w6+7QoMeJVGyfmbcgs28Br8cvmnucEXnY0rYXWg0=
