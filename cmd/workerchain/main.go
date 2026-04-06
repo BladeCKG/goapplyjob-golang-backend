@@ -368,19 +368,14 @@ func runStepWithTimeout(name string, timeout time.Duration, fn func(context.Cont
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- fn(ctx)
-	}()
-
-	select {
-	case err := <-errCh:
-		return err
-	case <-ctx.Done():
+	err := fn(ctx)
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		log.Printf("worker-chain step_timeout step=%s timeout=%s", name, timeout)
-		return ctx.Err()
 	}
+	if err != nil {
+		return err
+	}
+	return ctx.Err()
 }
 
 func runCountStepWithTimeout(timeout time.Duration, fn func(context.Context) (int, error)) (int, error) {
@@ -389,22 +384,14 @@ func runCountStepWithTimeout(timeout time.Duration, fn func(context.Context) (in
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	type result struct {
-		count int
-		err   error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		count, err := fn(ctx)
-		ch <- result{count: count, err: err}
-	}()
-	select {
-	case res := <-ch:
-		return res.count, res.err
-	case <-ctx.Done():
+	count, err := fn(ctx)
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		log.Printf("worker-chain step_timeout timeout=%s", timeout)
-		return 0, ctx.Err()
 	}
+	if err != nil {
+		return count, err
+	}
+	return count, ctx.Err()
 }
 
 func makeReadHTMLForSourceWith429Retry(max429Retries int, retryDelay time.Duration) raw.ReadHTMLForSourceFunc {
