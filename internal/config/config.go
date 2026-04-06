@@ -193,7 +193,7 @@ func Load() Config {
 		NowPaymentsCurrencyCandidates:            getenv("NOWPAYMENTS_CURRENCY_CANDIDATES", "btc,eth,ltc,usdttrc20,usdterc20,usdtbsc,usdc"),
 		NowPaymentsIPNSecret:                     getenv("NOWPAYMENTS_IPN_SECRET", ""),
 		SkippableRecheckBatchSize:                getenvInt("SKIPPABLE_RECHECK_BATCH_SIZE", 100),
-		ParsedJobAvailabilityEnabled:             getenvBool("PARSED_JOB_AVAILABILITY_ENABLED", false),
+		ParsedJobAvailabilityEnabled:             getenvBool("PARSED_JOB_AVAILABILITY_ENABLED", true),
 		ParsedJobAvailabilityFetchTimeoutSeconds: getenvInt("PARSED_JOB_AVAILABILITY_FETCH_TIMEOUT_SECONDS", 30),
 		AIClassifierProvider:                     getenv("AI_CLASSIFIER_PROVIDER", "auto"),
 		AIClassifierProviders:                    getenv("AI_CLASSIFIER_PROVIDERS", ""),
