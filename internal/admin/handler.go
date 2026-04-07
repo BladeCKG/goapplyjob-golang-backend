@@ -818,15 +818,16 @@ func (h *Handler) listRawUSJobs(c *gin.Context) {
 		return
 	}
 	orderClause, err := queryOrderClause(c, map[string]string{
-		"id":           "id",
-		"source":       "source",
-		"url":          "url",
-		"post_date":    "post_date",
-		"is_ready":     "is_ready",
-		"is_skippable": "is_skippable",
-		"is_parsed":    "is_parsed",
-		"retry_count":  "retry_count",
-		"raw_json":     "raw_json",
+		"id":            "id",
+		"parsed_job_id": "(SELECT id FROM parsed_jobs WHERE raw_us_job_id = raw_us_jobs.id LIMIT 1)",
+		"source":        "source",
+		"url":           "url",
+		"post_date":     "post_date",
+		"is_ready":      "is_ready",
+		"is_skippable":  "is_skippable",
+		"is_parsed":     "is_parsed",
+		"retry_count":   "retry_count",
+		"raw_json":      "raw_json",
 	}, "id")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"detail": err.Error()})
@@ -843,15 +844,16 @@ func (h *Handler) listRawUSJobs(c *gin.Context) {
 		filters = append(filters, "is_ready = false")
 	}
 	filterDefinitions := map[string]filterDef{
-		"id":           {columnExpr: "id", valueType: "int"},
-		"source":       {columnExpr: "source", valueType: "text"},
-		"url":          {columnExpr: "url", valueType: "text"},
-		"post_date":    {columnExpr: "post_date", valueType: "datetime"},
-		"is_ready":     {columnExpr: "is_ready", valueType: "bool"},
-		"is_skippable": {columnExpr: "is_skippable", valueType: "bool"},
-		"is_parsed":    {columnExpr: "is_parsed", valueType: "bool"},
-		"retry_count":  {columnExpr: "retry_count", valueType: "int"},
-		"raw_json":     {columnExpr: "raw_json", valueType: "text"},
+		"id":            {columnExpr: "id", valueType: "int"},
+		"parsed_job_id": {columnExpr: "(SELECT id FROM parsed_jobs WHERE raw_us_job_id = raw_us_jobs.id LIMIT 1)", valueType: "int"},
+		"source":        {columnExpr: "source", valueType: "text"},
+		"url":           {columnExpr: "url", valueType: "text"},
+		"post_date":     {columnExpr: "post_date", valueType: "datetime"},
+		"is_ready":      {columnExpr: "is_ready", valueType: "bool"},
+		"is_skippable":  {columnExpr: "is_skippable", valueType: "bool"},
+		"is_parsed":     {columnExpr: "is_parsed", valueType: "bool"},
+		"retry_count":   {columnExpr: "retry_count", valueType: "int"},
+		"raw_json":      {columnExpr: "raw_json", valueType: "text"},
 	}
 	for _, item := range parsedFilters {
 		def, ok := filterDefinitions[item.Column]
