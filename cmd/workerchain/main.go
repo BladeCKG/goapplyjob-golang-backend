@@ -18,6 +18,7 @@ import (
 	"goapplyjob-golang-backend/internal/workerlog"
 	"log"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -96,6 +97,8 @@ func main() {
 			stepTimeoutSeconds = 0
 		}
 
+		var stepMu sync.Mutex
+		stepRunning := map[string]bool{}
 		runChain := func() {
 			for {
 				parsedAIClassifierEnabled := config.GetenvBool("PARSED_JOB_AI_CLASSIFIER_ENABLED", false)
@@ -227,8 +230,28 @@ func main() {
 					err   error
 				}
 				results := make(chan stepResult, 6)
+				tryStartStep := func(name string) bool {
+					stepMu.Lock()
+					defer stepMu.Unlock()
+					if stepRunning[name] {
+						return false
+					}
+					stepRunning[name] = true
+					return true
+				}
+				finishStep := func(name string) {
+					stepMu.Lock()
+					delete(stepRunning, name)
+					stepMu.Unlock()
+				}
 				launchStep := func(name string, fn func(context.Context) error) {
+					if !tryStartStep(name) {
+						log.Printf("worker-chain %s_skipped reason=already_running", strings.ToLower(name))
+						results <- stepResult{name: name}
+						return
+					}
 					go func() {
+						defer finishStep(name)
 						ctx := context.Background()
 						cancel := func() {}
 						if stepTimeout > 0 {
@@ -245,7 +268,13 @@ func main() {
 					}()
 				}
 				launchCountStep := func(name string, fn func(context.Context) (int, error)) {
+					if !tryStartStep(name) {
+						log.Printf("worker-chain %s_skipped reason=already_running", strings.ToLower(name))
+						results <- stepResult{name: name, count: 0, err: nil}
+						return
+					}
 					go func() {
+						defer finishStep(name)
 						ctx := context.Background()
 						cancel := func() {}
 						if stepTimeout > 0 {
@@ -274,6 +303,12 @@ func main() {
 					return parsedSvc.RunOnce(ctx)
 				})
 				go func() {
+					if !tryStartStep(constants.WorkerNameParsedAIClassifier) {
+						log.Printf("worker-chain %s_skipped reason=already_running", strings.ToLower(constants.WorkerNameParsedAIClassifier))
+						results <- stepResult{name: constants.WorkerNameParsedAIClassifier, count: 0, err: nil}
+						return
+					}
+					defer finishStep(constants.WorkerNameParsedAIClassifier)
 					if !parsedAIClassifierEnabled || parsedAIClassifierSvc == nil {
 						log.Printf("worker-chain parsed_ai_classifier_disabled")
 						results <- stepResult{name: constants.WorkerNameParsedAIClassifier, count: 0, err: nil}
@@ -294,6 +329,12 @@ func main() {
 					results <- stepResult{name: constants.WorkerNameParsedAIClassifier, count: count, err: err}
 				}()
 				go func() {
+					if !tryStartStep(constants.WorkerNameParsedAvailability) {
+						log.Printf("worker-chain %s_skipped reason=already_running", strings.ToLower(constants.WorkerNameParsedAvailability))
+						results <- stepResult{name: constants.WorkerNameParsedAvailability, count: 0, err: nil}
+						return
+					}
+					defer finishStep(constants.WorkerNameParsedAvailability)
 					if !parsedJobAvailabilityEnabled || parsedAvailabilitySvc == nil {
 						log.Printf("worker-chain parsed_job_availability_disabled")
 						results <- stepResult{name: constants.WorkerNameParsedAvailability, count: 0, err: nil}
