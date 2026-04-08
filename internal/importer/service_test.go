@@ -151,7 +151,7 @@ func TestReplacePayloadRowsKeepsRemainingRowsInOrder(t *testing.T) {
 		{URL: "https://example.com/new", PostDate: time.Date(2026, 2, 12, 18, 0, 0, 0, time.UTC)},
 		{URL: "https://example.com/old", PostDate: time.Date(2026, 2, 12, 17, 0, 0, 0, time.UTC)},
 	}
-	if err := svc.ReplacePayloadRows(payloadID, rows); err != nil {
+	if err := svc.ReplacePayloadRows(context.Background(), payloadID, rows); err != nil {
 		t.Fatal(err)
 	}
 
@@ -194,7 +194,7 @@ func TestDeleteConsumedPayloadsRemovesLegacyRows(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deleted, err := svc.DeleteConsumedPayloads()
+	deleted, err := svc.DeleteConsumedPayloads(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

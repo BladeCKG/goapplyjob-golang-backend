@@ -227,39 +227,70 @@ func main() {
 					err   error
 				}
 				results := make(chan stepResult, 6)
-				go func() {
-					err := runStepWithTimeout(constants.WorkerNameWatcher, stepTimeout, func(ctx context.Context) error {
-						return watcherSvc.RunOnceWithContext(ctx)
-					})
-					results <- stepResult{name: constants.WorkerNameWatcher, err: err}
-				}()
-				go func() {
-					err := runStepWithTimeout(constants.WorkerNameImporter, stepTimeout, func(ctx context.Context) error {
-						return importerSvc.RunOnceWithContext(ctx)
-					})
-					results <- stepResult{name: constants.WorkerNameImporter, err: err}
-				}()
-				go func() {
-					count, err := runCountStepWithTimeout(stepTimeout, func(ctx context.Context) (int, error) {
-						return rawSvc.RunOnce(ctx)
-					})
-					results <- stepResult{name: constants.WorkerNameRaw, count: count, err: err}
-				}()
-				go func() {
-					count, err := runCountStepWithTimeout(stepTimeout, func(ctx context.Context) (int, error) {
-						return parsedSvc.RunOnce(ctx)
-					})
-					results <- stepResult{name: constants.WorkerNameParsed, count: count, err: err}
-				}()
+				launchStep := func(name string, fn func(context.Context) error) {
+					go func() {
+						ctx := context.Background()
+						cancel := func() {}
+						if stepTimeout > 0 {
+							ctx, cancel = context.WithTimeout(context.Background(), stepTimeout)
+						}
+						defer cancel()
+						defer func() {
+							if r := recover(); r != nil {
+								results <- stepResult{name: name, err: errors.New("panic")}
+							}
+						}()
+						err := fn(ctx)
+						results <- stepResult{name: name, err: err}
+					}()
+				}
+				launchCountStep := func(name string, fn func(context.Context) (int, error)) {
+					go func() {
+						ctx := context.Background()
+						cancel := func() {}
+						if stepTimeout > 0 {
+							ctx, cancel = context.WithTimeout(context.Background(), stepTimeout)
+						}
+						defer cancel()
+						defer func() {
+							if r := recover(); r != nil {
+								results <- stepResult{name: name, err: errors.New("panic")}
+							}
+						}()
+						count, err := fn(ctx)
+						results <- stepResult{name: name, count: count, err: err}
+					}()
+				}
+				launchStep(constants.WorkerNameWatcher, func(ctx context.Context) error {
+					return watcherSvc.RunOnceWithContext(ctx)
+				})
+				launchStep(constants.WorkerNameImporter, func(ctx context.Context) error {
+					return importerSvc.RunOnceWithContext(ctx)
+				})
+				launchCountStep(constants.WorkerNameRaw, func(ctx context.Context) (int, error) {
+					return rawSvc.RunOnce(ctx)
+				})
+				launchCountStep(constants.WorkerNameParsed, func(ctx context.Context) (int, error) {
+					return parsedSvc.RunOnce(ctx)
+				})
 				go func() {
 					if !parsedAIClassifierEnabled || parsedAIClassifierSvc == nil {
 						log.Printf("worker-chain parsed_ai_classifier_disabled")
 						results <- stepResult{name: constants.WorkerNameParsedAIClassifier, count: 0, err: nil}
 						return
 					}
-					count, err := runCountStepWithTimeout(stepTimeout, func(ctx context.Context) (int, error) {
-						return parsedAIClassifierSvc.RunOnce(ctx)
-					})
+					ctx := context.Background()
+					cancel := func() {}
+					if stepTimeout > 0 {
+						ctx, cancel = context.WithTimeout(context.Background(), stepTimeout)
+					}
+					defer cancel()
+					defer func() {
+						if r := recover(); r != nil {
+							results <- stepResult{name: constants.WorkerNameParsedAIClassifier, err: errors.New("panic")}
+						}
+					}()
+					count, err := parsedAIClassifierSvc.RunOnce(ctx)
 					results <- stepResult{name: constants.WorkerNameParsedAIClassifier, count: count, err: err}
 				}()
 				go func() {
@@ -268,13 +299,36 @@ func main() {
 						results <- stepResult{name: constants.WorkerNameParsedAvailability, count: 0, err: nil}
 						return
 					}
-					count, err := runCountStepWithTimeout(stepTimeout, func(ctx context.Context) (int, error) {
-						return parsedAvailabilitySvc.RunOnce(ctx)
-					})
+					ctx := context.Background()
+					cancel := func() {}
+					if stepTimeout > 0 {
+						ctx, cancel = context.WithTimeout(context.Background(), stepTimeout)
+					}
+					defer cancel()
+					defer func() {
+						if r := recover(); r != nil {
+							results <- stepResult{name: constants.WorkerNameParsedAvailability, err: errors.New("panic")}
+						}
+					}()
+					count, err := parsedAvailabilitySvc.RunOnce(ctx)
 					results <- stepResult{name: constants.WorkerNameParsedAvailability, count: count, err: err}
 				}()
-				for i := 0; i < 6; i++ {
-					res := <-results
+				pendingSteps := map[string]struct{}{
+					constants.WorkerNameWatcher:            {},
+					constants.WorkerNameImporter:           {},
+					constants.WorkerNameRaw:                {},
+					constants.WorkerNameParsed:             {},
+					constants.WorkerNameParsedAIClassifier: {},
+					constants.WorkerNameParsedAvailability: {},
+				}
+				var timeoutCh <-chan time.Time
+				var timeoutTimer *time.Timer
+				if stepTimeout > 0 {
+					timeoutTimer = time.NewTimer(stepTimeout)
+					timeoutCh = timeoutTimer.C
+				}
+				handleResult := func(res stepResult) {
+					delete(pendingSteps, res.name)
 					switch res.name {
 					case constants.WorkerNameWatcher:
 						if res.err != nil {
@@ -326,6 +380,22 @@ func main() {
 						}
 					}
 				}
+				for len(pendingSteps) > 0 {
+					select {
+					case res := <-results:
+						handleResult(res)
+					case <-timeoutCh:
+						for name := range pendingSteps {
+							log.Printf("worker-chain %s_failed error=%v", strings.ToLower(name), context.DeadlineExceeded)
+							hadError = true
+							errorDetails = append(errorDetails, name+"="+context.DeadlineExceeded.Error())
+						}
+						pendingSteps = map[string]struct{}{}
+					}
+				}
+				if timeoutTimer != nil {
+					timeoutTimer.Stop()
+				}
 				if hadError {
 					log.Printf("worker-chain cycle_done had_error=true details=%s", strings.Join(errorDetails, " | "))
 				} else {
@@ -368,22 +438,14 @@ func runStepWithTimeout(name string, timeout time.Duration, fn func(context.Cont
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-
-	// Run the step in a child goroutine so workerchain can move on to the next
-	// cycle as soon as the timeout expires. The result channel is buffered so the
-	// child can exit cleanly even if it returns after the timeout path wins.
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- fn(ctx)
-	}()
-
-	select {
-	case err := <-errCh:
-		return err
-	case <-ctx.Done():
+	err := fn(ctx)
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		log.Printf("worker-chain step_timeout step=%s timeout=%s", name, timeout)
-		return ctx.Err()
 	}
+	if err != nil {
+		return err
+	}
+	return ctx.Err()
 }
 
 func runCountStepWithTimeout(timeout time.Duration, fn func(context.Context) (int, error)) (int, error) {
@@ -392,24 +454,14 @@ func runCountStepWithTimeout(timeout time.Duration, fn func(context.Context) (in
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-
-	type result struct {
-		count int
-		err   error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		count, err := fn(ctx)
-		ch <- result{count: count, err: err}
-	}()
-
-	select {
-	case res := <-ch:
-		return res.count, res.err
-	case <-ctx.Done():
+	count, err := fn(ctx)
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		log.Printf("worker-chain step_timeout timeout=%s", timeout)
-		return 0, ctx.Err()
 	}
+	if err != nil {
+		return count, err
+	}
+	return count, ctx.Err()
 }
 
 func makeReadHTMLForSourceWith429Retry(max429Retries int, retryDelay time.Duration) raw.ReadHTMLForSourceFunc {

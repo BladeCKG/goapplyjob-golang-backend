@@ -267,14 +267,14 @@ func newImportedPath(importDir, importedPrefix string) string {
 	}
 }
 
-func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int, int, int, map[string]SitemapRow) {
+func (s *Service) flushBuffer(ctx context.Context, buffer map[string]SitemapRow, source string) (int, int, int, map[string]SitemapRow) {
 	if len(buffer) == 0 {
 		return 0, 0, 0, map[string]SitemapRow{}
 	}
 	log.Printf("raw-import-worker flush_buffer_start source=%s rows=%d", source, len(buffer))
 	inserted, updated, failedDB := 0, 0, 0
 	failedRows := map[string]SitemapRow{}
-	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+	err := database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
 		tx, err := s.DB.SQL.Begin()
 		if err != nil {
 			return err
@@ -435,7 +435,7 @@ func (s *Service) flushBuffer(buffer map[string]SitemapRow, source string) (int,
 	return inserted, updated, failedDB, failedRows
 }
 
-func (s *Service) ImportRawUSJobsRows(rows []SitemapRow, flushBufferBatchSize int, source string) (Stats, map[string]SitemapRow, map[string]SitemapRow, error) {
+func (s *Service) ImportRawUSJobsRows(ctx context.Context, rows []SitemapRow, flushBufferBatchSize int, source string) (Stats, map[string]SitemapRow, map[string]SitemapRow, error) {
 	if flushBufferBatchSize <= 0 {
 		flushBufferBatchSize = 100
 	}
@@ -457,7 +457,7 @@ func (s *Service) ImportRawUSJobsRows(rows []SitemapRow, flushBufferBatchSize in
 			buffer[row.URL] = row
 		}
 		if len(buffer) >= flushBufferBatchSize {
-			inserted, updated, failedDB, failedBatch := s.flushBuffer(buffer, rowSource)
+			inserted, updated, failedDB, failedBatch := s.flushBuffer(ctx, buffer, rowSource)
 			stats.Inserted += inserted
 			stats.Updated += updated
 			stats.FailedDB += failedDB
@@ -465,7 +465,7 @@ func (s *Service) ImportRawUSJobsRows(rows []SitemapRow, flushBufferBatchSize in
 			buffer = map[string]SitemapRow{}
 		}
 	}
-	inserted, updated, failedDB, failedBatch := s.flushBuffer(buffer, rowSource)
+	inserted, updated, failedDB, failedBatch := s.flushBuffer(ctx, buffer, rowSource)
 	stats.Inserted += inserted
 	stats.Updated += updated
 	stats.FailedDB += failedDB
@@ -509,7 +509,7 @@ func (s *Service) PickUnconsumedPayloads(ctx context.Context, limit int, enabled
 	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
 	args = append(args, limit)
 	var rows *sql.Rows
-	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+	err := database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
 		var queryErr error
 		rows, queryErr = s.DB.SQL.QueryContext(ctx, query, args...)
 		return queryErr
@@ -551,8 +551,8 @@ func sortedSourceNames(values map[string]struct{}) []string {
 	return out
 }
 
-func (s *Service) DeletePayload(payloadID int64) error {
-	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+func (s *Service) DeletePayload(ctx context.Context, payloadID int64) error {
+	err := database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
 		_, execErr := s.DB.SQL.Exec(`DELETE FROM watcher_payloads WHERE id = ?`, payloadID)
 		return execErr
 	})
@@ -562,9 +562,9 @@ func (s *Service) DeletePayload(payloadID int64) error {
 	return err
 }
 
-func (s *Service) DeleteConsumedPayloads() (int64, error) {
+func (s *Service) DeleteConsumedPayloads(ctx context.Context) (int64, error) {
 	var result sql.Result
-	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+	err := database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
 		var execErr error
 		result, execErr = s.DB.SQL.Exec(`DELETE FROM watcher_payloads WHERE consumed_at IS NOT NULL`)
 		return execErr
@@ -579,24 +579,24 @@ func (s *Service) DeleteConsumedPayloads() (int64, error) {
 	return affected, nil
 }
 
-func (s *Service) MarkPayloadConsumed(payloadID int64) error {
-	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+func (s *Service) MarkPayloadConsumed(ctx context.Context, payloadID int64) error {
+	err := database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
 		_, execErr := s.DB.SQL.Exec(`UPDATE watcher_payloads SET consumed_at = ? WHERE id = ?`, time.Now().UTC().Format(time.RFC3339Nano), payloadID)
 		return execErr
 	})
 	return err
 }
 
-func (s *Service) ReplacePayloadBody(payloadID int64, failedRows map[string]time.Time) error {
-	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+func (s *Service) ReplacePayloadBody(ctx context.Context, payloadID int64, failedRows map[string]time.Time) error {
+	err := database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
 		_, execErr := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, rowsToXML(failedRows), payloadID)
 		return execErr
 	})
 	return err
 }
 
-func (s *Service) ReplacePayloadRows(payloadID int64, rows []SitemapRow) error {
-	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+func (s *Service) ReplacePayloadRows(ctx context.Context, payloadID int64, rows []SitemapRow) error {
+	err := database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
 		_, execErr := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, rowsListToXML(rows), payloadID)
 		return execErr
 	})
@@ -606,7 +606,7 @@ func (s *Service) ReplacePayloadRows(payloadID int64, rows []SitemapRow) error {
 	return err
 }
 
-func (s *Service) ReplaceBuiltinPayloadRows(payloadID int64, rows []SitemapRow) error {
+func (s *Service) ReplaceBuiltinPayloadRows(ctx context.Context, payloadID int64, rows []SitemapRow) error {
 	payload := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		payload = append(payload, map[string]any{
@@ -620,19 +620,19 @@ func (s *Service) ReplaceBuiltinPayloadRows(payloadID int64, rows []SitemapRow) 
 		})
 	}
 	body, _ := json.Marshal(payload)
-	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+	err := database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
 		_, execErr := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, string(body), payloadID)
 		return execErr
 	})
 	return err
 }
 
-func (s *Service) ReplaceSourcePayloadRows(payloadID int64, source string, rows []map[string]any) error {
+func (s *Service) ReplaceSourcePayloadRows(ctx context.Context, payloadID int64, source string, rows []map[string]any) error {
 	plugin, ok := plugins.Get(source)
 	if !ok || plugin.SerializeImportRows == nil {
 		return errors.New("unsupported source payload serializer")
 	}
-	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+	err := database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
 		_, execErr := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, plugin.SerializeImportRows(rows), payloadID)
 		return execErr
 	})
@@ -819,7 +819,7 @@ func (s *Service) RunOnceWithContext(ctx context.Context) error {
 				rowsToProcess := payloadRows[:toProcessCount]
 				unprocessedRows := payloadRows[toProcessCount:]
 
-				stats, failedRows, _, err := s.ImportRawUSJobsRows(rowsToProcess, flushBufferBatchSize, payload.Source)
+				stats, failedRows, _, err := s.ImportRawUSJobsRows(ctx, rowsToProcess, flushBufferBatchSize, payload.Source)
 				if err != nil {
 					log.Printf("raw-import-worker payload_failed payload_id=%d source=%s error=%v", payload.ID, payload.Source, err)
 					continue
@@ -833,7 +833,7 @@ func (s *Service) RunOnceWithContext(ctx context.Context) error {
 					for _, row := range remainingRows {
 						serializedRows = append(serializedRows, serializeRowForSource(row))
 					}
-					if err := s.ReplaceSourcePayloadRows(payload.ID, payload.Source, serializedRows); err != nil {
+					if err := s.ReplaceSourcePayloadRows(ctx, payload.ID, payload.Source, serializedRows); err != nil {
 						log.Printf("raw-import-worker payload_update_failed payload_id=%d source=%s error=%v", payload.ID, payload.Source, err)
 						continue
 					}
@@ -841,7 +841,7 @@ func (s *Service) RunOnceWithContext(ctx context.Context) error {
 						payload.ID, stats.Seen, stats.Inserted, stats.Updated, stats.SkippedInvalid, stats.FailedDB, len(remainingRows), atomic.LoadInt64(&remainingRowsBudget))
 					continue
 				}
-				if err := s.DeletePayload(payload.ID); err != nil {
+				if err := s.DeletePayload(ctx, payload.ID); err != nil {
 					log.Printf("raw-import-worker payload_delete_failed payload_id=%d source=%s error=%v", payload.ID, payload.Source, err)
 					continue
 				}
@@ -867,7 +867,7 @@ func (s *Service) RunForeverWithContext(ctx context.Context) error {
 	sleepDuration := s.Config.SleepDuration
 	runOnce := s.Config.RunOnce
 
-	if deleted, err := s.DeleteConsumedPayloads(); err != nil {
+	if deleted, err := s.DeleteConsumedPayloads(ctx); err != nil {
 		log.Fatal(err)
 	} else if deleted > 0 {
 		log.Printf("importer removed legacy consumed payloads=%d", deleted)

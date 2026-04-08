@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"time"
@@ -32,6 +33,47 @@ func RetryLocked(attempts int, baseDelay time.Duration, op func() error) error {
 			return err
 		}
 		time.Sleep(baseDelay * time.Duration(1<<attempt))
+	}
+	if lastErr == nil {
+		lastErr = errors.New("retry locked failed")
+	}
+	return lastErr
+}
+
+func RetryLockedWithContext(ctx context.Context, attempts int, baseDelay time.Duration, op func() error) error {
+	if attempts < 0 {
+		attempts = 0
+	}
+	if baseDelay <= 0 {
+		baseDelay = 50 * time.Millisecond
+	}
+	var lastErr error
+	for attempt := 0; attempt <= attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			if lastErr != nil {
+				return lastErr
+			}
+			return err
+		}
+		err := op()
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !IsLockedError(err) || attempt >= attempts {
+			return err
+		}
+		delay := baseDelay * time.Duration(1<<attempt)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			if lastErr != nil {
+				return lastErr
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 	if lastErr == nil {
 		lastErr = errors.New("retry locked failed")

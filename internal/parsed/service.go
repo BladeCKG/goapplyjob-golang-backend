@@ -1610,7 +1610,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 					createdAtSourceValue = formatNullableTime(&previousCreatedAt.Time)
 				}
 				retries, retryDelay := parsedLockRetryConfig()
-				if err := database.RetryLocked(retries, retryDelay, func() error {
+				if err := database.RetryLockedWithContext(ctx, retries, retryDelay, func() error {
 					_, execErr := s.DB.SQL.ExecContext(
 						ctx,
 						`UPDATE parsed_jobs
@@ -1627,7 +1627,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 				}
 				if legacyRawJobID > 0 && legacyRawJobID != row.id {
 					retries, retryDelay = parsedLockRetryConfig()
-					if err := database.RetryLocked(retries, retryDelay, func() error {
+					if err := database.RetryLockedWithContext(ctx, retries, retryDelay, func() error {
 						_, execErr := s.DB.SQL.ExecContext(
 							ctx,
 							`UPDATE raw_us_jobs
@@ -1702,7 +1702,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 
 		if mergeIntoExistingParsedID != 0 {
 			retries, retryDelay := parsedLockRetryConfig()
-			if err := database.RetryLocked(retries, retryDelay, func() error {
+			if err := database.RetryLockedWithContext(ctx, retries, retryDelay, func() error {
 				_, execErr := s.DB.SQL.ExecContext(
 					ctx,
 					`UPDATE parsed_jobs SET
@@ -1831,7 +1831,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 					log.Printf("parsed-job-worker duplicate_cross_source_merge raw_job_id=%d source=%s duplicate_parsed_job_id=%d", row.id, row.source, duplicateID)
 				}
 				retries, retryDelay = parsedLockRetryConfig()
-				if err := database.RetryLocked(retries, retryDelay, func() error {
+				if err := database.RetryLockedWithContext(ctx, retries, retryDelay, func() error {
 					_, execErr := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true, is_skippable = true, raw_json = NULL WHERE id = ?`, row.id)
 					return execErr
 				}); err != nil {
@@ -1841,7 +1841,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			} else {
 				log.Printf("parsed-job-worker existing_raw_merge raw_job_id=%d source=%s parsed_job_id=%d", row.id, row.source, existingParsedID)
 				retries, retryDelay = parsedLockRetryConfig()
-				if err := database.RetryLocked(retries, retryDelay, func() error {
+				if err := database.RetryLockedWithContext(ctx, retries, retryDelay, func() error {
 					_, execErr := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true WHERE id = ?`, row.id)
 					return execErr
 				}); err != nil {
@@ -1853,7 +1853,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		}
 
 		retries, retryDelay = parsedLockRetryConfig()
-		err = database.RetryLocked(retries, retryDelay, func() error {
+		err = database.RetryLockedWithContext(ctx, retries, retryDelay, func() error {
 			_, execErr := s.DB.SQL.ExecContext(
 				ctx,
 				`INSERT INTO parsed_jobs (
@@ -2020,7 +2020,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			return processedInc, skippedInc + 1, nil
 		}
 		retries, retryDelay = parsedLockRetryConfig()
-		if err := database.RetryLocked(retries, retryDelay, func() error {
+		if err := database.RetryLockedWithContext(ctx, retries, retryDelay, func() error {
 			_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_parsed = true WHERE id = ?`, row.id)
 			return err
 		}); err != nil {

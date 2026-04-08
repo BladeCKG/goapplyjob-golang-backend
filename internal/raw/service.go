@@ -34,17 +34,17 @@ const (
 )
 
 type (
-	ReadHTMLFunc func(context.Context, string) (string, int, error)
+	ReadHTMLFunc          func(context.Context, string) (string, int, error)
 	ReadHTMLForSourceFunc func(context.Context, string, string) (string, int, error)
 )
 
 type Service struct {
-	DB             *database.DB
-	ReadHTML       ReadHTMLFunc
+	DB                *database.DB
+	ReadHTML          ReadHTMLFunc
 	ReadHTMLForSource ReadHTMLForSourceFunc
-	Status         StatusFunc
-	EnabledSources map[string]struct{}
-	Config         Config
+	Status            StatusFunc
+	EnabledSources    map[string]struct{}
+	Config            Config
 }
 
 type Config struct {
@@ -212,6 +212,9 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	queryWithRetry := func(query string, args ...any) (*sql.Rows, error) {
 		var qErr error
 		for attempt := 0; attempt < 3; attempt++ {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			rows, qErr = s.DB.SQL.QueryContext(ctx, query, args...)
 			if qErr == nil {
 				return rows, nil
@@ -219,7 +222,14 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			if !isTransientDBError(qErr) || attempt == 2 {
 				return nil, qErr
 			}
-			time.Sleep(time.Duration(50*(1<<attempt)) * time.Millisecond)
+			delay := time.Duration(50*(1<<attempt)) * time.Millisecond
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, ctx.Err()
+			case <-timer.C:
+			}
 		}
 		return nil, qErr
 	}
@@ -314,7 +324,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 					return
 				}
 				clearParsed := func(jobID int64) error {
-					return database.RetryLocked(8, 50*time.Millisecond, func() error {
+					return database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
 						var parsedJobID int64
 						err := s.DB.SQL.QueryRowContext(ctx, `SELECT id FROM parsed_jobs WHERE raw_us_job_id = ? LIMIT 1`, jobID).Scan(&parsedJobID)
 						if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -335,7 +345,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 					if err := clearParsed(jobID); err != nil {
 						return err
 					}
-					return database.RetryLocked(8, 50*time.Millisecond, func() error {
+					return database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
 						_, err := s.DB.SQL.ExecContext(
 							ctx,
 							`UPDATE raw_us_jobs
@@ -385,7 +395,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 					if err := clearParsed(job_id); err != nil {
 						return err
 					}
-					return database.RetryLocked(8, 50*time.Millisecond, func() error {
+					return database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
 						_, err := s.DB.SQL.ExecContext(
 							ctx,
 							`UPDATE raw_us_jobs
@@ -466,7 +476,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 						reportErr(err)
 						return
 					}
-					if err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+					if err := database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
 						_, err := s.DB.SQL.ExecContext(ctx, `UPDATE raw_us_jobs SET is_ready = true, raw_json = ?, extra_json = NULL WHERE id = ?`, string(rawJSON), job.id)
 						return err
 					}); err != nil {
@@ -500,7 +510,7 @@ func (s *Service) CleanupOldRawJobs(ctx context.Context, retentionDays, cleanupB
 	cutoff := time.Now().UTC().Add(-time.Duration(retentionDays) * 24 * time.Hour)
 	var deletedRaw int64
 	var deletedParsed int64
-	err := database.RetryLocked(8, 50*time.Millisecond, func() error {
+	err := database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
 		tx, err := s.DB.SQL.BeginTx(ctx, nil)
 		if err != nil {
 			return err
