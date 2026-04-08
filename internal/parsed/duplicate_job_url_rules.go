@@ -292,7 +292,7 @@ func extractDuplicateJobURLSignatures(rawURL string, ruleSet *duplicateJobURLRul
 		for _, signature := range rule.signatures {
 			values := make([]string, 0, len(signature.parts))
 			prefilterTerms := make([]string, 0, len(signature.parts)+1)
-			if matchedSuffix != "" {
+			if matchedSuffix != "" && !rule.allowWithoutHost {
 				prefilterTerms = append(prefilterTerms, matchedSuffix)
 			}
 			valid := true
@@ -305,7 +305,7 @@ func extractDuplicateJobURLSignatures(rawURL string, ruleSet *duplicateJobURLRul
 						break
 					}
 					values = append(values, part.label+"="+value)
-					prefilterTerms = append(prefilterTerms, strings.ToLower(url.QueryEscape(part.key))+"="+strings.ToLower(url.QueryEscape(value)))
+					prefilterTerms = append(prefilterTerms, value)
 				case "host_label":
 					index, err := strconv.Atoi(part.key)
 					if err != nil || index < 0 || index >= len(hostParts) {
@@ -368,3 +368,4 @@ func extractDuplicateJobURLSignatures(rawURL string, ruleSet *duplicateJobURLRul
 	}
 	return out
 }
+

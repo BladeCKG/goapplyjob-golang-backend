@@ -1373,6 +1373,46 @@ func TestFindDuplicateCrossSourceParsedJobMatchesMeaningfulQueryParamsIgnoringCo
 	}
 }
 
+func TestFindDuplicateCrossSourceParsedJobMatchesGreenhouseBoardPathAndGHJID(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_duplicate_greenhouse_board_path_and_gh_jid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = db.SQL.ExecContext(context.Background(),
+		`INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
+		 VALUES (1, 'dailyremote', 'https://companycam.com/job?gh_jid=7692268003&ref=dailyremote&utm_source=dailyremote.com&utm_campaign=dailyremote.com&utm_medium=dailyremote.com', ?, true, false, true, 0, '{}'),
+		        (2, 'builtin', 'https://boards.greenhouse.io/companycam/jobs/7692268003', ?, true, false, false, 0, '{}')`,
+		now,
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(),
+		`INSERT INTO parsed_jobs (raw_us_job_id, url, role_title, updated_at)
+		 VALUES (1, 'https://companycam.com/job?gh_jid=7692268003&ref=dailyremote&utm_source=dailyremote.com&utm_campaign=dailyremote.com&utm_medium=dailyremote.com', 'Software Engineer', ?)`,
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(Config{}, db)
+	payload := map[string]any{
+		"url": "https://boards.greenhouse.io/companycam/jobs/7692268003",
+	}
+	duplicateID, isDuplicate, err := svc.findDuplicateCrossSourceParsedJob(context.Background(), 2, "builtin", payload, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isDuplicate || duplicateID <= 0 {
+		t.Fatalf("expected duplicate by greenhouse board path and gh_jid signature, got duplicate=%v id=%d", isDuplicate, duplicateID)
+	}
+}
+
 func TestFindDuplicateCrossSourceParsedJobMatchesGreenhouseGHJIDAcrossDomains(t *testing.T) {
 	db, err := database.Open(testDatabaseURL(t, "test_parsed_duplicate_by_greenhouse_gh_jid"))
 	if err != nil {
@@ -1903,3 +1943,5 @@ func TestProcessPendingUpsertMergesExistingParsedRowColumns(t *testing.T) {
 		t.Fatalf("expected existing tech_stack to be preserved, got %#v", techValues)
 	}
 }
+
+

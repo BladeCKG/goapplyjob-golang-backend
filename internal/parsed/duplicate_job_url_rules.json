@@ -3,7 +3,7 @@
   "rules": [
     {
       "name": "greenhouse",
-      "description": "Greenhouse URLs are best identified by company slug plus job id, with gh_jid as a fallback for embedded links.",
+      "description": "Greenhouse URLs are identified by job id first so canonical board links and gh_jid-tracked embeds converge, with company+job kept as an extra stronger signature.",
       "hostSuffixes": ["greenhouse.io"],
       "allowWithoutHost": true,
       "signatures": [
@@ -17,7 +17,7 @@
         {
           "name": "gh_jid_only",
           "parts": [
-            { "type": "query_param", "key": "gh_jid", "label": "gh_jid" }
+            { "type": "query_param", "key": "gh_jid", "label": "job_id" }
           ]
         },
         {
@@ -479,3 +479,4 @@
     }
   ]
 }
+
