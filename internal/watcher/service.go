@@ -852,17 +852,17 @@ func (s *Service) runOnceWorkable(ctx context.Context) error {
 			return err
 		}
 		pageURL := workable.BuildAPIURL(s.Config.WorkableAPIURL, nextToken, max(s.Config.WorkablePageLimit, 1))
-		logf("fetch_start token=%s url=%s", valueOrNil(nextToken), pageURL)
+		logf("fetch_start token=%v url=%s", valueOrNil(nextToken), pageURL)
 
 		bodyText, err := s.fetchTextWithScraper(ctx, pageURL)
 		if err != nil {
 			return err
 		}
-		logf("fetch_done bytes=%d token=%s", len(bodyText), valueOrNil(nextToken))
+		logf("fetch_done bytes=%d token=%v", len(bodyText), valueOrNil(nextToken))
 
 		var response map[string]any
 		if err := json.Unmarshal([]byte(bodyText), &response); err != nil || response == nil {
-			logf("parse_failed token=%s error=%v", valueOrNil(nextToken), err)
+			logf("parse_failed token=%v error=%v", valueOrNil(nextToken), err)
 			break
 		}
 		jobsRaw, _ := response["jobs"].([]any)
@@ -900,7 +900,7 @@ func (s *Service) runOnceWorkable(ctx context.Context) error {
 		if len(rows) == 0 {
 			break
 		}
-		logf("fetch_done jobs=%d token=%s", len(rows), valueOrNil(nextToken))
+		logf("fetch_done jobs=%d token=%v", len(rows), valueOrNil(nextToken))
 
 		toUpsert := rows
 		if !isBootstrap && previousFirstDT != nil {
@@ -936,7 +936,7 @@ func (s *Service) runOnceWorkable(ctx context.Context) error {
 			}
 			insertedRows += inserted
 			updatedRows += updated
-			logf("upsert_done inserted=%d updated=%d token=%s", inserted, updated, valueOrNil(nextToken))
+			logf("upsert_done inserted=%d updated=%d token=%v", inserted, updated, valueOrNil(nextToken))
 		}
 
 		pagesScanned++

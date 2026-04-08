@@ -2,6 +2,8 @@ package cloudscraper
 
 import (
 	"bytes"
+	"compress/flate"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"io"
@@ -209,9 +211,33 @@ func (s *Scraper) do(req *http.Request) (*http.Response, error) {
 		s.ProxyManager.ReportSuccess(currentProxy)
 	}
 
-	switch resp.Header.Get("Content-Encoding") {
+	switch strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Encoding"))) {
 	case "br":
 		resp.Body = io.NopCloser(brotli.NewReader(resp.Body))
+		resp.Header.Del("Content-Encoding")
+	case "gzip":
+		gzipReader, gzipErr := gzip.NewReader(resp.Body)
+		if gzipErr != nil {
+			resp.Body.Close()
+			return nil, fmt.Errorf("failed to decode gzip response body: %w", gzipErr)
+		}
+		resp.Body = &decodedReadCloser{
+			Reader: gzipReader,
+			closers: []io.Closer{
+				gzipReader,
+				resp.Body,
+			},
+		}
+		resp.Header.Del("Content-Encoding")
+	case "deflate":
+		deflateReader := flate.NewReader(resp.Body)
+		resp.Body = &decodedReadCloser{
+			Reader: deflateReader,
+			closers: []io.Closer{
+				deflateReader,
+				resp.Body,
+			},
+		}
 		resp.Header.Del("Content-Encoding")
 	}
 
@@ -276,6 +302,24 @@ func (s *Scraper) handle403(req *http.Request) (*http.Response, error) {
 	}
 
 	return nil, errors.ErrMaxRetriesExceeded
+}
+
+type decodedReadCloser struct {
+	io.Reader
+	closers []io.Closer
+}
+
+func (d *decodedReadCloser) Close() error {
+	var firstErr error
+	for _, closer := range d.closers {
+		if closer == nil {
+			continue
+		}
+		if err := closer.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func (s *Scraper) shouldRefreshSession() bool {
