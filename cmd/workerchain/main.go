@@ -97,8 +97,6 @@ func main() {
 			stepTimeoutSeconds = 0
 		}
 
-		var stepMu sync.Mutex
-		stepRunning := map[string]bool{}
 		runChain := func() {
 			for {
 				parsedAIClassifierEnabled := config.GetenvBool("PARSED_JOB_AI_CLASSIFIER_ENABLED", false)
@@ -224,71 +222,51 @@ func main() {
 				errorDetails := make([]string, 0, 6)
 				log.Printf("worker-chain cycle_start")
 				stepTimeout := time.Duration(stepTimeoutSeconds) * time.Second
+				cycleCtx := context.Background()
+				cancelCycle := func() {}
+				if stepTimeout > 0 {
+					cycleCtx, cancelCycle = context.WithTimeout(context.Background(), stepTimeout)
+				}
 				type stepResult struct {
 					name  string
 					count int
 					err   error
 				}
 				results := make(chan stepResult, 6)
-				tryStartStep := func(name string) bool {
-					stepMu.Lock()
-					defer stepMu.Unlock()
-					if stepRunning[name] {
-						return false
-					}
-					stepRunning[name] = true
-					return true
-				}
-				finishStep := func(name string) {
-					stepMu.Lock()
-					delete(stepRunning, name)
-					stepMu.Unlock()
-				}
+				var wg sync.WaitGroup
 				launchStep := func(name string, fn func(context.Context) error) {
-					if !tryStartStep(name) {
-						log.Printf("worker-chain %s_skipped reason=already_running", strings.ToLower(name))
-						results <- stepResult{name: name}
-						return
-					}
+					wg.Add(1)
 					go func() {
-						defer finishStep(name)
-						ctx := context.Background()
-						cancel := func() {}
-						if stepTimeout > 0 {
-							ctx, cancel = context.WithTimeout(context.Background(), stepTimeout)
-						}
-						defer cancel()
+						defer wg.Done()
 						defer func() {
 							if r := recover(); r != nil {
 								results <- stepResult{name: name, err: errors.New("panic")}
 							}
 						}()
-						err := fn(ctx)
+						err := fn(cycleCtx)
 						results <- stepResult{name: name, err: err}
 					}()
 				}
 				launchCountStep := func(name string, fn func(context.Context) (int, error)) {
-					if !tryStartStep(name) {
-						log.Printf("worker-chain %s_skipped reason=already_running", strings.ToLower(name))
-						results <- stepResult{name: name, count: 0, err: nil}
-						return
-					}
+					wg.Add(1)
 					go func() {
-						defer finishStep(name)
-						ctx := context.Background()
-						cancel := func() {}
-						if stepTimeout > 0 {
-							ctx, cancel = context.WithTimeout(context.Background(), stepTimeout)
-						}
-						defer cancel()
+						defer wg.Done()
 						defer func() {
 							if r := recover(); r != nil {
 								results <- stepResult{name: name, err: errors.New("panic")}
 							}
 						}()
-						count, err := fn(ctx)
+						count, err := fn(cycleCtx)
 						results <- stepResult{name: name, count: count, err: err}
 					}()
+				}
+				launchOptionalCountStep := func(name string, enabled bool, disabledLog string, fn func(context.Context) (int, error)) {
+					if !enabled {
+						log.Printf("%s", disabledLog)
+						results <- stepResult{name: name, count: 0, err: nil}
+						return
+					}
+					launchCountStep(name, fn)
 				}
 				launchStep(constants.WorkerNameWatcher, func(ctx context.Context) error {
 					return watcherSvc.RunOnceWithContext(ctx)
@@ -302,74 +280,30 @@ func main() {
 				launchCountStep(constants.WorkerNameParsed, func(ctx context.Context) (int, error) {
 					return parsedSvc.RunOnce(ctx)
 				})
+				launchOptionalCountStep(
+					constants.WorkerNameParsedAIClassifier,
+					parsedAIClassifierEnabled && parsedAIClassifierSvc != nil,
+					"worker-chain parsed_ai_classifier_disabled",
+					func(ctx context.Context) (int, error) {
+						return parsedAIClassifierSvc.RunOnce(ctx)
+					},
+				)
+				launchOptionalCountStep(
+					constants.WorkerNameParsedAvailability,
+					parsedJobAvailabilityEnabled && parsedAvailabilitySvc != nil,
+					"worker-chain parsed_job_availability_disabled",
+					func(ctx context.Context) (int, error) {
+						return parsedAvailabilitySvc.RunOnce(ctx)
+					},
+				)
 				go func() {
-					if !tryStartStep(constants.WorkerNameParsedAIClassifier) {
-						log.Printf("worker-chain %s_skipped reason=already_running", strings.ToLower(constants.WorkerNameParsedAIClassifier))
-						results <- stepResult{name: constants.WorkerNameParsedAIClassifier, count: 0, err: nil}
-						return
-					}
-					defer finishStep(constants.WorkerNameParsedAIClassifier)
-					if !parsedAIClassifierEnabled || parsedAIClassifierSvc == nil {
-						log.Printf("worker-chain parsed_ai_classifier_disabled")
-						results <- stepResult{name: constants.WorkerNameParsedAIClassifier, count: 0, err: nil}
-						return
-					}
-					ctx := context.Background()
-					cancel := func() {}
-					if stepTimeout > 0 {
-						ctx, cancel = context.WithTimeout(context.Background(), stepTimeout)
-					}
-					defer cancel()
-					defer func() {
-						if r := recover(); r != nil {
-							results <- stepResult{name: constants.WorkerNameParsedAIClassifier, err: errors.New("panic")}
-						}
-					}()
-					count, err := parsedAIClassifierSvc.RunOnce(ctx)
-					results <- stepResult{name: constants.WorkerNameParsedAIClassifier, count: count, err: err}
+					wg.Wait()
+					close(results)
 				}()
-				go func() {
-					if !tryStartStep(constants.WorkerNameParsedAvailability) {
-						log.Printf("worker-chain %s_skipped reason=already_running", strings.ToLower(constants.WorkerNameParsedAvailability))
-						results <- stepResult{name: constants.WorkerNameParsedAvailability, count: 0, err: nil}
-						return
-					}
-					defer finishStep(constants.WorkerNameParsedAvailability)
-					if !parsedJobAvailabilityEnabled || parsedAvailabilitySvc == nil {
-						log.Printf("worker-chain parsed_job_availability_disabled")
-						results <- stepResult{name: constants.WorkerNameParsedAvailability, count: 0, err: nil}
-						return
-					}
-					ctx := context.Background()
-					cancel := func() {}
-					if stepTimeout > 0 {
-						ctx, cancel = context.WithTimeout(context.Background(), stepTimeout)
-					}
-					defer cancel()
-					defer func() {
-						if r := recover(); r != nil {
-							results <- stepResult{name: constants.WorkerNameParsedAvailability, err: errors.New("panic")}
-						}
-					}()
-					count, err := parsedAvailabilitySvc.RunOnce(ctx)
-					results <- stepResult{name: constants.WorkerNameParsedAvailability, count: count, err: err}
-				}()
-				pendingSteps := map[string]struct{}{
-					constants.WorkerNameWatcher:            {},
-					constants.WorkerNameImporter:           {},
-					constants.WorkerNameRaw:                {},
-					constants.WorkerNameParsed:             {},
-					constants.WorkerNameParsedAIClassifier: {},
-					constants.WorkerNameParsedAvailability: {},
-				}
-				var timeoutCh <-chan time.Time
-				var timeoutTimer *time.Timer
-				if stepTimeout > 0 {
-					timeoutTimer = time.NewTimer(stepTimeout)
-					timeoutCh = timeoutTimer.C
-				}
 				handleResult := func(res stepResult) {
-					delete(pendingSteps, res.name)
+					if res.err != nil && !errors.Is(res.err, context.Canceled) {
+						cancelCycle()
+					}
 					switch res.name {
 					case constants.WorkerNameWatcher:
 						if res.err != nil {
@@ -421,22 +355,10 @@ func main() {
 						}
 					}
 				}
-				for len(pendingSteps) > 0 {
-					select {
-					case res := <-results:
-						handleResult(res)
-					case <-timeoutCh:
-						for name := range pendingSteps {
-							log.Printf("worker-chain %s_failed error=%v", strings.ToLower(name), context.DeadlineExceeded)
-							hadError = true
-							errorDetails = append(errorDetails, name+"="+context.DeadlineExceeded.Error())
-						}
-						pendingSteps = map[string]struct{}{}
-					}
+				for res := range results {
+					handleResult(res)
 				}
-				if timeoutTimer != nil {
-					timeoutTimer.Stop()
-				}
+				cancelCycle()
 				if hadError {
 					log.Printf("worker-chain cycle_done had_error=true details=%s", strings.Join(errorDetails, " | "))
 				} else {
