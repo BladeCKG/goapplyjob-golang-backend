@@ -275,7 +275,7 @@ func (s *Service) flushBuffer(ctx context.Context, buffer map[string]SitemapRow,
 	inserted, updated, failedDB := 0, 0, 0
 	failedRows := map[string]SitemapRow{}
 	err := database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
-		tx, err := s.DB.SQL.Begin()
+		tx, err := s.DB.SQL.BeginTx(ctx, nil)
 		if err != nil {
 			return err
 		}
@@ -298,7 +298,7 @@ func (s *Service) flushBuffer(ctx context.Context, buffer map[string]SitemapRow,
 			var existingID int64
 			var existingPostDate string
 			var existingRawJSON sql.NullString
-			err := tx.QueryRow(`SELECT id, post_date, raw_json FROM raw_us_jobs WHERE url = ? LIMIT 1`, url).Scan(&existingID, &existingPostDate, &existingRawJSON)
+			err := tx.QueryRowContext(ctx, `SELECT id, post_date, raw_json FROM raw_us_jobs WHERE url = ? LIMIT 1`, url).Scan(&existingID, &existingPostDate, &existingRawJSON)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				failedDB++
 				failedRows[url] = row
@@ -319,7 +319,7 @@ func (s *Service) flushBuffer(ctx context.Context, buffer map[string]SitemapRow,
 				extraJSONText = string(body)
 			}
 			if errors.Is(err, sql.ErrNoRows) {
-				if _, err := tx.Exec(`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, retry_count, extra_json, raw_json) VALUES (?, ?, ?, ?, false, 0, ?, ?)`, source, url, postDate.Format(time.RFC3339), isReady, extraJSONText, rawJSONText); err != nil {
+				if _, err := tx.ExecContext(ctx, `INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, retry_count, extra_json, raw_json) VALUES (?, ?, ?, ?, false, 0, ?, ?)`, source, url, postDate.Format(time.RFC3339), isReady, extraJSONText, rawJSONText); err != nil {
 					failedDB++
 					failedRows[url] = row
 					continue
@@ -351,7 +351,7 @@ func (s *Service) flushBuffer(ctx context.Context, buffer map[string]SitemapRow,
 			for _, candidate := range pendingUpdates {
 				rawIDs = append(rawIDs, candidate.existingID)
 			}
-			parsedRows, err := tx.Query(`SELECT raw_us_job_id FROM parsed_jobs WHERE raw_us_job_id = ANY(?::bigint[])`, rawIDs)
+			parsedRows, err := tx.QueryContext(ctx, `SELECT raw_us_job_id FROM parsed_jobs WHERE raw_us_job_id = ANY(?::bigint[])`, rawIDs)
 			if err != nil {
 				return err
 			}
@@ -370,7 +370,7 @@ func (s *Service) flushBuffer(ctx context.Context, buffer map[string]SitemapRow,
 				hasParsed = true
 			}
 			if hasParsed && candidate.rawJSONString != "" && candidate.rawJSONString == candidate.existingRaw {
-				if _, err := tx.Exec(
+				if _, err := tx.ExecContext(ctx,
 					`UPDATE raw_us_jobs
 					 SET post_date = ?,
 					     is_ready = ?,
@@ -390,7 +390,7 @@ func (s *Service) flushBuffer(ctx context.Context, buffer map[string]SitemapRow,
 				}
 				continue
 			}
-			if _, err := tx.Exec(
+			if _, err := tx.ExecContext(ctx,
 				`UPDATE raw_us_jobs
 				 SET source = ?,
 				     post_date = ?,
@@ -553,7 +553,7 @@ func sortedSourceNames(values map[string]struct{}) []string {
 
 func (s *Service) DeletePayload(ctx context.Context, payloadID int64) error {
 	err := database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
-		_, execErr := s.DB.SQL.Exec(`DELETE FROM watcher_payloads WHERE id = ?`, payloadID)
+		_, execErr := s.DB.SQL.ExecContext(ctx, `DELETE FROM watcher_payloads WHERE id = ?`, payloadID)
 		return execErr
 	})
 	if err == nil {
@@ -566,7 +566,7 @@ func (s *Service) DeleteConsumedPayloads(ctx context.Context) (int64, error) {
 	var result sql.Result
 	err := database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
 		var execErr error
-		result, execErr = s.DB.SQL.Exec(`DELETE FROM watcher_payloads WHERE consumed_at IS NOT NULL`)
+		result, execErr = s.DB.SQL.ExecContext(ctx, `DELETE FROM watcher_payloads WHERE consumed_at IS NOT NULL`)
 		return execErr
 	})
 	if err != nil {
@@ -581,7 +581,7 @@ func (s *Service) DeleteConsumedPayloads(ctx context.Context) (int64, error) {
 
 func (s *Service) MarkPayloadConsumed(ctx context.Context, payloadID int64) error {
 	err := database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
-		_, execErr := s.DB.SQL.Exec(`UPDATE watcher_payloads SET consumed_at = ? WHERE id = ?`, time.Now().UTC().Format(time.RFC3339Nano), payloadID)
+		_, execErr := s.DB.SQL.ExecContext(ctx, `UPDATE watcher_payloads SET consumed_at = ? WHERE id = ?`, time.Now().UTC().Format(time.RFC3339Nano), payloadID)
 		return execErr
 	})
 	return err
@@ -589,7 +589,7 @@ func (s *Service) MarkPayloadConsumed(ctx context.Context, payloadID int64) erro
 
 func (s *Service) ReplacePayloadBody(ctx context.Context, payloadID int64, failedRows map[string]time.Time) error {
 	err := database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
-		_, execErr := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, rowsToXML(failedRows), payloadID)
+		_, execErr := s.DB.SQL.ExecContext(ctx, `UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, rowsToXML(failedRows), payloadID)
 		return execErr
 	})
 	return err
@@ -597,7 +597,7 @@ func (s *Service) ReplacePayloadBody(ctx context.Context, payloadID int64, faile
 
 func (s *Service) ReplacePayloadRows(ctx context.Context, payloadID int64, rows []SitemapRow) error {
 	err := database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
-		_, execErr := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, rowsListToXML(rows), payloadID)
+		_, execErr := s.DB.SQL.ExecContext(ctx, `UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, rowsListToXML(rows), payloadID)
 		return execErr
 	})
 	if err == nil {
@@ -621,7 +621,7 @@ func (s *Service) ReplaceBuiltinPayloadRows(ctx context.Context, payloadID int64
 	}
 	body, _ := json.Marshal(payload)
 	err := database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
-		_, execErr := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, string(body), payloadID)
+		_, execErr := s.DB.SQL.ExecContext(ctx, `UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, string(body), payloadID)
 		return execErr
 	})
 	return err
@@ -633,7 +633,7 @@ func (s *Service) ReplaceSourcePayloadRows(ctx context.Context, payloadID int64,
 		return errors.New("unsupported source payload serializer")
 	}
 	err := database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
-		_, execErr := s.DB.SQL.Exec(`UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, plugin.SerializeImportRows(rows), payloadID)
+		_, execErr := s.DB.SQL.ExecContext(ctx, `UPDATE watcher_payloads SET body_text = ? WHERE id = ?`, plugin.SerializeImportRows(rows), payloadID)
 		return execErr
 	})
 	return err

@@ -18,7 +18,6 @@ import (
 	"goapplyjob-golang-backend/internal/workerlog"
 	"log"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -233,11 +232,8 @@ func main() {
 					err   error
 				}
 				results := make(chan stepResult, 6)
-				var wg sync.WaitGroup
 				launchStep := func(name string, fn func(context.Context) error) {
-					wg.Add(1)
 					go func() {
-						defer wg.Done()
 						defer func() {
 							if r := recover(); r != nil {
 								results <- stepResult{name: name, err: errors.New("panic")}
@@ -248,9 +244,7 @@ func main() {
 					}()
 				}
 				launchCountStep := func(name string, fn func(context.Context) (int, error)) {
-					wg.Add(1)
 					go func() {
-						defer wg.Done()
 						defer func() {
 							if r := recover(); r != nil {
 								results <- stepResult{name: name, err: errors.New("panic")}
@@ -296,14 +290,16 @@ func main() {
 						return parsedAvailabilitySvc.RunOnce(ctx)
 					},
 				)
-				go func() {
-					wg.Wait()
-					close(results)
-				}()
+				pendingSteps := map[string]struct{}{
+					constants.WorkerNameWatcher:            {},
+					constants.WorkerNameImporter:           {},
+					constants.WorkerNameRaw:                {},
+					constants.WorkerNameParsed:             {},
+					constants.WorkerNameParsedAIClassifier: {},
+					constants.WorkerNameParsedAvailability: {},
+				}
 				handleResult := func(res stepResult) {
-					if res.err != nil && !errors.Is(res.err, context.Canceled) {
-						cancelCycle()
-					}
+					delete(pendingSteps, res.name)
 					switch res.name {
 					case constants.WorkerNameWatcher:
 						if res.err != nil {
@@ -355,8 +351,18 @@ func main() {
 						}
 					}
 				}
-				for res := range results {
-					handleResult(res)
+				for len(pendingSteps) > 0 {
+					select {
+					case res := <-results:
+						handleResult(res)
+					case <-cycleCtx.Done():
+						for name := range pendingSteps {
+							log.Printf("worker-chain %s_failed error=%v", strings.ToLower(name), cycleCtx.Err())
+							hadError = true
+							errorDetails = append(errorDetails, name+"="+cycleCtx.Err().Error())
+						}
+						pendingSteps = map[string]struct{}{}
+					}
 				}
 				cancelCycle()
 				if hadError {
