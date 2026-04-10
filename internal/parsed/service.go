@@ -2037,26 +2037,43 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for row := range rowCh {
-				if err := ctx.Err(); err != nil {
+			for {
+				select {
+				case <-ctx.Done():
 					return
-				}
-				proc, skip, err := processRow(ctx, row)
-				if err != nil {
-					reportErr(err)
-					return
-				}
-				if proc > 0 {
-					atomic.AddInt64(&processed, int64(proc))
-				}
-				if skip > 0 {
-					atomic.AddInt64(&skipped, int64(skip))
+				case row, ok := <-rowCh:
+					if !ok {
+						return
+					}
+					if err := ctx.Err(); err != nil {
+						return
+					}
+					proc, skip, err := processRow(ctx, row)
+					if err != nil {
+						reportErr(err)
+						return
+					}
+					if proc > 0 {
+						atomic.AddInt64(&processed, int64(proc))
+					}
+					if skip > 0 {
+						atomic.AddInt64(&skipped, int64(skip))
+					}
 				}
 			}
 		}()
 	}
 	for _, row := range pending {
-		rowCh <- row
+		select {
+		case <-ctx.Done():
+			close(rowCh)
+			wg.Wait()
+			if err := firstErr.Load(); err != nil {
+				return int(atomic.LoadInt64(&processed)), err.(error)
+			}
+			return int(atomic.LoadInt64(&processed)), ctx.Err()
+		case rowCh <- row:
+		}
 	}
 	close(rowCh)
 	wg.Wait()

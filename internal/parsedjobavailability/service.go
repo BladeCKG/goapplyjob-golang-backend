@@ -241,14 +241,27 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for idx := range workCh {
-				row := jobs[idx]
-				results[idx] = s.processRow(ctx, row)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case idx, ok := <-workCh:
+					if !ok {
+						return
+					}
+					results[idx] = s.processRow(ctx, jobs[idx])
+				}
 			}
 		}()
 	}
 	for idx := range jobs {
-		workCh <- idx
+		select {
+		case <-ctx.Done():
+			close(workCh)
+			wg.Wait()
+			return 0, ctx.Err()
+		case workCh <- idx:
+		}
 	}
 	close(workCh)
 	wg.Wait()
