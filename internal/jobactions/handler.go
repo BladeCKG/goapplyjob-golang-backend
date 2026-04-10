@@ -2,6 +2,7 @@ package jobactions
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -31,12 +32,45 @@ type actionItem struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+type companyCompanionJobItem struct {
+	ForJobID               int64      `json:"for_job_id"`
+	ID                     int64      `json:"id"`
+	RoleTitle              *string    `json:"role_title"`
+	JobDescriptionSummary  *string    `json:"job_description_summary"`
+	CompanyName            *string    `json:"company_name"`
+	CompanySlug            *string    `json:"company_slug"`
+	CompanyTagline         *string    `json:"company_tagline"`
+	CompanyProfilePicURL   *string    `json:"company_profile_pic_url"`
+	CompanyHomePageURL     *string    `json:"company_home_page_url"`
+	CompanyLinkedInURL     *string    `json:"company_linkedin_url"`
+	CompanyEmployeeRange   *string    `json:"company_employee_range"`
+	CompanyFoundedYear     *string    `json:"company_founded_year"`
+	CompanySponsorsH1B     *bool      `json:"company_sponsors_h1b"`
+	CategorizedJobTitle    *string    `json:"categorized_job_title"`
+	CategorizedJobFunction *string    `json:"categorized_job_function"`
+	LocationType           *string    `json:"location_type"`
+	LocationUsStates       []string   `json:"location_us_states"`
+	LocationCountries      []string   `json:"location_countries"`
+	EmploymentType         *string    `json:"employment_type"`
+	SalaryMin              *float64   `json:"salary_min"`
+	SalaryMax              *float64   `json:"salary_max"`
+	SalaryMinUSD           *float64   `json:"salary_min_usd"`
+	SalaryMaxUSD           *float64   `json:"salary_max_usd"`
+	SalaryCurrencyCode     *string    `json:"salary_currency_code"`
+	SalaryCurrencySymbol   *string    `json:"salary_currency_symbol"`
+	SalaryType             *string    `json:"salary_type"`
+	TechStack              []string   `json:"tech_stack"`
+	CreatedAtSource        *time.Time `json:"created_at_source"`
+	URL                    *string    `json:"url"`
+}
+
 func NewHandler(db *database.DB, authHandler *auth.Handler) *Handler {
 	return &Handler{db: db, auth: authHandler, q: gensqlc.New(db.PGX)}
 }
 
 func (h *Handler) Register(router gin.IRouter) {
 	router.GET("/job-actions", h.getJobActions)
+	router.GET("/job-actions/company-companions", h.getCompanyCompanionJobs)
 	router.GET("/job-actions/summary", h.getJobActionsSummary)
 	router.PUT("/job-actions/:jobID", h.updateJobAction)
 	router.POST("/job-actions/clear", h.clearJobActions)
@@ -73,6 +107,195 @@ func (h *Handler) getJobActions(c *gin.Context) {
 			UpdatedAt: row.UpdatedAt.Time.UTC().Format(time.RFC3339Nano),
 		})
 	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (h *Handler) getCompanyCompanionJobs(c *gin.Context) {
+	user, err := h.auth.CurrentUser(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Not authenticated"})
+		return
+	}
+	jobIDs := parseJobIDsCSV(c.Query("job_ids"))
+	if len(jobIDs) == 0 {
+		c.JSON(http.StatusOK, gin.H{"items": []companyCompanionJobItem{}})
+		return
+	}
+
+	rows, err := h.db.PGX.Query(
+		c.Request.Context(),
+		`WITH requested AS (
+			SELECT * FROM unnest($2::bigint[]) WITH ORDINALITY AS t(base_job_id, ord)
+		),
+		base_jobs AS (
+			SELECT r.base_job_id, p.company_id, r.ord
+			FROM requested r
+			JOIN parsed_jobs p ON p.id = r.base_job_id
+			WHERE p.company_id IS NOT NULL
+		),
+		ranked AS (
+			SELECT
+				b.base_job_id,
+				p.id AS companion_job_id,
+				ROW_NUMBER() OVER (
+					PARTITION BY b.base_job_id
+					ORDER BY uja.updated_at DESC, p.created_at_source DESC NULLS LAST, p.id DESC
+				) AS rn
+			FROM base_jobs b
+			JOIN parsed_jobs p
+				ON p.company_id = b.company_id
+				AND p.id <> b.base_job_id
+				AND p.date_deleted IS NULL
+			JOIN user_job_actions uja
+				ON uja.parsed_job_id = p.id
+				AND uja.user_id = $1
+				AND uja.is_applied = true
+				AND uja.is_hidden = false
+		)
+		SELECT
+			r.base_job_id,
+			p.id,
+			p.role_title,
+			p.job_description_summary,
+			c.name,
+			c.slug,
+			c.tagline,
+			c.profile_pic_url,
+			c.home_page_url,
+			c.linkedin_url,
+			c.employee_range,
+			c.founded_year,
+			c.sponsors_h1b,
+			p.categorized_job_title,
+			p.categorized_job_function,
+			p.location_type,
+			p.location_us_states,
+			p.location_countries,
+			p.employment_type,
+			p.salary_min,
+			p.salary_max,
+			p.salary_min_usd,
+			p.salary_max_usd,
+			p.salary_currency_code,
+			p.salary_currency_symbol,
+			p.salary_type,
+			p.tech_stack,
+			p.created_at_source,
+			p.url
+		FROM ranked r
+		JOIN parsed_jobs p ON p.id = r.companion_job_id
+		LEFT JOIN parsed_companies c ON c.id = p.company_id
+		WHERE r.rn = 1
+		ORDER BY r.base_job_id ASC`,
+		user.ID,
+		jobIDs,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load companion jobs"})
+		return
+	}
+	defer rows.Close()
+
+	items := []companyCompanionJobItem{}
+	for rows.Next() {
+		var (
+			item                 companyCompanionJobItem
+			roleTitle            pgtype.Text
+			jobDescription       pgtype.Text
+			companyName          pgtype.Text
+			companySlug          pgtype.Text
+			companyTagline       pgtype.Text
+			companyProfilePicURL pgtype.Text
+			companyHomePageURL   pgtype.Text
+			companyLinkedInURL   pgtype.Text
+			companyEmployeeRange pgtype.Text
+			companyFoundedYear   pgtype.Text
+			companySponsorsH1B   pgtype.Bool
+			categoryTitle        pgtype.Text
+			categoryFunction     pgtype.Text
+			locationType         pgtype.Text
+			locationUSStates     []byte
+			locationCountries    []byte
+			employmentType       pgtype.Text
+			salaryMin            pgtype.Float8
+			salaryMax            pgtype.Float8
+			salaryMinUSD         pgtype.Float8
+			salaryMaxUSD         pgtype.Float8
+			salaryCurrencyCode   pgtype.Text
+			salaryCurrencySymbol pgtype.Text
+			salaryType           pgtype.Text
+			techStack            []byte
+			createdAtSource      pgtype.Timestamptz
+			jobURL               pgtype.Text
+		)
+		if err := rows.Scan(
+			&item.ForJobID,
+			&item.ID,
+			&roleTitle,
+			&jobDescription,
+			&companyName,
+			&companySlug,
+			&companyTagline,
+			&companyProfilePicURL,
+			&companyHomePageURL,
+			&companyLinkedInURL,
+			&companyEmployeeRange,
+			&companyFoundedYear,
+			&companySponsorsH1B,
+			&categoryTitle,
+			&categoryFunction,
+			&locationType,
+			&locationUSStates,
+			&locationCountries,
+			&employmentType,
+			&salaryMin,
+			&salaryMax,
+			&salaryMinUSD,
+			&salaryMaxUSD,
+			&salaryCurrencyCode,
+			&salaryCurrencySymbol,
+			&salaryType,
+			&techStack,
+			&createdAtSource,
+			&jobURL,
+		); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load companion jobs"})
+			return
+		}
+		item.RoleTitle = pgTextPtr(roleTitle)
+		item.JobDescriptionSummary = pgTextPtr(jobDescription)
+		item.CompanyName = pgTextPtr(companyName)
+		item.CompanySlug = pgTextPtr(companySlug)
+		item.CompanyTagline = pgTextPtr(companyTagline)
+		item.CompanyProfilePicURL = pgTextPtr(companyProfilePicURL)
+		item.CompanyHomePageURL = pgTextPtr(companyHomePageURL)
+		item.CompanyLinkedInURL = pgTextPtr(companyLinkedInURL)
+		item.CompanyEmployeeRange = pgTextPtr(companyEmployeeRange)
+		item.CompanyFoundedYear = pgTextPtr(companyFoundedYear)
+		item.CompanySponsorsH1B = pgBoolPtr(companySponsorsH1B)
+		item.CategorizedJobTitle = pgTextPtr(categoryTitle)
+		item.CategorizedJobFunction = pgTextPtr(categoryFunction)
+		item.LocationType = pgTextPtr(locationType)
+		item.EmploymentType = pgTextPtr(employmentType)
+		item.SalaryMin = pgFloat64Ptr(salaryMin)
+		item.SalaryMax = pgFloat64Ptr(salaryMax)
+		item.SalaryMinUSD = pgFloat64Ptr(salaryMinUSD)
+		item.SalaryMaxUSD = pgFloat64Ptr(salaryMaxUSD)
+		item.SalaryCurrencyCode = pgTextPtr(salaryCurrencyCode)
+		item.SalaryCurrencySymbol = pgTextPtr(salaryCurrencySymbol)
+		item.SalaryType = pgTextPtr(salaryType)
+		item.CreatedAtSource = pgTimePtr(createdAtSource)
+		item.URL = pgTextPtr(jobURL)
+		_ = json.Unmarshal(locationUSStates, &item.LocationUsStates)
+		_ = json.Unmarshal(locationCountries, &item.LocationCountries)
+		_ = json.Unmarshal(techStack, &item.TechStack)
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load companion jobs"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
@@ -256,4 +479,36 @@ func parseJobIDsCSV(raw string) []int64 {
 
 func pgTimestamptz(value time.Time) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: value, Valid: true}
+}
+
+func pgTextPtr(value pgtype.Text) *string {
+	if !value.Valid {
+		return nil
+	}
+	v := value.String
+	return &v
+}
+
+func pgBoolPtr(value pgtype.Bool) *bool {
+	if !value.Valid {
+		return nil
+	}
+	v := value.Bool
+	return &v
+}
+
+func pgFloat64Ptr(value pgtype.Float8) *float64 {
+	if !value.Valid {
+		return nil
+	}
+	v := value.Float64
+	return &v
+}
+
+func pgTimePtr(value pgtype.Timestamptz) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	v := value.Time.UTC()
+	return &v
 }
