@@ -3,11 +3,12 @@ package scraper
 import (
 	"context"
 	"errors"
+	"goapplyjob-golang-backend/internal/thirdparty/cloudscraper/lib/stealth"
 	"io"
 	"time"
 
 	cloudscraper "goapplyjob-golang-backend/internal/thirdparty/cloudscraper/lib"
-	"goapplyjob-golang-backend/internal/thirdparty/cloudscraper/lib/stealth"
+
 	useragent "goapplyjob-golang-backend/internal/thirdparty/cloudscraper/lib/user_agent"
 )
 
@@ -33,13 +34,13 @@ func NewCloudscraperFetcher(cfg CloudscraperConfig) (*CloudscraperFetcher, error
 		}),
 		cloudscraper.WithStealth(stealth.Options{
 			Enabled:          true,
-			HumanLikeDelays:  false,
+			HumanLikeDelays:  true,
 			RandomizeHeaders: true,
 			BrowserQuirks:    true,
 		}),
-		// Keep retries bounded, but allow a small amount of 403 recovery now
-		// that the vendored scraper path is context-aware.
-		cloudscraper.WithSessionConfig(true, time.Hour, 2),
+		// Keep retries bounded while allowing more recovery attempts on
+		// throttled/blocked sessions.
+		cloudscraper.WithSessionConfig(true, time.Hour, 4),
 	)
 	if err != nil {
 		return nil, err
