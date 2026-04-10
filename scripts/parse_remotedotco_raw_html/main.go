@@ -21,7 +21,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "read html: %v\n", err)
 		os.Exit(1)
 	}
-	payload := remotedotco.ParseRawHTML(string(raw), inputPath)
+	payload, err := remotedotco.ParseRawHTML(string(raw), inputPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "parse remotedotco html: %v\n", err)
+		os.Exit(1)
+	}
 	out, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "marshal json: %v\n", err)

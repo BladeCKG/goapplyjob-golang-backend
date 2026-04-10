@@ -5,6 +5,7 @@ import (
 	"errors"
 	"goapplyjob-golang-backend/internal/normalize/employmentnorm"
 	"goapplyjob-golang-backend/internal/normalize/locationnorm"
+	"goapplyjob-golang-backend/internal/sources/parseerr"
 	"net/url"
 	"regexp"
 	"sort"
@@ -36,8 +37,8 @@ func BuildAPIURL(baseURL, pageToken string, pageLimit int) string {
 
 func ToTargetJobURL(rawURL string) string { return rawURL }
 
-func ParseRawHTML(_ string, _ string) map[string]any {
-	return map[string]any{}
+func ParseRawHTML(_ string, _ string) (map[string]any, error) {
+	return nil, parseerr.Skip("unsupported_raw_html")
 }
 
 func NormalizeJobs(payloadText string) ([]map[string]any, int) {

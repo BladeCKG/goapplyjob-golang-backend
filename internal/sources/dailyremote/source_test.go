@@ -36,8 +36,15 @@ func TestExtractJobListings(t *testing.T) {
 }
 
 func TestParseRawHTMLKeepsNonUSLocationCountries(t *testing.T) {
+	orig := resolveRedirectURLDailyRemoteFunc
+	resolveRedirectURLDailyRemoteFunc = func(_url string) string { return "https://boards.greenhouse.io/acme/jobs/12345" }
+	defer func() { resolveRedirectURLDailyRemoteFunc = orig }()
+
 	html := `<script type="application/ld+json">{"@type":"JobPosting","url":"https://dailyremote.com/remote-job/test-12345","datePosted":"2026-03-01T12:00:00Z","title":"Role","description":"Desc","employmentType":"full_time","jobLocationType":"TELECOMMUTE","applicantLocationRequirements":[{"@type":"Country","name":"Germany"}],"hiringOrganization":{"@type":"Organization","name":"Acme","sameAs":"https://acme.example"}}</script>`
-	payload := ParseRawHTML(html, "https://dailyremote.com/remote-job/test-12345")
+	payload, err := ParseRawHTML(html, "https://dailyremote.com/remote-job/test-12345")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
 	values, _ := payload["locationCountries"].([]string)
 	if len(values) != 1 || values[0] != "Germany" {
 		t.Fatalf("expected Germany locationCountries, got %#v", payload["locationCountries"])
@@ -45,8 +52,15 @@ func TestParseRawHTMLKeepsNonUSLocationCountries(t *testing.T) {
 }
 
 func TestParseRawHTMLDoesNotInventUnitedStatesWhenCountriesMissing(t *testing.T) {
+	orig := resolveRedirectURLDailyRemoteFunc
+	resolveRedirectURLDailyRemoteFunc = func(_url string) string { return "https://boards.greenhouse.io/acme/jobs/12346" }
+	defer func() { resolveRedirectURLDailyRemoteFunc = orig }()
+
 	html := `<script type="application/ld+json">{"@type":"JobPosting","url":"https://dailyremote.com/remote-job/test-12346","datePosted":"2026-03-01T12:00:00Z","title":"Role","description":"Desc","employmentType":"full_time","jobLocationType":"TELECOMMUTE","applicantLocationRequirements":[{"@type":"Country"}],"hiringOrganization":{"@type":"Organization","name":"Acme","sameAs":"https://acme.example"}}</script>`
-	payload := ParseRawHTML(html, "https://dailyremote.com/remote-job/test-12346")
+	payload, err := ParseRawHTML(html, "https://dailyremote.com/remote-job/test-12346")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
 	values, _ := payload["locationCountries"].([]string)
 	if len(values) != 0 {
 		t.Fatalf("expected empty locationCountries, got %#v", payload["locationCountries"])
@@ -55,7 +69,7 @@ func TestParseRawHTMLDoesNotInventUnitedStatesWhenCountriesMissing(t *testing.T)
 
 func TestParseRawHTMLFixtureUsesDisplayedWorldwideInsteadOfApplicantCountryList(t *testing.T) {
 	orig := resolveRedirectURLDailyRemoteFunc
-	resolveRedirectURLDailyRemoteFunc = func(url string) string { return url }
+	resolveRedirectURLDailyRemoteFunc = func(_url string) string { return "https://boards.greenhouse.io/acme/jobs/4795688" }
 	defer func() { resolveRedirectURLDailyRemoteFunc = orig }()
 
 	fixturePath := filepath.Join("..", "..", "..", "test-extract", "dailyremote", "raw-job-2.html")
@@ -64,7 +78,10 @@ func TestParseRawHTMLFixtureUsesDisplayedWorldwideInsteadOfApplicantCountryList(
 		t.Fatalf("read fixture: %v", err)
 	}
 
-	payload := ParseRawHTML(string(html), "https://dailyremote.com/remote-job/1023-mid-level-software-engineer-4795688")
+	payload, err := ParseRawHTML(string(html), "https://dailyremote.com/remote-job/1023-mid-level-software-engineer-4795688")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
 	values, _ := payload["locationCountries"].([]string)
 	if len(values) != 1 || values[0] != "Worldwide" {
 		t.Fatalf("expected displayed Worldwide locationCountries, got %#v", payload["locationCountries"])
@@ -111,12 +128,12 @@ func TestParseRawHTMLExtractsSalarySummaryAndCompanyEnrichment(t *testing.T) {
 }
 </script>`
 
-	payload := ParseRawHTML(html, "https://dailyremote.com/remote-job/c-c-senior-software-engineer-4683161")
+	payload, err := ParseRawHTML(html, "https://dailyremote.com/remote-job/c-c-senior-software-engineer-4683161")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
 	if payload["id"] != "4683161" {
 		t.Fatalf("expected extracted id, got %#v", payload["id"])
-	}
-	if payload["_skip_for_retry"] != nil {
-		t.Fatalf("did not expect retry marker for resolved url, got %#v", payload["_skip_for_retry"])
 	}
 	if payload["isSenior"] != true || payload["isMidLevel"] != false {
 		t.Fatalf("unexpected seniority flags %#v", payload)
@@ -174,13 +191,17 @@ func TestParseRawHTMLMarksRetryWhenUnresolvedApplyURL(t *testing.T) {
 	}
 	defer func() { resolveRedirectURLDailyRemoteFunc = orig }()
 
-	payload := ParseRawHTML(html, "https://dailyremote.com/remote-job/senior-platform-engineer-4683999")
-	if payload["_skip_for_retry"] != true {
-		t.Fatalf("expected retry marker, got %#v", payload["_skip_for_retry"])
+	payload, err := ParseRawHTML(html, "https://dailyremote.com/remote-job/senior-platform-engineer-4683999")
+	if err == nil {
+		t.Fatalf("expected retry parse error, got payload %#v", payload)
 	}
 }
 
 func TestParseRawHTMLDropsDailyRemoteFaviconProfilePic(t *testing.T) {
+	orig := resolveRedirectURLDailyRemoteFunc
+	resolveRedirectURLDailyRemoteFunc = func(_url string) string { return "https://boards.greenhouse.io/acme/jobs/4683998" }
+	defer func() { resolveRedirectURLDailyRemoteFunc = orig }()
+
 	html := `
 <script type="application/ld+json">
 {
@@ -200,7 +221,10 @@ func TestParseRawHTMLDropsDailyRemoteFaviconProfilePic(t *testing.T) {
 }
 </script>`
 
-	payload := ParseRawHTML(html, "https://dailyremote.com/remote-job/test-4683998")
+	payload, err := ParseRawHTML(html, "https://dailyremote.com/remote-job/test-4683998")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
 	company, _ := payload["company"].(map[string]any)
 	if company == nil {
 		t.Fatalf("expected company payload")

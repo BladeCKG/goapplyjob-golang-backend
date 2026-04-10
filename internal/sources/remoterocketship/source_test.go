@@ -8,10 +8,13 @@ func TestParseRawHTMLAlwaysSetsLocationCountries(t *testing.T) {
 <body>
 <script type="application/json">
 {"props":{"pageProps":{"jobOpening":{"title":"Engineer","location":"United States"}}}}
-</script>
+	</script>
 </body>
 </html>`
-	payload := ParseRawHTML(htmlText, "")
+	payload, err := ParseRawHTML(htmlText, "")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
 	values, ok := payload["locationCountries"].([]string)
 	if !ok || len(values) != 1 || values[0] != "United States" {
 		t.Fatalf("expected normalized locationCountries, got %#v", payload["locationCountries"])
@@ -27,7 +30,10 @@ func TestParseRawHTMLSetsEmptyLocationCountriesWhenMissing(t *testing.T) {
 </script>
 </body>
 </html>`
-	payload := ParseRawHTML(htmlText, "")
+	payload, err := ParseRawHTML(htmlText, "")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
 	values, ok := payload["locationCountries"].([]string)
 	if !ok || len(values) != 0 {
 		t.Fatalf("expected empty locationCountries slice, got %#v", payload["locationCountries"])
@@ -43,7 +49,10 @@ func TestParseRawHTMLNormalizesNumericCompanyIDToString(t *testing.T) {
 </script>
 </body>
 </html>`
-	payload := ParseRawHTML(htmlText, "")
+	payload, err := ParseRawHTML(htmlText, "")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
 	company, _ := payload["company"].(map[string]any)
 	if company["id"] != "remoterocketship_227383" {
 		t.Fatalf("expected company.id string, got %#v", company["id"])
@@ -59,7 +68,10 @@ func TestParseRawHTMLMapsCompanyIndustryToIndustries(t *testing.T) {
 </script>
 </body>
 </html>`
-	payload := ParseRawHTML(htmlText, "")
+	payload, err := ParseRawHTML(htmlText, "")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
 	company, _ := payload["company"].(map[string]any)
 	industries, _ := company["industries"].([]string)
 	if len(industries) != 1 || industries[0] != "Wellness and Fitness Services" {
@@ -79,7 +91,10 @@ func TestParseRawHTMLInfersCurrencySymbolFromCode(t *testing.T) {
 </script>
 </body>
 </html>`
-	payload := ParseRawHTML(htmlText, "")
+	payload, err := ParseRawHTML(htmlText, "")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
 	salaryRange, _ := payload["salaryRange"].(map[string]any)
 	if salaryRange["currencyCode"] != "USD" {
 		t.Fatalf("expected normalized currencyCode, got %#v", salaryRange["currencyCode"])
@@ -98,7 +113,10 @@ func TestParseRawHTMLInfersCurrencyCodeWhenSymbolContainsCode(t *testing.T) {
 </script>
 </body>
 </html>`
-	payload := ParseRawHTML(htmlText, "")
+	payload, err := ParseRawHTML(htmlText, "")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
 	salaryRange, _ := payload["salaryRange"].(map[string]any)
 	if salaryRange["currencyCode"] != "USD" {
 		t.Fatalf("expected inferred currencyCode, got %#v", salaryRange["currencyCode"])

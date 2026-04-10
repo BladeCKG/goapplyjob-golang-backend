@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/sources/parseerr"
 	"goapplyjob-golang-backend/internal/sources/plugins"
 )
 
@@ -164,12 +165,12 @@ func toTargetJobURLForSource(source, rawURL string) string {
 	return toTargetJobURL(rawURL)
 }
 
-func parseHTMLForSource(source, html, sourceURL string) map[string]any {
+func parseHTMLForSource(source, html, sourceURL string) (map[string]any, error) {
 	if plugin, ok := plugins.Get(source); ok && plugin.ParseRawHTML != nil {
 		return plugin.ParseRawHTML(html, sourceURL)
 	}
 
-	return map[string]any{}
+	return nil, parseerr.Skip("missing_source_parser")
 }
 
 func isRemovedBuiltinJobHTML(source, html string) bool {
@@ -459,12 +460,21 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 						}
 					default:
 						log.Printf("raw-us-job-worker parse_start job_id=%d source=%s", job.id, job.source)
-						payload := parseHTMLForSource(job.source, html, job.url)
-						if skipRetry, _ := payload["_skip_for_retry"].(bool); skipRetry {
-							log.Printf("raw-us-job-worker parse_retry_later job_id=%d source=%s reason=%v", job.id, job.source, payload["_skip_reason"])
-							if err := setRetry(job.id); err != nil {
-								reportErr(err)
-								return
+						payload, parseErr := parseHTMLForSource(job.source, html, job.url)
+						if parseErr != nil {
+							reason := parseerr.Reason(parseErr)
+							if parseerr.IsRetry(parseErr) {
+								log.Printf("raw-us-job-worker parse_retry_later job_id=%d source=%s reason=%s", job.id, job.source, reason)
+								if err := setRetry(job.id); err != nil {
+									reportErr(err)
+									return
+								}
+							} else {
+								log.Printf("raw-us-job-worker parse_skip job_id=%d source=%s reason=%s", job.id, job.source, reason)
+								if err := setSkippable(job.id); err != nil {
+									reportErr(err)
+									return
+								}
 							}
 							atomic.AddInt64(&processed, 1)
 							continue

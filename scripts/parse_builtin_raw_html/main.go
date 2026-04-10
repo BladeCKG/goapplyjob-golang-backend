@@ -20,7 +20,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "read %s: %v\n", htmlPath, err)
 		os.Exit(1)
 	}
-	payload := builtin.ExtractJobFromHTML(string(htmlBytes), "")
+	payload, err := builtin.ExtractJobFromHTML(string(htmlBytes), "")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "parse builtin html: %v\n", err)
+		os.Exit(1)
+	}
 	encoded, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "marshal payload: %v\n", err)

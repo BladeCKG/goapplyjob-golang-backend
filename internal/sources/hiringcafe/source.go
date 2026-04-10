@@ -2,6 +2,7 @@ package hiringcafe
 
 import (
 	"goapplyjob-golang-backend/internal/normalize/employmentnorm"
+	"goapplyjob-golang-backend/internal/sources/parseerr"
 	"goapplyjob-golang-backend/internal/sources/remoterocketship"
 	"net/url"
 	"regexp"
@@ -25,8 +26,8 @@ func ToTargetJobURL(rawURL string) string {
 	return rawURL
 }
 
-func ParseRawHTML(_ string, _ string) map[string]any {
-	return map[string]any{}
+func ParseRawHTML(_ string, _ string) (map[string]any, error) {
+	return nil, parseerr.Skip("unsupported_raw_html")
 }
 
 func ParseImportRows(bodyText string) ([]map[string]any, int) {

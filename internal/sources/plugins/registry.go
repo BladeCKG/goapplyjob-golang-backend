@@ -4,6 +4,7 @@ import (
 	"goapplyjob-golang-backend/internal/sources/builtin"
 	"goapplyjob-golang-backend/internal/sources/dailyremote"
 	"goapplyjob-golang-backend/internal/sources/hiringcafe"
+	"goapplyjob-golang-backend/internal/sources/parseerr"
 	"goapplyjob-golang-backend/internal/sources/remotedotco"
 	"goapplyjob-golang-backend/internal/sources/remoterocketship"
 	"goapplyjob-golang-backend/internal/sources/remotive"
@@ -14,7 +15,7 @@ type SourcePlugin struct {
 	Source                       string
 	PayloadType                  string
 	ToTargetJobURL               func(string) string
-	ParseRawHTML                 func(string, string) map[string]any
+	ParseRawHTML                 func(string, string) (map[string]any, error)
 	IsJobClosed                  func(int, string, string) bool
 	ParseImportRows              func(string) ([]map[string]any, int)
 	SerializeImportRows          func([]map[string]any) string
@@ -62,8 +63,8 @@ var registry = map[string]SourcePlugin{
 		ToTargetJobURL: func(rawURL string) string {
 			return rawURL
 		},
-		ParseRawHTML: func(_ string, _ string) map[string]any {
-			return map[string]any{}
+		ParseRawHTML: func(_ string, _ string) (map[string]any, error) {
+			return nil, parseerr.Skip("unsupported_raw_html")
 		},
 		IsJobClosed:                  workable.IsJobClosed,
 		ParseImportRows:              nil,
@@ -80,8 +81,8 @@ var registry = map[string]SourcePlugin{
 		ToTargetJobURL: func(rawURL string) string {
 			return rawURL
 		},
-		ParseRawHTML: func(_ string, _ string) map[string]any {
-			return map[string]any{}
+		ParseRawHTML: func(_ string, _ string) (map[string]any, error) {
+			return nil, parseerr.Skip("unsupported_raw_html")
 		},
 		IsJobClosed:                  hiringcafe.IsJobClosed,
 		ParseImportRows:              nil,

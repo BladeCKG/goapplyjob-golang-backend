@@ -72,7 +72,12 @@ func main() {
 			continue
 		}
 
-		payload := builtin.ExtractJobFromHTML(htmlText, row.URL)
+		payload, parseErr := builtin.ExtractJobFromHTML(htmlText, row.URL)
+		if parseErr != nil {
+			log.Printf("skip raw_id=%d url=%s parse_error=%v", row.RawID, row.URL, parseErr)
+			skipped++
+			continue
+		}
 		techStack := extractTechStack(payload)
 
 		rawPayload := map[string]any{}

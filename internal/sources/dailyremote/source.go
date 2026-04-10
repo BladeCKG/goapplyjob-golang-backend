@@ -8,6 +8,7 @@ import (
 	"goapplyjob-golang-backend/internal/normalize/locationnorm"
 	"goapplyjob-golang-backend/internal/scraper"
 	"goapplyjob-golang-backend/internal/sources/currency"
+	"goapplyjob-golang-backend/internal/sources/parseerr"
 	"html"
 	"net/url"
 	"regexp"
@@ -136,10 +137,10 @@ func SerializeImportRows(rows []map[string]any) string {
 	return string(data)
 }
 
-func ParseRawHTML(htmlText, sourceURL string) map[string]any {
+func ParseRawHTML(htmlText, sourceURL string) (map[string]any, error) {
 	jobPosting := extractJobPostingLD(htmlText)
 	if len(jobPosting) == 0 {
-		return map[string]any{}
+		return nil, parseerr.Retry("missing_job_posting_ld")
 	}
 	locationCountries := extractDisplayedLocationCountriesFromHTML(htmlText)
 	if len(locationCountries) == 0 {
@@ -186,8 +187,7 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 		"company":              company,
 	}
 	if strings.Contains(targetURL, "dailyremote.com/apply/") {
-		payload["_skip_for_retry"] = true
-		payload["_skip_reason"] = "dailyremote_unresolved_url"
+		return nil, parseerr.Retry("dailyremote_unresolved_url")
 	}
 	if strings.TrimSpace(aiSummary) != "" {
 		payload["jobDescriptionSummary"] = aiSummary
@@ -196,7 +196,7 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 	if salaryPayload != nil {
 		payload["salaryRange"] = salaryPayload
 	}
-	return payload
+	return payload, nil
 }
 
 func extractJobPostingLD(htmlText string) map[string]any {

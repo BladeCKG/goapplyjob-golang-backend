@@ -7,6 +7,7 @@ import (
 	"goapplyjob-golang-backend/internal/normalize/employmentnorm"
 	"goapplyjob-golang-backend/internal/normalize/locationnorm"
 	"goapplyjob-golang-backend/internal/sources/currency"
+	"goapplyjob-golang-backend/internal/sources/parseerr"
 	"html"
 	"net/url"
 	"regexp"
@@ -58,24 +59,24 @@ func ToTargetJobURL(rawURL string) string {
 	return parsed.String()
 }
 
-func ParseRawHTML(htmlText, sourceUrl string) map[string]any {
+func ParseRawHTML(htmlText, sourceUrl string) (map[string]any, error) {
 	blocks := jsonBlockPattern.FindAllStringSubmatch(htmlText, -1)
 	if len(blocks) == 0 {
-		return map[string]any{}
+		return nil, parseerr.Retry("missing_json_script")
 	}
 	lastBlock := strings.TrimSpace(blocks[len(blocks)-1][1])
 	if lastBlock == "" {
-		return map[string]any{}
+		return nil, parseerr.Retry("empty_json_script")
 	}
 	var data map[string]any
 	if err := json.Unmarshal([]byte(lastBlock), &data); err != nil {
-		return map[string]any{}
+		return nil, parseerr.Retry("invalid_json_script")
 	}
 	props, _ := data["props"].(map[string]any)
 	pageProps, _ := props["pageProps"].(map[string]any)
 	jobData, _ := pageProps["jobOpening"].(map[string]any)
 	if jobData == nil {
-		return map[string]any{}
+		return nil, parseerr.Retry("missing_job_opening")
 	}
 	if company, ok := jobData["company"].(map[string]any); ok {
 		company["id"] = namespacedCompanyID(company["id"])
@@ -93,7 +94,7 @@ func ParseRawHTML(htmlText, sourceUrl string) map[string]any {
 		jobData["locationCountries"] = []string{country}
 	}
 	jobData["employmentType"] = employmentnorm.NormalizeEmploymentTypeString(stringValue(jobData["employmentType"]))
-	return jobData
+	return jobData, nil
 }
 
 func stringValue(value any) string {

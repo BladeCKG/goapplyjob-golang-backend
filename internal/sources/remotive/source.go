@@ -7,6 +7,7 @@ import (
 	"goapplyjob-golang-backend/internal/normalize/employmentnorm"
 	"goapplyjob-golang-backend/internal/normalize/locationnorm"
 	"goapplyjob-golang-backend/internal/sources/currency"
+	"goapplyjob-golang-backend/internal/sources/parseerr"
 	"html"
 	"math"
 	"net/url"
@@ -45,10 +46,10 @@ func ToTargetJobURL(rawURL string) string {
 	return parsed.String()
 }
 
-func ParseRawHTML(htmlText, sourceURL string) map[string]any {
+func ParseRawHTML(htmlText, sourceURL string) (map[string]any, error) {
 	jobPosting := extractJobPostingLD(htmlText)
 	if len(jobPosting) == 0 {
-		return map[string]any{}
+		return nil, parseerr.Retry("missing_job_posting_ld")
 	}
 	locationCountries := extractLocationCountriesFromLocationComponent(htmlText)
 	postedAt := extractPublicationDate(htmlText)
@@ -89,7 +90,7 @@ func ParseRawHTML(htmlText, sourceURL string) map[string]any {
 		"isLead":                       isLead,
 		"salaryRange":                  salaryRange,
 		"company":                      parseCompany(jobPosting["hiringOrganization"], externalID, companyTagline),
-	}
+	}, nil
 }
 
 func ParseImportRows(payloadText string) ([]map[string]any, int) {

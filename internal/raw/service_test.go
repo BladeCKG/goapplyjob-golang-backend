@@ -262,6 +262,61 @@ func TestProcessPendingBuiltinRemovedIsTerminalSkipWithoutRetryIncrement(t *test
 	}
 }
 
+func TestProcessPendingRemoteDotCoMissingApplyURLOrCompanyIsTerminalSkip(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_raw_remotedotco_missing_apply_url_or_company_skip"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, extra_json, raw_json)
+		 VALUES ('remotedotco', 'https://remote.co/job-details/test-job', '2026-02-12T10:00:00Z', false, false, false, 0, '{"foo":"bar"}', NULL)`,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	html := `<html><body><script type="application/json">{"props":{"pageProps":{"jobDetails":{"id":"remoteco-test","title":"Staff Software Engineer - AAA","description":"desc","jobSummary":"summary","postedDate":"2026-04-07T08:38:48Z","expireOn":"2026-05-31T00:00:00Z","remoteOptions":["Remote"],"jobSchedules":["Other"],"countries":["United States"],"company":{}}}}}</script></body></html>`
+
+	svc := New(Config{}, db)
+	svc.EnabledSources = map[string]struct{}{"remotedotco": {}}
+	svc.ReadHTMLForSource = func(ctx context.Context, _ string, targetURL string) (string, int, error) {
+		_ = ctx
+		_ = targetURL
+		return html, 200, nil
+	}
+
+	processed, err := svc.ProcessPending(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected one processed job, got %d", processed)
+	}
+
+	var isReady, isSkippable, isParsed bool
+	var retryCount int
+	var rawJSON, extraJSON sql.NullString
+	if err := db.SQL.QueryRowContext(
+		context.Background(),
+		`SELECT is_ready, is_skippable, is_parsed, retry_count, raw_json, extra_json
+		 FROM raw_us_jobs WHERE url = 'https://remote.co/job-details/test-job'`,
+	).Scan(&isReady, &isSkippable, &isParsed, &retryCount, &rawJSON, &extraJSON); err != nil {
+		t.Fatal(err)
+	}
+	if !isReady || !isSkippable || isParsed {
+		t.Fatalf("unexpected state is_ready=%t is_skippable=%t is_parsed=%t", isReady, isSkippable, isParsed)
+	}
+	if retryCount != 0 {
+		t.Fatalf("expected retry_count unchanged, got %d", retryCount)
+	}
+	if rawJSON.Valid || extraJSON.Valid {
+		t.Fatalf("expected raw_json/extra_json cleared, got raw_json=%#v extra_json=%#v", rawJSON, extraJSON)
+	}
+}
+
 func TestProcessPendingSkipsWhenEnabledSourcesEmpty(t *testing.T) {
 	db, err := database.Open(testDatabaseURL(t, "test_raw_enabled_sources_empty"))
 	if err != nil {

@@ -272,7 +272,10 @@ func TestExtractJobUsesTooltipCountriesForMultipleBuiltinLocations(t *testing.T)
 		t.Fatalf("read html: %v", err)
 	}
 
-	payload := ExtractJobFromHTML(string(htmlBytes), "")
+	payload, err := ExtractJobFromHTML(string(htmlBytes), "")
+	if err != nil {
+		t.Fatalf("ExtractJobFromHTML failed: %v", err)
+	}
 	locationCountries, _ := payload["locationCountries"].([]string)
 	expectedCountries := []string{"Argentina", "United States"}
 	if !reflect.DeepEqual(locationCountries, expectedCountries) {
@@ -295,7 +298,10 @@ func TestExtractJobFromHTMLDoesNotInferSalaryWithoutBaseSalaryValues(t *testing.
 		t.Fatalf("read html: %v", err)
 	}
 
-	payload := ExtractJobFromHTML(string(htmlBytes), "")
+	payload, err := ExtractJobFromHTML(string(htmlBytes), "")
+	if err != nil {
+		t.Fatalf("ExtractJobFromHTML failed: %v", err)
+	}
 	salaryRange, _ := payload["salaryRange"].(map[string]any)
 	if salaryRange["min"] != nil {
 		t.Fatalf("expected nil min salary, got %#v", salaryRange["min"])
@@ -355,7 +361,10 @@ func TestExtractJobFromHTMLUsesFallbackCompanyWhenCompanyMissing(t *testing.T) {
   </head>
   <body></body>
 </html>`
-	payload := ExtractJobFromHTML(htmlText, "https://builtin.com/job/platform-engineer/12345")
+	payload, err := ExtractJobFromHTML(htmlText, "https://builtin.com/job/platform-engineer/12345")
+	if err != nil {
+		t.Fatalf("ExtractJobFromHTML failed: %v", err)
+	}
 	company, _ := payload["company"].(map[string]any)
 	if company["slug"] != "acme" {
 		t.Fatalf("expected fallback company slug, got %#v", company["slug"])
@@ -386,7 +395,10 @@ func TestExtractJobFromHTMLMapsJobBenefitsFromLDJSON(t *testing.T) {
   </head>
   <body></body>
 </html>`
-	payload := ExtractJobFromHTML(htmlText, "https://builtin.com/job/test-benefits/10")
+	payload, err := ExtractJobFromHTML(htmlText, "https://builtin.com/job/test-benefits/10")
+	if err != nil {
+		t.Fatalf("ExtractJobFromHTML failed: %v", err)
+	}
 	if payload["benefits"] != "<p>Medical, dental, vision</p><p>401(k) match</p>" {
 		t.Fatalf("expected benefits passthrough, got %#v", payload["benefits"])
 	}

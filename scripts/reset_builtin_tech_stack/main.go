@@ -70,7 +70,12 @@ func main() {
 			continue
 		}
 
-		payload := builtin.ExtractJobFromHTML(htmlText, row.URL)
+		payload, parseErr := builtin.ExtractJobFromHTML(htmlText, row.URL)
+		if parseErr != nil {
+			log.Printf("skip parsed_id=%d raw_id=%d url=%s parse_error=%v", row.ParsedID, row.RawID, row.URL, parseErr)
+			skipped++
+			continue
+		}
 		techStack := extractTechStack(payload)
 		techStackJSON, _ := json.Marshal(techStack)
 

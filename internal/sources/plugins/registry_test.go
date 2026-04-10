@@ -1,6 +1,9 @@
 package plugins
 
-import "testing"
+import (
+	"goapplyjob-golang-backend/internal/sources/parseerr"
+	"testing"
+)
 
 func TestRegistryIncludesWorkable(t *testing.T) {
 	plugin, ok := Get("workable")
@@ -31,8 +34,8 @@ func TestPluginParityWithPageExtractForWorkableAndHiringCafe(t *testing.T) {
 	if workablePlugin.PayloadType != "" || workablePlugin.ParseImportRows != nil || workablePlugin.SerializeImportRows != nil {
 		t.Fatalf("workable plugin should not define import payload handlers, got payloadType=%q", workablePlugin.PayloadType)
 	}
-	if payload := workablePlugin.ParseRawHTML("<html></html>", "https://example.com/job"); len(payload) != 0 {
-		t.Fatalf("workable parse_raw_html should return empty payload, got %#v", payload)
+	if payload, err := workablePlugin.ParseRawHTML("<html></html>", "https://example.com/job"); err == nil || payload != nil || parseerr.Reason(err) != "unsupported_raw_html" {
+		t.Fatalf("workable parse_raw_html should return unsupported_raw_html, got payload=%#v err=%v", payload, err)
 	}
 
 	hiringCafePlugin, ok := Get("hiringcafe")
@@ -42,8 +45,8 @@ func TestPluginParityWithPageExtractForWorkableAndHiringCafe(t *testing.T) {
 	if hiringCafePlugin.PayloadType != "" || hiringCafePlugin.ParseImportRows != nil || hiringCafePlugin.SerializeImportRows != nil {
 		t.Fatalf("hiringcafe plugin should not define import payload handlers, got payloadType=%q", hiringCafePlugin.PayloadType)
 	}
-	if payload := hiringCafePlugin.ParseRawHTML("<html></html>", "https://example.com/job"); len(payload) != 0 {
-		t.Fatalf("hiringcafe parse_raw_html should return empty payload, got %#v", payload)
+	if payload, err := hiringCafePlugin.ParseRawHTML("<html></html>", "https://example.com/job"); err == nil || payload != nil || parseerr.Reason(err) != "unsupported_raw_html" {
+		t.Fatalf("hiringcafe parse_raw_html should return unsupported_raw_html, got payload=%#v err=%v", payload, err)
 	}
 }
 

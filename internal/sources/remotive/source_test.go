@@ -21,7 +21,10 @@ func TestParseRawHTMLKeepsNonUSLocationCountries(t *testing.T) {
 {"@type":"JobPosting","title":"Backend Engineer","description":"<p>Build.</p>","applicantLocationRequirements":{"@type":"Country","name":"Canada"}}
 </script>
 </head><body><h1>Backend Engineer</h1><p class="tw-mt-4 tw-text-sm">Example Co is hiring a remote Backend Engineer. Location: Canada.</p></body></html>`
-	payload := ParseRawHTML(htmlText, "https://remotive.com/job-123")
+	payload, err := ParseRawHTML(htmlText, "https://remotive.com/job-123")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
 	countries, _ := payload["locationCountries"].([]string)
 	if len(countries) != 1 || countries[0] != "Canada" {
 		t.Fatalf("expected Canada locationCountries, got %#v", payload["locationCountries"])
@@ -35,7 +38,10 @@ func TestParseRawHTMLKeepsPayloadWhenLocationCountriesMissing(t *testing.T) {
 {"@type":"JobPosting","title":"Backend Engineer","description":"<p>Build.</p>"}
 </script>
 </head></html>`
-	payload := ParseRawHTML(htmlText, "https://remotive.com/job-123")
+	payload, err := ParseRawHTML(htmlText, "https://remotive.com/job-123")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
 	if len(payload) == 0 {
 		t.Fatalf("expected payload when locationCountries are missing, got %#v", payload)
 	}
@@ -58,7 +64,10 @@ func TestParseRawHTMLExtractsSectionsAndSalaryHandling(t *testing.T) {
 }
 </script>
 </head><body data-publication-date="2026-02-27 08:00:00"><h1>Senior Backend Engineer</h1><p class="tw-mt-4 tw-text-sm">Feb 27, 2026 - Example Co is hiring a remote Senior Backend Engineer. 📍Location: United States.</p></body></html>`
-	payload := ParseRawHTML(htmlText, "https://remotive.com/remote/jobs/software/senior-backend-engineer-9990001")
+	payload, err := ParseRawHTML(htmlText, "https://remotive.com/remote/jobs/software/senior-backend-engineer-9990001")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
 	if payload["slug"] != "senior-backend-engineer" {
 		t.Fatalf("expected remotive slug from role title, got %#v", payload["slug"])
 	}
@@ -90,7 +99,10 @@ func TestParseRawHTMLNormalizesTitleAndCountryTokens(t *testing.T) {
 </script>
 </head><body><h1>Senior Backend Engineer</h1><p class="tw-mt-4 tw-text-sm">Example Co is hiring a remote Senior Backend Engineer. 📍Location: United States.</p></body></html>`
 
-	payload := ParseRawHTML(htmlText, "https://remotive.com/remote-jobs/software/senior-backend-engineer-9990001")
+	payload, err := ParseRawHTML(htmlText, "https://remotive.com/remote-jobs/software/senior-backend-engineer-9990001")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
 	if payload["roleTitle"] != "Senior Backend Engineer" {
 		t.Fatalf("expected normalized roleTitle, got %#v", payload["roleTitle"])
 	}
@@ -215,7 +227,10 @@ func TestParseRawHTMLHandlesMissingOptionalSections(t *testing.T) {
 }
 </script>
 </head></html>`
-	payload := ParseRawHTML(htmlText, "https://remotive.com/remote-jobs/software/backend-engineer-111")
+	payload, err := ParseRawHTML(htmlText, "https://remotive.com/remote-jobs/software/backend-engineer-111")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
 	if payload["roleRequirements"] != nil || payload["benefits"] != nil {
 		t.Fatalf("expected nil optional sections, got %#v", payload)
 	}

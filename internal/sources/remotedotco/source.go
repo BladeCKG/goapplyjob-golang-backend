@@ -7,6 +7,7 @@ import (
 	"goapplyjob-golang-backend/internal/normalize/employmentnorm"
 	"goapplyjob-golang-backend/internal/normalize/locationnorm"
 	"goapplyjob-golang-backend/internal/sources/currency"
+	"goapplyjob-golang-backend/internal/sources/parseerr"
 	"html"
 	"math"
 	"regexp"
@@ -85,24 +86,24 @@ func SerializeImportRows(rows []map[string]any) string {
 	return strings.Join(parts, "\n") + "\n"
 }
 
-func ParseRawHTML(htmlText, _ string) map[string]any {
+func ParseRawHTML(htmlText, _ string) (map[string]any, error) {
 	matches := jsonAppPattern.FindAllStringSubmatch(htmlText, -1)
 	if len(matches) == 0 {
-		return map[string]any{}
+		return nil, parseerr.Retry("missing_json_app_script")
 	}
 	payloadRaw := strings.TrimSpace(matches[len(matches)-1][1])
 	if payloadRaw == "" {
-		return map[string]any{}
+		return nil, parseerr.Retry("empty_json_app_script")
 	}
 	var data map[string]any
 	if err := json.Unmarshal([]byte(payloadRaw), &data); err != nil {
-		return map[string]any{}
+		return nil, parseerr.Retry("invalid_json_app_script")
 	}
 	props, _ := data["props"].(map[string]any)
 	pageProps, _ := props["pageProps"].(map[string]any)
 	jobDetails, _ := pageProps["jobDetails"].(map[string]any)
 	if jobDetails == nil {
-		return map[string]any{}
+		return nil, parseerr.Retry("missing_job_details")
 	}
 
 	applyURL := stringValue(jobDetails["applyURL"])
@@ -141,6 +142,17 @@ func ParseRawHTML(htmlText, _ string) map[string]any {
 			"industrySpecialities":        nil,
 		}
 	}
+	if strings.TrimSpace(applyURL) == "" {
+		return nil, parseerr.Skip("missing_apply_url")
+	}
+	if len(company) == 0 {
+		return nil, parseerr.Skip("missing_company")
+	}
+	if strings.TrimSpace(stringValue(company["id"])) == "" &&
+		strings.TrimSpace(stringValue(company["name"])) == "" &&
+		strings.TrimSpace(stringValue(company["slug"])) == "" {
+		return nil, parseerr.Skip("missing_company")
+	}
 
 	salaryRange := extractSalaryRangeFromJobPostingLDJSON(htmlText)
 	educationRequirementsCredentialCategory := extractEducationCredentialCategory(htmlText)
@@ -176,7 +188,7 @@ func ParseRawHTML(htmlText, _ string) map[string]any {
 		"educationRequirementsCredentialCategory": educationRequirementsCredentialCategory,
 		"descriptionLanguage":          "en",
 	}
-	return payload
+	return payload, nil
 }
 
 func ExtractFirstLastmod(data []byte) string {

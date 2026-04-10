@@ -39,7 +39,10 @@ func TestParseRawHTMLStrictFields(t *testing.T) {
 		t.Fatalf("missing jobDetails in fixture")
 	}
 
-	payload := ParseRawHTML(string(htmlBytes), "")
+	payload, err := ParseRawHTML(string(htmlBytes), "")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
 	if len(payload) == 0 {
 		t.Fatalf("expected payload from html")
 	}
@@ -123,10 +126,64 @@ func TestParseRawHTMLPrefixesCompanyIDWithSource(t *testing.T) {
 </script>
 </body>
 </html>`
-	payload := ParseRawHTML(htmlText, "")
+	payload, err := ParseRawHTML(htmlText, "")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
 	company, _ := payload["company"].(map[string]any)
 	if company["id"] != "remotedotco_abc123" {
 		t.Fatalf("expected namespaced company.id, got %#v", company["id"])
+	}
+}
+
+func TestParseRawHTMLEmptyWhenApplyURLMissing(t *testing.T) {
+	htmlText := `
+<html>
+<body>
+<script type="application/json">
+{"props":{"pageProps":{"jobDetails":{
+  "id":"job-1",
+  "title":"Engineer",
+  "description":"Build things",
+  "jobSummary":"Summary",
+  "postedDate":"2026-03-01T10:00:00Z",
+  "remoteOptions":["100% remote work"],
+  "jobSchedules":["Full-time"],
+  "countries":["United States"],
+  "company":{"companyId":"abc123","name":"Acme","slug":"acme","website":"https://acme.com"}
+}}}}
+</script>
+</body>
+</html>`
+	payload, err := ParseRawHTML(htmlText, "")
+	if err == nil || err.Error() == "" {
+		t.Fatalf("expected parse error when applyURL missing, got payload=%#v err=%v", payload, err)
+	}
+}
+
+func TestParseRawHTMLEmptyWhenCompanyMissing(t *testing.T) {
+	htmlText := `
+<html>
+<body>
+<script type="application/json">
+{"props":{"pageProps":{"jobDetails":{
+  "id":"job-1",
+  "title":"Engineer",
+  "description":"Build things",
+  "jobSummary":"Summary",
+  "applyURL":"https://remote.co/remote-jobs/job-1",
+  "postedDate":"2026-03-01T10:00:00Z",
+  "remoteOptions":["100% remote work"],
+  "jobSchedules":["Full-time"],
+  "countries":["United States"],
+  "company":{}
+}}}}
+</script>
+</body>
+</html>`
+	payload, err := ParseRawHTML(htmlText, "")
+	if err == nil || err.Error() == "" {
+		t.Fatalf("expected parse error when company missing, got payload=%#v err=%v", payload, err)
 	}
 }
 
@@ -137,7 +194,10 @@ func TestParseRawHTMLRoleDescriptionFromFixtureRawJob3(t *testing.T) {
 		t.Fatalf("read html: %v", err)
 	}
 
-	payload := ParseRawHTML(string(htmlBytes), "")
+	payload, err := ParseRawHTML(string(htmlBytes), "")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
 	if len(payload) == 0 {
 		t.Fatalf("expected payload from html")
 	}
@@ -196,7 +256,10 @@ func TestParseRawHTMLEducationRequirementFromFixtures(t *testing.T) {
 				t.Fatalf("read html: %v", err)
 			}
 
-			payload := ParseRawHTML(string(htmlBytes), "")
+			payload, err := ParseRawHTML(string(htmlBytes), "")
+			if err != nil {
+				t.Fatalf("ParseRawHTML failed: %v", err)
+			}
 			if got := payload["educationRequirementsCredentialCategory"]; !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("educationRequirementsCredentialCategory mismatch got=%#v want=%#v", got, tc.want)
 			}
@@ -220,7 +283,8 @@ func TestParseRawHTMLNormalizesSalarySymbolFromCode(t *testing.T) {
   "jobSchedules":["Full-time"],
   "cities":["Austin"],
   "states":["Texas"],
-  "countries":["United States"]
+  "countries":["United States"],
+  "company":{"companyId":"abc123","name":"Acme","slug":"acme","website":"https://acme.com"}
 }}}}
 </script>
 <script type="application/ld+json">
@@ -228,7 +292,10 @@ func TestParseRawHTMLNormalizesSalarySymbolFromCode(t *testing.T) {
 </script>
 </body>
 </html>`
-	payload := ParseRawHTML(htmlText, "")
+	payload, err := ParseRawHTML(htmlText, "")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
 	salaryRange, _ := payload["salaryRange"].(map[string]any)
 	if salaryRange["currencyCode"] != "USD" {
 		t.Fatalf("expected normalized currencyCode, got %#v", salaryRange["currencyCode"])

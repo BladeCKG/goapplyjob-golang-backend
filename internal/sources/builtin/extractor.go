@@ -6,6 +6,7 @@ import (
 	"goapplyjob-golang-backend/internal/normalize/employmentnorm"
 	"goapplyjob-golang-backend/internal/normalize/locationnorm"
 	"goapplyjob-golang-backend/internal/sources/currency"
+	"goapplyjob-golang-backend/internal/sources/parseerr"
 	"html"
 	"net/url"
 	"regexp"
@@ -132,10 +133,10 @@ func ExtractJob(htmlText, companyHTML string) map[string]any {
 	return payload
 }
 
-func ExtractJobFromHTML(htmlText string, fallbackJobURL string) map[string]any {
+func ExtractJobFromHTML(htmlText string, fallbackJobURL string) (map[string]any, error) {
 	payload := ExtractJob(htmlText, "")
 	if len(payload) == 0 {
-		return payload
+		return nil, parseerr.Retry("missing_job_payload")
 	}
 	if company, _ := payload["company"].(map[string]any); company == nil || len(company) == 0 {
 		jobPosting := findJobPostingLD(htmlText)
@@ -150,7 +151,7 @@ func ExtractJobFromHTML(htmlText string, fallbackJobURL string) map[string]any {
 			}
 		}
 	}
-	return payload
+	return payload, nil
 }
 
 func findJobPostingLD(htmlText string) map[string]any {
