@@ -110,6 +110,82 @@ func TestProcessPendingSkipsRemainingSourceJobsAfter429(t *testing.T) {
 	}
 }
 
+func TestProcessPendingTopsUpBatchWithRetriedJobs(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_raw_top_up_batch_with_retries"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.SQL.ExecContext(context.Background(), `INSERT INTO raw_us_jobs (source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json) VALUES
+		('remoterocketship', 'https://remote.example/job/zero-1', '2026-02-12T10:00:00Z', false, false, false, 0, NULL),
+		('remoterocketship', 'https://remote.example/job/zero-2', '2026-02-12T09:00:00Z', false, false, false, 0, NULL),
+		('remoterocketship', 'https://remote.example/job/retry-1', '2026-02-12T08:00:00Z', false, false, false, 1, NULL),
+		('remoterocketship', 'https://remote.example/job/retry-2', '2026-02-12T07:00:00Z', false, false, false, 2, NULL),
+		('remoterocketship', 'https://remote.example/job/retry-3', '2026-02-12T06:00:00Z', false, false, false, 3, NULL)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(Config{}, db)
+	svc.EnabledSources = map[string]struct{}{"remoterocketship": {}}
+
+	var fetched []string
+	svc.ReadHTMLForSource = func(ctx context.Context, _ string, targetURL string) (string, int, error) {
+		fetched = append(fetched, targetURL)
+		return `<html><body>ok</body></html>`, 200, nil
+	}
+
+	processed, err := svc.ProcessPending(context.Background(), 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 4 {
+		t.Fatalf("expected four processed jobs, got %d", processed)
+	}
+	if len(fetched) != 4 {
+		t.Fatalf("expected four fetched jobs, got %d", len(fetched))
+	}
+
+	expectedFetched := map[string]struct{}{
+		"https://remote.example/job/zero-1":  {},
+		"https://remote.example/job/zero-2":  {},
+		"https://remote.example/job/retry-1": {},
+		"https://remote.example/job/retry-2": {},
+	}
+	for _, targetURL := range fetched {
+		if _, ok := expectedFetched[targetURL]; !ok {
+			t.Fatalf("unexpected fetched job %s", targetURL)
+		}
+		delete(expectedFetched, targetURL)
+	}
+	if len(expectedFetched) != 0 {
+		t.Fatalf("expected all top-up jobs to be fetched, remaining=%v", expectedFetched)
+	}
+
+	var retryThreeReady bool
+	if err := db.SQL.QueryRowContext(
+		context.Background(),
+		`SELECT is_ready FROM raw_us_jobs WHERE url = 'https://remote.example/job/retry-3'`,
+	).Scan(&retryThreeReady); err != nil {
+		t.Fatal(err)
+	}
+	if retryThreeReady {
+		t.Fatal("expected highest retry row to be left for later when batch is filled")
+	}
+
+	var retryThreeCount int
+	if err := db.SQL.QueryRowContext(
+		context.Background(),
+		`SELECT retry_count FROM raw_us_jobs WHERE url = 'https://remote.example/job/retry-3'`,
+	).Scan(&retryThreeCount); err != nil {
+		t.Fatal(err)
+	}
+	if retryThreeCount != 3 {
+		t.Fatalf("expected untouched highest retry row, got retry_count=%d", retryThreeCount)
+	}
+}
+
 func TestProcessPendingMarks404AsTerminalSkip(t *testing.T) {
 	db, err := database.Open(testDatabaseURL(t, "test_raw_404_terminal_skip"))
 	if err != nil {

@@ -209,6 +209,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	sort.Strings(names)
 	zeroRetryQuery := baseQuery + ` AND retry_count = 0 ORDER BY post_date DESC, id DESC LIMIT ?`
 	minRetryQuery := baseQuery + ` ORDER BY retry_count ASC, post_date DESC, id DESC LIMIT ?`
+	minRetryTopUpQuery := baseQuery + ` AND id <> ALL(?::bigint[]) ORDER BY retry_count ASC, post_date DESC, id DESC LIMIT ?`
 
 	queryWithRetry := func(query string, args ...any) (*sql.Rows, error) {
 		var qErr error
@@ -262,24 +263,38 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 	}
 	rows.Close()
 
-	if len(jobs) == 0 {
-		rows, err = queryWithRetry(minRetryQuery, names, batchSize)
-		if err != nil {
-			return 0, err
+	if len(jobs) < batchSize {
+		remaining := batchSize - len(jobs)
+		if remaining < 0 {
+			remaining = 0
 		}
-		for rows.Next() {
-			var job rawJob
-			if err := rows.Scan(&job.id, &job.url, &job.source, &job.postDate, &job.extraJSON); err != nil {
+		if remaining > 0 {
+			if len(jobs) == 0 {
+				rows, err = queryWithRetry(minRetryQuery, names, remaining)
+			} else {
+				existingIDs := make([]int64, 0, len(jobs))
+				for _, job := range jobs {
+					existingIDs = append(existingIDs, job.id)
+				}
+				rows, err = queryWithRetry(minRetryTopUpQuery, names, existingIDs, remaining)
+			}
+			if err != nil {
+				return 0, err
+			}
+			for rows.Next() {
+				var job rawJob
+				if err := rows.Scan(&job.id, &job.url, &job.source, &job.postDate, &job.extraJSON); err != nil {
+					rows.Close()
+					return 0, err
+				}
+				jobs = append(jobs, job)
+			}
+			if err := rows.Err(); err != nil {
 				rows.Close()
 				return 0, err
 			}
-			jobs = append(jobs, job)
-		}
-		if err := rows.Err(); err != nil {
 			rows.Close()
-			return 0, err
 		}
-		rows.Close()
 	}
 
 	log.Printf("raw-us-job-worker picked_unready_jobs=%d", len(jobs))
