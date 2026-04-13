@@ -22,7 +22,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.Close()
-	intervalMinutes := config.GetenvFloat("RAW_IMPORT_INTERVAL_MINUTES", 1)
+	intervalMinutes := cfg.RawImportIntervalMinutes
 	if intervalMinutes < 0 {
 		intervalMinutes = 1
 	}
@@ -30,21 +30,21 @@ func main() {
 	if sleepDuration < time.Second {
 		sleepDuration = time.Second
 	}
-	batchSize := config.GetenvInt("RAW_IMPORT_BATCH_SIZE", 1000)
+	batchSize := cfg.RawImportBatchSize
 	if batchSize < 1 {
 		batchSize = 1
 	}
-	payloadsPerCycle := config.GetenvInt("RAW_IMPORT_PAYLOADS_PER_CYCLE", 40)
+	payloadsPerCycle := cfg.RawImportPayloadsPerCycle
 	if payloadsPerCycle < 1 {
 		payloadsPerCycle = 1
 	}
-	enabledSources := config.GetenvCSVSet("ENABLED_SOURCES", "remoterocketship")
-	runOnce := config.GetenvBool("RAW_IMPORT_RUN_ONCE", false)
-	errorBackoffSeconds := config.GetenvInt("WORKER_ERROR_BACKOFF_SECONDS", 10)
+	enabledSources := cfg.EnabledSources
+	runOnce := cfg.RawImportRunOnce
+	errorBackoffSeconds := cfg.WorkerErrorBackoffSeconds
 	if errorBackoffSeconds < 1 {
 		errorBackoffSeconds = 1
 	}
-	workerCount := config.GetenvInt("RAW_IMPORT_WORKER_COUNT", 2)
+	workerCount := cfg.RawImportWorkerCount
 	if workerCount < 1 {
 		workerCount = 1
 	}

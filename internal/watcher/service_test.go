@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"goapplyjob-golang-backend/internal/database"
+	"goapplyjob-golang-backend/internal/sources/flexjobs"
 	"goapplyjob-golang-backend/internal/sources/remotive"
 	"net/url"
 	"strconv"
@@ -73,6 +74,7 @@ func buildService(t *testing.T) *Service {
 		HiringCafeSearchAPIURL:           "",
 		HiringCafeTotalCountURL:          "",
 		HiringCafePageSize:               200,
+		FlexJobsSitemapURL:               "",
 		EnabledSources: map[string]struct{}{
 			sourceRemoterocketship: {},
 		},
@@ -175,7 +177,9 @@ func TestRunOnceUsesSampleDeltaWithoutFullFetch(t *testing.T) {
 </urlset>`)
 
 	service.RemoteRocketShipUSJobsSitemapFetchSample = func(context.Context, string) ([]byte, error) { return sample, nil }
-	service.RemoteRocketShipUSJobsSitemapFetchFull = func(context.Context, string) ([]byte, error) { return nil, errors.New("full fetch should not be called") }
+	service.RemoteRocketShipUSJobsSitemapFetchFull = func(context.Context, string) ([]byte, error) {
+		return nil, errors.New("full fetch should not be called")
+	}
 	if _, err := service.DB.SQL.ExecContext(context.Background(), `INSERT INTO watcher_states (source, state_json, updated_at) VALUES (?, ?, ?)`, "remoterocketship", `{"sitemaps":{"https://example.com/jobs.xml":{"source_url":"https://example.com/jobs.xml","sample_hash":"old-hash","first_lastmod":"2026-02-12T10:00:00+00:00"}}}`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
@@ -677,5 +681,36 @@ func TestDailyremoteWatcherCreatesDeltaPayload(t *testing.T) {
 	}
 	if payloadType != "delta_dailyremote_json" {
 		t.Fatalf("expected delta_dailyremote_json payload type, got %s", payloadType)
+	}
+}
+
+func TestFlexJobsWatcherCreatesDeltaPayloadFromSitemap(t *testing.T) {
+	service := buildService(t)
+	service.Config.FlexJobsSitemapURL = "https://www.flexjobs.com/sitemap-for-gjw-jobs.xml"
+	service.Config.EnabledSources = map[string]struct{}{sourceFlexjobs: {}}
+	service.FlexJobsSitemapFetchText = func(ctx context.Context, rawURL string) (string, error) {
+		if rawURL != service.Config.FlexJobsSitemapURL {
+			return "", errors.New("unexpected URL: " + rawURL)
+		}
+		return `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://www.flexjobs.com/gjw/acme/test/publicjobs?id=1</loc></url></urlset>`, nil
+	}
+
+	if err := service.RunOnce(); err != nil {
+		t.Fatal(err)
+	}
+
+	var payloadType, body string
+	if err := service.DB.SQL.QueryRowContext(context.Background(), `SELECT payload_type, body_text FROM watcher_payloads WHERE source = ? ORDER BY id DESC LIMIT 1`, sourceFlexjobs).Scan(&payloadType, &body); err != nil {
+		t.Fatal(err)
+	}
+	if payloadType != flexjobs.PayloadType {
+		t.Fatalf("expected %s payload type, got %s", flexjobs.PayloadType, payloadType)
+	}
+	rows, skipped := flexjobs.ParseImportRows(body)
+	if skipped != 0 {
+		t.Fatalf("unexpected skipped rows: %d", skipped)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
 	}
 }

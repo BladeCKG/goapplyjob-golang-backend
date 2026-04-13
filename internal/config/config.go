@@ -84,8 +84,58 @@ type Config struct {
 	NowPaymentsCurrencyCandidates            string
 	NowPaymentsIPNSecret                     string
 	SkippableRecheckBatchSize                int
+	EnabledSources                           map[string]struct{}
+	WorkerErrorBackoffSeconds                int
+	WorkerChainSleepSeconds                  int
+	WorkerChainRunOnce                       bool
+	WorkerChainStepTimeoutSeconds            int
+	WatchEnabled                             bool
+	WatchIntervalMinutes                     float64
+	WatchSampleKB                            int
+	WatchTimeoutSeconds                      float64
+	WatchBuiltinMaxPage                      int
+	WatchBuiltinPagesPerCycle                int
+	WatchBuiltinCheckpointPages              int
+	WatchBuiltinFetchIntervalSeconds         float64
+	WatchBuiltin429RetryCount                int
+	WatchBuiltin429BackoffSeconds            float64
+	WatchWorkablePageLimit                   int
+	WatchRemotiveSitemapMaxIndex             int
+	WatchRemotiveSitemapMinIndex             int
+	WatchDailyRemoteMaxPage                  int
+	WatchDailyRemotePagesPerCycle            int
+	WatchRemoteDotCoSitemapURL               string
+	WatchHiringCafePageSize                  int
+	WatchRunOnce                             bool
+	RawImportIntervalMinutes                 float64
+	RawImportBatchSize                       int
+	RawImportPayloadsPerCycle                int
+	RawImportRunOnce                         bool
+	RawImportWorkerCount                     int
+	RawJobHTTP429Retries                     int
+	RawJobHTTP429RetryDelaySeconds           int
+	RawJobWorkerBatchSize                    int
+	RawJobWorkerPollSeconds                  int
+	RawJobRunOnce                            bool
+	RawJobFetchTimeoutSeconds                int
+	RawJobRetentionDays                      int
+	RawJobRetentionCleanupBatch              int
+	RawJobWorkerCount                        int
+	ParsedJobWorkerBatchSize                 int
+	ParsedJobWorkerPollSeconds               float64
+	ParsedJobRunOnce                         bool
+	ParsedJobWorkerCount                     int
+	ParsedJobAIClassifierEnabled             bool
+	ParsedJobAIClassifierBatchSize           int
+	ParsedJobAIClassifierPollSeconds         float64
+	ParsedJobAIClassifierRunOnce             bool
 	ParsedJobAvailabilityEnabled             bool
+	ParsedJobAvailabilityBatchSize           int
+	ParsedJobAvailabilityPollSeconds         float64
+	ParsedJobAvailabilityRunOnce             bool
+	ParsedJobAvailabilityWorkerCount         int
 	ParsedJobAvailabilityFetchTimeoutSeconds int
+	FlexJobsSitemapURL                       string
 	AIClassifierProvider                     string
 	AIClassifierProviders                    string
 	GroqAPIKey                               string
@@ -193,8 +243,58 @@ func Load() Config {
 		NowPaymentsCurrencyCandidates:            getenv("NOWPAYMENTS_CURRENCY_CANDIDATES", "btc,eth,ltc,usdttrc20,usdterc20,usdtbsc,usdc"),
 		NowPaymentsIPNSecret:                     getenv("NOWPAYMENTS_IPN_SECRET", ""),
 		SkippableRecheckBatchSize:                getenvInt("SKIPPABLE_RECHECK_BATCH_SIZE", 100),
+		EnabledSources:                           getenvCSVSet("ENABLED_SOURCES", "remoterocketship"),
+		WorkerErrorBackoffSeconds:                getenvInt("WORKER_ERROR_BACKOFF_SECONDS", 10),
+		WorkerChainSleepSeconds:                  getenvInt("WORKER_CHAIN_SLEEP_SECONDS", 5),
+		WorkerChainRunOnce:                       getenvBool("WORKER_CHAIN_RUN_ONCE", false),
+		WorkerChainStepTimeoutSeconds:            getenvInt("WORKER_CHAIN_STEP_TIMEOUT_SECONDS", 900),
+		WatchEnabled:                             getenvBool("WATCH_ENABLED", true),
+		WatchIntervalMinutes:                     getenvFloat("WATCH_INTERVAL_MINUTES", 1),
+		WatchSampleKB:                            getenvInt("WATCH_SAMPLE_KB", 40),
+		WatchTimeoutSeconds:                      getenvFloat("WATCH_TIMEOUT_SECONDS", 30),
+		WatchBuiltinMaxPage:                      getenvInt("WATCH_BUILTIN_MAX_PAGE", 1000),
+		WatchBuiltinPagesPerCycle:                getenvInt("WATCH_BUILTIN_PAGES_PER_CYCLE", 200),
+		WatchBuiltinCheckpointPages:              getenvInt("WATCH_BUILTIN_STATE_CHECKPOINT_PAGES", 5),
+		WatchBuiltinFetchIntervalSeconds:         getenvFloat("WATCH_BUILTIN_FETCH_INTERVAL_SECONDS", 0),
+		WatchBuiltin429RetryCount:                getenvInt("WATCH_BUILTIN_429_RETRY_COUNT", 3),
+		WatchBuiltin429BackoffSeconds:            getenvFloat("WATCH_BUILTIN_429_BACKOFF_SECONDS", 10),
+		WatchWorkablePageLimit:                   getenvInt("WATCH_WORKABLE_PAGE_LIMIT", 100),
+		WatchRemotiveSitemapMaxIndex:             getenvInt("WATCH_REMOTIVE_SITEMAP_MAX_INDEX", 10),
+		WatchRemotiveSitemapMinIndex:             getenvInt("WATCH_REMOTIVE_SITEMAP_MIN_INDEX", 1),
+		WatchDailyRemoteMaxPage:                  getenvInt("WATCH_DAILYREMOTE_MAX_PAGE", 5000),
+		WatchDailyRemotePagesPerCycle:            getenvInt("WATCH_DAILYREMOTE_PAGES_PER_CYCLE", 300),
+		WatchRemoteDotCoSitemapURL:               getenv("WATCH_REMOTEDOTCO_SITEMAP_URL", "https://remote.co/latest-jobs-sitemap.xml"),
+		WatchHiringCafePageSize:                  getenvInt("WATCH_HIRINGCAFE_PAGE_SIZE", 200),
+		WatchRunOnce:                             getenvBool("WATCH_RUN_ONCE", false),
+		RawImportIntervalMinutes:                 getenvFloat("RAW_IMPORT_INTERVAL_MINUTES", 1),
+		RawImportBatchSize:                       getenvInt("RAW_IMPORT_BATCH_SIZE", 1000),
+		RawImportPayloadsPerCycle:                getenvInt("RAW_IMPORT_PAYLOADS_PER_CYCLE", 40),
+		RawImportRunOnce:                         getenvBool("RAW_IMPORT_RUN_ONCE", false),
+		RawImportWorkerCount:                     getenvInt("RAW_IMPORT_WORKER_COUNT", 2),
+		RawJobHTTP429Retries:                     getenvInt("RAW_JOB_HTTP_429_RETRIES", 3),
+		RawJobHTTP429RetryDelaySeconds:           getenvInt("RAW_JOB_HTTP_429_RETRY_DELAY_SECONDS", 10),
+		RawJobWorkerBatchSize:                    getenvInt("RAW_JOB_WORKER_BATCH_SIZE", 320),
+		RawJobWorkerPollSeconds:                  getenvInt("RAW_JOB_WORKER_POLL_SECONDS", 5),
+		RawJobRunOnce:                            getenvBool("RAW_JOB_RUN_ONCE", false),
+		RawJobFetchTimeoutSeconds:                getenvInt("RAW_JOB_FETCH_TIMEOUT_SECONDS", 45),
+		RawJobRetentionDays:                      getenvInt("RAW_JOB_RETENTION_DAYS", 365),
+		RawJobRetentionCleanupBatch:              getenvInt("RAW_JOB_RETENTION_CLEANUP_BATCH", 5000),
+		RawJobWorkerCount:                        getenvInt("RAW_JOB_WORKER_COUNT", 4),
+		ParsedJobWorkerBatchSize:                 getenvInt("PARSED_JOB_WORKER_BATCH_SIZE", 260),
+		ParsedJobWorkerPollSeconds:               getenvFloat("PARSED_JOB_WORKER_POLL_SECONDS", 5),
+		ParsedJobRunOnce:                         getenvBool("PARSED_JOB_RUN_ONCE", false),
+		ParsedJobWorkerCount:                     getenvInt("PARSED_JOB_WORKER_COUNT", 1),
+		ParsedJobAIClassifierEnabled:             getenvBool("PARSED_JOB_AI_CLASSIFIER_ENABLED", false),
+		ParsedJobAIClassifierBatchSize:           getenvInt("PARSED_JOB_AI_CLASSIFIER_BATCH_SIZE", 200),
+		ParsedJobAIClassifierPollSeconds:         getenvFloat("PARSED_JOB_AI_CLASSIFIER_POLL_SECONDS", 5),
+		ParsedJobAIClassifierRunOnce:             getenvBool("PARSED_JOB_AI_CLASSIFIER_RUN_ONCE", false),
 		ParsedJobAvailabilityEnabled:             getenvBool("PARSED_JOB_AVAILABILITY_ENABLED", true),
+		ParsedJobAvailabilityBatchSize:           getenvInt("PARSED_JOB_AVAILABILITY_BATCH_SIZE", 200),
+		ParsedJobAvailabilityPollSeconds:         getenvFloat("PARSED_JOB_AVAILABILITY_POLL_SECONDS", 5),
+		ParsedJobAvailabilityRunOnce:             getenvBool("PARSED_JOB_AVAILABILITY_RUN_ONCE", false),
+		ParsedJobAvailabilityWorkerCount:         getenvInt("PARSED_JOB_AVAILABILITY_WORKER_COUNT", 4),
 		ParsedJobAvailabilityFetchTimeoutSeconds: getenvInt("PARSED_JOB_AVAILABILITY_FETCH_TIMEOUT_SECONDS", 30),
+		FlexJobsSitemapURL:                       getenv("WATCH_FLEXJOBS_SITEMAP_URL", "https://www.flexjobs.com/sitemap-for-gjw-jobs.xml"),
 		AIClassifierProvider:                     getenv("AI_CLASSIFIER_PROVIDER", "auto"),
 		AIClassifierProviders:                    getenv("AI_CLASSIFIER_PROVIDERS", ""),
 		GroqAPIKey:                               getenv("GROQ_API_KEY", ""),
@@ -336,3 +436,9 @@ func GetenvBool(key string, fallback bool) bool {
 func getenv(key, fallback string) string        { return Getenv(key, fallback) }
 func getenvInt(key string, fallback int) int    { return GetenvInt(key, fallback) }
 func getenvBool(key string, fallback bool) bool { return GetenvBool(key, fallback) }
+func getenvFloat(key string, fallback float64) float64 {
+	return GetenvFloat(key, fallback)
+}
+func getenvCSVSet(key, fallback string) map[string]struct{} {
+	return GetenvCSVSet(key, fallback)
+}

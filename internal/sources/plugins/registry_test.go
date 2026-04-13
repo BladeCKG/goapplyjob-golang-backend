@@ -26,6 +26,13 @@ func TestRegistryIncludesRemoteDotCo(t *testing.T) {
 	}
 }
 
+func TestRegistryIncludesFlexJobs(t *testing.T) {
+	plugin, ok := Get("flexjobs")
+	if !ok || plugin.Source != "flexjobs" {
+		t.Fatalf("expected flexjobs plugin, got %#v ok=%v", plugin, ok)
+	}
+}
+
 func TestPluginParityWithPageExtractForWorkableAndHiringCafe(t *testing.T) {
 	workablePlugin, ok := Get("workable")
 	if !ok {

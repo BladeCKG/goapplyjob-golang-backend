@@ -15,12 +15,11 @@ func main() {
 		log.Fatal(err)
 	}
 	defer func() { _ = closeLogFile() }()
-	if !config.GetenvBool("PARSED_JOB_AI_CLASSIFIER_ENABLED", false) {
+	cfg := config.Load()
+	if !cfg.ParsedJobAIClassifierEnabled {
 		log.Printf("parsed-job-ai-classifier-worker disabled")
 		return
 	}
-
-	cfg := config.Load()
 	db, err := database.Open(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatal(err)
@@ -28,10 +27,10 @@ func main() {
 	defer db.Close()
 
 	svc := parsedaiclassifier.New(parsedaiclassifier.Config{
-		BatchSize:            config.GetenvInt("PARSED_JOB_AI_CLASSIFIER_BATCH_SIZE", 200),
-		PollSeconds:          config.GetenvFloat("PARSED_JOB_AI_CLASSIFIER_POLL_SECONDS", 5),
-		RunOnce:              config.GetenvBool("PARSED_JOB_AI_CLASSIFIER_RUN_ONCE", false),
-		ErrorBackoffSeconds:  config.GetenvInt("WORKER_ERROR_BACKOFF_SECONDS", 10),
+		BatchSize:            cfg.ParsedJobAIClassifierBatchSize,
+		PollSeconds:          cfg.ParsedJobAIClassifierPollSeconds,
+		RunOnce:              cfg.ParsedJobAIClassifierRunOnce,
+		ErrorBackoffSeconds:  cfg.WorkerErrorBackoffSeconds,
 		Provider:             cfg.AIClassifierProvider,
 		Providers:            cfg.AIClassifierProviders,
 		GroqAPIKey:           cfg.GroqAPIKey,
@@ -60,7 +59,7 @@ func main() {
 		OpenAIBaseURL:        cfg.OpenAIBaseURL,
 		OpenAIPromptSource:   cfg.OpenAIClassifierPromptSource,
 	}, db)
-	svc.EnabledSources = config.GetenvCSVSet("ENABLED_SOURCES", "remoterocketship")
+	svc.EnabledSources = cfg.EnabledSources
 
 	if err := svc.RunForever(); err != nil {
 		log.Fatal(err)

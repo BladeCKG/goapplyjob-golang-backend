@@ -1,0 +1,468 @@
+{
+  "props": {
+    "pageProps": {
+      "isLoggedIn": false,
+      "companiesHiringCount": { "jobsCount": 217762, "companiesCount": 14493 },
+      "isPremiumUser": false,
+      "isHybrid": true,
+      "jobList": {
+        "id": "27a649d6-7df8-41dd-86f8-b8cf3eeffdb7",
+        "title": "Senior Backend - Full Stack Software Engineer",
+        "description": "\u003cp\u003e\u003cstrong\u003eTitle:\u003c/strong\u003e Senior Backend - Full Stack Software Engineer\u003c/p\u003e\n\n\u003cp\u003e\u003cstrong\u003eLocation:\u003c/strong\u003e Boston, Massachusetts, United States\u003c/p\u003e\n\n\u003cp\u003eSoftware Engineering\u003c/p\u003e\n\n\u003cp\u003eHybrid Remote\u003c/p\u003e\n\n\u003cp\u003e\u003cstrong\u003eJob Description:\u003c/strong\u003e\u003c/p\u003e\n\n\u003cp\u003e\u003cstrong\u003eWHO ARE YOU?\u0026nbsp;\u0026nbsp;\u003c/strong\u003eYou bring strong backend and full stack technical expertise to your work as a Senior Software Engineer. You thrive in a collaborative, fast‑moving development environment, and are motivated to ensure your work has a positive impact.\u003c/p\u003e\n\n\u003cp\u003e\u003cstrong\u003eWHO ARE WE?\u003c/strong\u003e\u0026nbsp; We are passionate, innovative, lifelong learners, and creative thinkers working to develop culturally authentic language learning products for K-12 schools and universities.\u0026nbsp;\u003c/p\u003e\n\n\u003cp\u003e\u003cstrong\u003eWHAT IS THIS ROLE ABOUT?\u0026nbsp;\u003c/strong\u003eAs a Senior Software Engineer here, you will join a Development team that is focused, professional and consistently driving innovation that shapes our industry‑leading digital language education products.\u003c/p\u003e\n\n\u003cp\u003e\u003cstrong\u003eOUR TECHNOLOGY STACK\u003c/strong\u003e\u0026nbsp;\u0026nbsp;\u003c/p\u003e\n\n\u003cul\u003e\n\t\u003cli\u003eLanguages/Frameworks: Ruby/Rails, JS, Vue\u0026nbsp;\u0026nbsp;\u003c/li\u003e\n\t\u003cli\u003ePersistence: MySQL, Postgres, Redis, ElasticSearch\u0026nbsp;\u0026nbsp;\u003c/li\u003e\n\t\u003cli\u003eHosting: AWS\u0026amp;nbsp;\u0026nbsp;\u003c/li\u003e\n\u003c/ul\u003e\n\n\u003cp\u003e\u003cstrong\u003eIN THIS ROLE YOU WILL:\u003c/strong\u003e\u0026nbsp;\u0026nbsp;\u003c/p\u003e\n\n\u003cul\u003e\n\t\u003cli\u003eParticipate in all aspects of the Software Development Lifecycle (SDLC)\u0026nbsp;\u0026nbsp;\u003c/li\u003e\n\t\u003cli\u003ePerform tests to optimize performance\u0026nbsp;\u0026nbsp;\u003c/li\u003e\n\t\u003cli\u003eWrite clean code to develop functioning web applications\u0026nbsp;\u0026nbsp;\u003c/li\u003e\n\t\u003cli\u003eWork effectively and collaborate with different team members to deliver on-time and efficient projects\u0026nbsp;\u0026nbsp;\u0026nbsp;\u003cstrong\u003e\u0026nbsp;\u003c/strong\u003e\u003c/li\u003e\n\u003c/ul\u003e\n\n\u003cp\u003e\u003cstrong\u003eYOU MUST HAVE (MINIMUM REQUIRED SKILLS \u0026amp; EXPERIENCE) \u0026nbsp;\u003c/strong\u003e\u003c/p\u003e\n\n\u003cul\u003e\n\t\u003cli\u003eBachelor\u0026rsquo;s Degree\u003c/li\u003e\n\t\u003cli\u003e7+ years of Senior level Software Engineering experience with Ruby, Ruby on Rails or Python + JavaScript\u003c/li\u003e\n\t\u003cli\u003eDemonstrated software architectural design experience, including data persistence and API design\u003c/li\u003e\n\t\u003cli\u003eStrong understanding of networking and web browser protocols\u003c/li\u003e\n\t\u003cli\u003eAdvanced working knowledge of *nix systems, and comfort working at terminal command line.\u003c/li\u003e\n\t\u003cli\u003eAdvanced SQL and DB schema design knowledge\u003c/li\u003e\n\t\u003cli\u003eAdvanced working knowledge of git \u0026amp; GitHub\u003c/li\u003e\n\t\u003cli\u003eExperience collaborating with other departments/teams\u003c/li\u003e\n\t\u003cli\u003eStrong communication, listening and interpersonal skills to be able to actively listen to needs and respond to audience appropriately\u0026ensp;\u0026ensp;\u0026ensp;\u0026ensp;\u0026ensp;\u0026ensp;\u0026nbsp;\u003c/li\u003e\n\u003c/ul\u003e\n\n\u003cp\u003e\u0026ensp;\u003cstrong\u003eIDEAL IF YOU HAVE or ARE (PREFERRED SKILLS \u0026amp; EXPERIENCE)\u003c/strong\u003e\u0026nbsp;\u0026nbsp;\u003c/p\u003e\n\n\u003cul\u003e\n\t\u003cli\u003eExperience with Sagemaker, AWS Poly, Azure Speech Service\u003c/li\u003e\n\t\u003cli\u003eExperience with SQL, Postgres, Redis, Elasticsearch\u003c/li\u003e\n\t\u003cli\u003eExperience building and deploying high-capacity applications in cloud environments,\u0026nbsp;especially AWS\u0026amp;nbsp;\u003c/li\u003e\n\t\u003cli\u003eA strong understanding of how to architect solutions for scalability and performance\u003c/li\u003e\n\t\u003cli\u003eExperience working with LLMs and AI tooling for developers\u003c/li\u003e\n\t\u003cli\u003eExperience with Ruby highly preferred\u003c/li\u003e\n\t\u003cli\u003eExperience in ed-tech, education, language-learning or a similar industry\u003c/li\u003e\n\t\u003cli\u003eFamiliarity with Web Content Accessibility Guidelines (WCAG) and best practices for meeting 2.1 AA compliance\u003c/li\u003e\n\u003c/ul\u003e\n\n\u003cp\u003e\u003cstrong\u003eLOCATION:\u003c/strong\u003e\u0026nbsp;\u003cstrong\u003e\u0026nbsp;Boston-Hybrid\u003c/strong\u003e\u0026nbsp;or\u0026nbsp;\u003cstrong\u003eRemote - Eastern US Time Zone\u003c/strong\u003e\u003c/p\u003e\n\n\u003cp\u003ePosition requires current residence within the United States of America and within the eastern time zone. Ideal candidates will be located within close proximity to our Boston office location and be willing to work a Tuesday and Thursday (2-day minimum) Hybrid schedule. Relocation assistance is not available.\u0026nbsp;\u003c/p\u003e\n\n\u003cp\u003e\u003cstrong\u003eSALARY:\u003c/strong\u003e\u0026nbsp;$140k-$150k annual base salary range\u003c/p\u003e\n\n\u003cp\u003eThis position is salaried and is eligible for an annual incentive based on employee and organizational performance.\u0026nbsp;\u003c/p\u003e\n\n\u003cp\u003eWe are passionate, innovative, lifelong learners, and creative thinkers working to develop culturally authentic language learning products for K-12 schools and universities. Our benefits package includes life/health/dental/vision insurance, 401(k), educational assistance, commuter pass subsidies, generous employee referral bonuses, PTO and paid holidays.\u003cbr /\u003e\n\u003cbr /\u003e\n\u003cem\u003eVista Higher Learning is an Equal Opportunity Employer. All qualified applicants will receive consideration for employment without regard to race, age, color, religion, sexual orientation, gender identity, national origin, physical or mental disability, and/or protected veteran status or other characteristics protected by applicable law.\u003c/em\u003e\u003c/p\u003e\n",
+        "jobSummary": "Participate in the Software Development Lifecycle, write clean code for web applications, perform performance optimization tests, and collaborate effectively with team members to ensure timely project delivery.",
+        "postedDate": "2026-04-03T10:03:52Z",
+        "locations": [
+          {
+            "latLng": "42.361100,-71.051800",
+            "radius": 0,
+            "city": "Boston",
+            "state": "MA",
+            "country": "United States",
+            "areaLocation": null
+          }
+        ],
+        "displayLocations": ["Boston, MA or US National"],
+        "allowedCandidateLocation": ["Boston, MA or US National"],
+        "remoteOptions": ["100% Remote Work"],
+        "jobSchedules": ["Full-Time"],
+        "jobTypes": ["Employee"],
+        "featured": false,
+        "company": {
+          "researcher": null,
+          "description": "\u003cp\u003eVista Higher Learning is an independent publishing company offering print and digital language-learning solutions.\u0026nbsp;In past hiring, the company has posted hybrid remote job opportunities in career fields like \u003ca href=\"https://www.flexjobs.com/remote-jobs/computer-it\" target=\"_blank\"\u003ecomputer \u0026amp; IT\u003c/a\u003e, \u003ca href=\"https://www.flexjobs.com/remote-jobs/accounting\" target=\"_blank\"\u003eaccounting \u0026amp; finance\u003c/a\u003e, and as an\u0026nbsp;\u003ca href=\"https://www.flexjobs.com/remote-jobs/analyst\" target=\"_blank\"\u003eanalyst\u003c/a\u003e.\u0026nbsp;To attract top candidates, the company offers a competitive benefits and perks package to eligible staff, including comprehensive health coverage, a 401(k) savings plan with company match, generous paid time off, tuition reimbursement, career development opportunities, wellness programs, and volunteer opportunities. Vista is interested in new hires who are passionate about products that support global cultures and a wide variety of languages for people whose educational interests lie not only in the classroom but beyond.\u003c/p\u003e\r\n\r\n\u003cp\u003eA privately-owned company, Vista Higher Learning offers products for people who are learning a new language, people who are building skills in a second language, and people who are looking to improve their native language skills. The company is committed to supporting lifelong learning through high-quality content and technology-based resources for learners. Established in 2000, Vista Higher Learning is on a mission to empower students and educators alike through K-12 programs that teach a variety of languages, higher education programs that move students toward greater proficiency, and international initiatives that support language literacy.\u003c/p\u003e\r\n",
+          "city": null,
+          "state": null,
+          "country": null,
+          "website": null,
+          "twitterURL": null,
+          "facebookURL": null,
+          "linkedinURL": null,
+          "youtubeURL": null,
+          "companyId": "71172",
+          "logo": "/assets/jctblobcontent/71172/primary.png",
+          "squareLogo": "/assets/jctblobcontent/71172/square.png",
+          "name": "Vista Higher Learning",
+          "slug": "vista_higher_learning",
+          "accolades": null
+        },
+        "slug": "senior-backend-full-stack-software-engineer-27a649d6-7df8-41dd-86f8-b8cf3eeffdb7",
+        "expireOn": "2026-05-28T00:00:00",
+        "salaryRanges": [
+          {
+            "salaryMin": 140000,
+            "salaryMax": 150000,
+            "salaryUnit": "ANNUALLY",
+            "salaryCurrency": "USD"
+          }
+        ],
+        "createdOn": "2026-04-03T04:36:55.137",
+        "educationLevels": ["Bachelor's/Undergraduate Degree"],
+        "jobBenefits": [
+          "Retirement Savings",
+          "Education Assistance",
+          "Dental Insurance",
+          "Health Insurance",
+          "Life Insurance",
+          "Vision Insurance",
+          "Commuter Benefits",
+          "Paid Holidays",
+          "Paid Time Off"
+        ],
+        "categories": [
+          {
+            "categoryID": 91,
+            "parentCategoryID": 11,
+            "name": "SQL",
+            "slug": "online-sql",
+            "description": null,
+            "imgSrc": "11.svg"
+          },
+          {
+            "categoryID": 17,
+            "parentCategoryID": null,
+            "name": "Education \u0026 Training",
+            "slug": "education-training",
+            "description": null,
+            "imgSrc": "17.svg"
+          },
+          {
+            "categoryID": 39,
+            "parentCategoryID": null,
+            "name": "Project Management",
+            "slug": "project-management",
+            "description": null,
+            "imgSrc": "39.svg"
+          },
+          {
+            "categoryID": 38,
+            "parentCategoryID": null,
+            "name": "Software Development",
+            "slug": "web-software-development-programming",
+            "description": null,
+            "imgSrc": "38.svg"
+          },
+          {
+            "categoryID": 108,
+            "parentCategoryID": 38,
+            "name": "Ruby on Rails",
+            "slug": "ruby-on-rails",
+            "description": null,
+            "imgSrc": "38.svg"
+          },
+          {
+            "categoryID": 47,
+            "parentCategoryID": null,
+            "name": "Web Design",
+            "slug": "web-design",
+            "description": null,
+            "imgSrc": "47.svg"
+          }
+        ],
+        "accolades": [],
+        "careerLevel": ["Experienced"],
+        "travelRequired": "No Specification",
+        "regionID": [1],
+        "states": ["MA"],
+        "countries": ["US"],
+        "cities": ["Boston"],
+        "eligibleForExpertApply": true,
+        "applyURL": "https://jobs.jobvite.com/vistahigherlearning-careers/job/oJm5yfws",
+        "ats": "46",
+        "postalCode": null,
+        "feedId": 14172,
+        "eaProcessor": "AUTO",
+        "coordinates": ["42.361100,-71.051800"],
+        "matchID": "127880d1-f15d-4317-b2a3-d578cbdacf7e",
+        "searchID": "127880d1-f15d-4317-b2a3-d578cbdacf7e",
+        "searchCriteriaID": "3a47720b-ebe4-4644-ad85-faee5cb01493",
+        "coverLetterRequirement": { "status": "YNDOC", "charLimit": null },
+        "partnerJobID": null,
+        "isGJWEnabled": true,
+        "applyCount": null,
+        "applyJobStatus": "None",
+        "appliedDate": null,
+        "saved": false,
+        "savedDate": null,
+        "viewed": false,
+        "viewedDate": null,
+        "similarJobsAlert": false,
+        "notes": null,
+        "reportJobStatus": false,
+        "isFreeJob": false,
+        "cachedInCategory": null
+      },
+      "successStoriesList": [
+        {
+          "quote": "Perfection! I love you guys! You saved my life!",
+          "author": "Austin T.",
+          "job": "Stocker at Walmart",
+          "created_At": "2026-03-11T20:13:30"
+        },
+        {
+          "quote": "I applied for the job and got it!",
+          "author": "Ramata B.",
+          "job": "Project Manager",
+          "created_At": "2026-03-11T20:12:27"
+        },
+        {
+          "quote": "FlexJobs is a better job search website!",
+          "author": "Vanessa B., Uganda",
+          "job": "Administrative Officer",
+          "created_At": "2026-03-11T20:11:10"
+        },
+        {
+          "quote": "Good variety of job listings!",
+          "author": "Stephanie L., NY",
+          "job": "Treasury Manager",
+          "created_At": "2026-03-09T18:30:14"
+        },
+        {
+          "quote": "Less than a week after I subscribed to FlexJobs, I accepted a 100% remote job doing exactly what I was hoping for!",
+          "author": "Katie P., CO",
+          "job": "Digital Marketing Lead",
+          "created_At": "2026-03-09T18:28:31"
+        },
+        {
+          "quote": "A friend in the UK let me know about FlexJobs, and within a month, I had a couple of interviews for the position!",
+          "author": "Sam B., FL",
+          "job": "Instructional Designer at Candescent",
+          "created_At": "2026-03-09T18:25:52"
+        },
+        {
+          "quote": "I used the ExpertApply tools, and they worked flawlessly!",
+          "author": "Louis A., Langhorne, PA",
+          "job": "Security Engineer at GuidePoint Security",
+          "created_At": "2026-03-09T17:52:39"
+        }
+      ],
+      "headerProps": ["/remote-jobs", ""],
+      "reportJobLoc": {
+        "noLongerAvailable": "Thank you so much for taking the time to flag this position! Our team works really hard to make sure the jobs on our site are active. We will definitely be looking into it. If the job is expired, this will be reflected at the bottom of the job listing. Otherwise, if we have any further questions for you about the nature of the flag or we find that the position is still available, we will follow up with you shortly.",
+        "incorrectOrMissing": "Thank you so much for taking the time to flag this position! Our team works really hard to make sure the jobs on our site are accurate. We will definitely be looking into it, and we will follow up with you as soon as we can. Otherwise, thank you again and we hope you're having a great day.",
+        "troubleApplying": "Thank you for bringing this to our attention! It's possible the employer site was experiencing issues or downtime when you tried to apply earlier. Please try again, perhaps from a different browser or computer. If you continue to have trouble, you may need to follow up with the employer to troubleshoot the issue with their application form.",
+        "jobNotRemote": "FlexJobs offers more than just remote jobs. Many jobs have different types of flexibility. We provide access to jobs offering various levels of work flexibility, including remote, part-time, freelance, temporary, alternative schedule, etc. If you are specifically interested in remote jobs, try doing a site search and filtering on your results. You can select \"100% Remote Work\" in the \"Remote Work Level\" filter on the left-hand side.",
+        "locationRequirement": "Many employers, even with 100% remote positions, prefer a person within a particular city or state. Employers may be limited to specific locations due to local tax requirements, training, or certifications. Use keyword search and location search to find jobs in your area along with US National and Worldwide jobs. Search results can then be filtered for different options, like schedule or remote work level.",
+        "other": "Thank you so much for taking the time to flag this position! We will definitely be looking into it, and we will follow up with you as soon as we can. Otherwise, thank you again and we hope you're having a great day.",
+        "pageTitle": "{title} | FlexJobs",
+        "meta_title": "{title} | FlexJobs",
+        "publicJobsGJWPageTitle": "{title}",
+        "public_jobs_gjw__meta_title": "{title}",
+        "date_posted": "Date Posted:",
+        "expired_date_message": "- SORRY, THIS JOB EXPIRED ON:",
+        "expired_date_message_mobile": "SORRY, THIS JOB EXPIRED ON:",
+        "work_level": "Remote Work Level:",
+        "location": "Location:",
+        "job_type": "Job Type:",
+        "job_schedule": "Job Schedule:",
+        "career_level": "Career Level:",
+        "travel_required": "Travel Required:",
+        "education": "Education Level:",
+        "salary": "Salary:",
+        "benefits": "Benefits:",
+        "accolades": "Company Awards:",
+        "company_accolades": "Awards \u0026 Accolades:",
+        "categories": "Categories:",
+        "company": "Company:",
+        "job_description": "Job Description",
+        "about_company": "About the Company",
+        "about_role": "About the Role",
+        "overview": "Overview",
+        "learn_more": "Learn More About",
+        "sample_company_details": "Company details here",
+        "sample_company_benefits": "Company Benefits here",
+        "no_salary_info": "We're sorry, the employer did not include salary information for this job.",
+        "headquarters": "Headquarters:",
+        "approved_employer": "APPROVED EMPLOYER",
+        "previous_page": "Previous Page",
+        "current_past": "See Current Past Flexible Jobs with",
+        "write_note": "Write Note",
+        "view_note": "View Note",
+        "show_more": "Show More",
+        "show_less": "Show less",
+        "location_prefix": "Must work from",
+        "apply_for_this_job": "Apply for This Job",
+        "to_apply_send": "To Apply, Send Email To:",
+        "apply_btn": "Apply",
+        "applied_for_job": "Applied for Job",
+        "did_not_apply": "Did Not Apply",
+        "apply_popup_content": "Did you apply to this job at the employer's site? If so, please click 'Applied for Job' to save it to your 'Application History' page. If not, click on 'Did Not Apply' to return to the job post.",
+        "unlock_banner": {
+          "join": "Join FlexJobs to Unlock \u0026 Apply to \u003cspan class='border-underline'\u003eRemote\u003c/span\u003e Jobs",
+          "join_mobile": "Join FlexJobs to Unlock \u0026 Apply to  \u003cspan\u003eRemote\u003c/span\u003e Jobs",
+          "join_hybrid": "Join FlexJobs and Access {0} More \u003cspan class='border-underline'\u003eRemote\u003c/span\u003e Jobs",
+          "join_hybrid_mobile": "Join FlexJobs and Access {0} More \u003cspan\u003eRemote\u003c/span\u003e Jobs",
+          "joinJobInsetExperiment": "Unlock this job and \u003cbr /\u003e {0} more \u003cspan\u003eremote\u003c/span\u003e jobs",
+          "create_account": "Create an Account to Unlock",
+          "signup_and_find": "Find Your Next Remote Job!",
+          "signup_and_find_job_inset_experiment": "Join FlexJobs Now!",
+          "best_site_quote": "\u003cspan class='highlight'\u003eI found a job\u003c/span\u003e with higher pay and better benefits! My only regret is not becoming a FlexJobs member the first time I visited the site.",
+          "author_name": "–Jacob N. •",
+          "address": " Cleveland, OH",
+          "verified_member": "Verified Member",
+          "benefits": [
+            "Find a remote job, faster!",
+            "{0}+ jobs across 50+ job categories",
+            "Only hand-screened, legit jobs",
+            "No ads, scams, junk",
+            "Expert resources, webinars \u0026 events"
+          ],
+          "benefits_mobile": [
+            "Find a remote job faster!",
+            "{0}+ jobs across 50+ job categories",
+            "Only hand-screened, legit jobs",
+            "No ads, scams, or junk",
+            "Expert resources, webinars \u0026 events"
+          ],
+          "benifits_hybrid": [
+            "Find a remote job faster!",
+            "Hand-screened leads",
+            "No ads, scams, or junk",
+            "Great job search support",
+            " 50+ career categories"
+          ],
+          "benefits_job_inset_experiment": [
+            "Only hand-screened, legit jobs",
+            "No ads, scams, or junk",
+            "Expert resources, webinars \u0026 events"
+          ]
+        },
+        "unauth_footer_text": {
+          "upper": {
+            "find_out": "To find out more about or apply to this",
+            "and_other": "job—and other great opportunities like it—",
+            "become_member": "become a FlexJobs member today!"
+          },
+          "lower": {
+            "expert_resources": "With FlexJobs, you'll find the best flexible jobs and fantastic expert resources to support you in your job search. If you have any questions,",
+            "contact": "please feel free to contact us"
+          }
+        },
+        "reconsider": "Reconsider?",
+        "reconsider_reasons": "Here are the \u003cspan class='top-reasons'\u003etop 3 reasons\u003c/span\u003e to join FlexJobs today",
+        "reconsider_reasons1": "Access {0} hand-screened work from home or flexible schedule jobs",
+        "reconsider_reasons2": "Skills tests, checklists, and expert content to help you land your next job",
+        "reconsider_reasons3": "Helpful customer service from friendly humans",
+        "come_see_why": "We're not like the other sites. Come see why.",
+        "join_now": "Join Now!",
+        "meta_description": "Learn more about this {0} job on FlexJobs",
+        "gjw_public_jobs_meta_description": "Apply for the {0} job at {1}. View the job description, responsibilities and qualifications.",
+        "company_accolades_new": "Company Accolades",
+        "current_past_new": "See Current \u0026 Past Flexible Jobs with"
+      },
+      "similarJobs": [
+        {
+          "id": "6ea18c3f-6400-43be-ad6e-bdbb48f7f4f7",
+          "title": "Full Stack Software Engineer",
+          "postedDate": "2026-04-08T07:48:00Z",
+          "jobLocations": ["Denver, CO"],
+          "allowedCandidateLocation": ["Denver, CO"],
+          "remoteOptions": ["100% Remote Work"],
+          "jobSchedules": ["Full-Time"],
+          "company": null,
+          "slug": "full-stack-software-engineer-6ea18c3f-6400-43be-ad6e-bdbb48f7f4f7",
+          "regionID": [0],
+          "states": ["CO"],
+          "countries": ["United States"],
+          "cities": ["Denver"],
+          "isFreeJob": false
+        },
+        {
+          "id": "29fb0f3c-7125-459a-8573-e09a80c74d84",
+          "title": "Full-Stack Software Developer",
+          "postedDate": "2026-04-10T08:53:33Z",
+          "jobLocations": ["NC"],
+          "allowedCandidateLocation": ["NC"],
+          "remoteOptions": ["100% Remote Work"],
+          "jobSchedules": ["Full-Time"],
+          "company": null,
+          "slug": "full-stack-software-developer-29fb0f3c-7125-459a-8573-e09a80c74d84",
+          "regionID": [0],
+          "states": ["NC"],
+          "countries": ["United States"],
+          "cities": [],
+          "isFreeJob": false
+        },
+        {
+          "id": "64fcf943-c2ca-45ec-a32d-4fdc0aea6968",
+          "title": "Junior Full-Stack Software Developer",
+          "postedDate": "2026-04-10T06:49:09Z",
+          "jobLocations": ["US National"],
+          "allowedCandidateLocation": ["US National"],
+          "remoteOptions": ["100% Remote Work"],
+          "jobSchedules": ["Flexible Schedule", "Full-Time"],
+          "company": null,
+          "slug": "junior-full-stack-software-developer-64fcf943-c2ca-45ec-a32d-4fdc0aea6968",
+          "regionID": [1],
+          "states": [],
+          "countries": [],
+          "cities": [],
+          "isFreeJob": false
+        },
+        {
+          "id": "990bbfad-e1c2-4a4b-a189-cdcce767b41a",
+          "title": "Full-Stack Software Developer",
+          "postedDate": "2026-04-07T08:15:31Z",
+          "jobLocations": ["US National"],
+          "allowedCandidateLocation": ["US National"],
+          "remoteOptions": ["100% Remote Work"],
+          "jobSchedules": ["Full-Time"],
+          "company": null,
+          "slug": "full-stack-software-developer-990bbfad-e1c2-4a4b-a189-cdcce767b41a",
+          "regionID": [1],
+          "states": [],
+          "countries": [],
+          "cities": [],
+          "isFreeJob": false
+        },
+        {
+          "id": "c1617546-b089-46fd-b31a-eac97f5d6ba1",
+          "title": "Senior Full Stack Engineer - Electronic Health Record Integrations",
+          "postedDate": "2026-04-07T08:35:10Z",
+          "jobLocations": ["US National"],
+          "allowedCandidateLocation": ["US National"],
+          "remoteOptions": ["100% Remote Work"],
+          "jobSchedules": ["Full-Time"],
+          "company": null,
+          "slug": "senior-full-stack-engineer-electronic-health-record-integrations-c1617546-b089-46fd-b31a-eac97f5d6ba1",
+          "regionID": [1],
+          "states": [],
+          "countries": [],
+          "cities": [],
+          "isFreeJob": false
+        }
+      ],
+      "deviceType": "desktop",
+      "url": "https://www.flexjobs.com/gjw/publicjobs?id=27a649d6-7df8-41dd-86f8-b8cf3eeffdb7",
+      "previousUrl": "/",
+      "isCompanyPage": false,
+      "jobId": "27a649d6-7df8-41dd-86f8-b8cf3eeffdb7",
+      "unlockBannerSrc": "unlock-banner-2.png",
+      "jobFeedName": "gjw",
+      "bannerRandomTestimonial": {
+        "data": "I'm so happy I signed up and took part in so many wonderful resources. \u003cspan class='highlight'\u003e I am forever grateful to FlexJobs!\u003c/span\u003e ",
+        "author": "Julien V",
+        "hired": "Hired at Beyond Finance"
+      },
+      "screenName": "gjw jobs",
+      "isGJWEnabled": true
+    },
+    "experimentCookies": {
+      "c_expt": null,
+      "runtest": null,
+      "disabletests": null
+    },
+    "deviceType": "desktop",
+    "query": {
+      "gjwRewrite": "1",
+      "comp": "vista_higher_learning",
+      "jobSlug": "senior-backend-full-stack-software-engineer",
+      "id": "27a649d6-7df8-41dd-86f8-b8cf3eeffdb7",
+      "jobfeed": "gjw",
+      "companyslug": "id-27a649d6-7df8-41dd-86f8-b8cf3eeffdb7"
+    },
+    "domain": "jobs.flexjobs.com",
+    "expertApplyExperimentObj": {},
+    "isSessionCookie": "969571d9a50e2a61f983704c3baaa43e",
+    "isRegOnlyLandingPageExpRunning": false,
+    "navbarRedesign": {
+      "navbarRedesignedDesktopV1": false,
+      "navbarRedesignedDesktopV2": true,
+      "navRedesignNavbarMob": false,
+      "navRedesignNavbarMobV2": false
+    },
+    "homepageMetaDescription": "The #1 job site for fully verified work from home jobs . No ads, scams, or junk. Discover a better online job search with FlexJobs!",
+    "__N_SSP": true
+  },
+  "page": "/[jobfeed]/publicjobs/[companyslug]",
+  "query": {
+    "gjwRewrite": "1",
+    "comp": "vista_higher_learning",
+    "jobSlug": "senior-backend-full-stack-software-engineer",
+    "id": "27a649d6-7df8-41dd-86f8-b8cf3eeffdb7",
+    "jobfeed": "gjw",
+    "companyslug": "id-27a649d6-7df8-41dd-86f8-b8cf3eeffdb7"
+  },
+  "buildId": "6BC9ELQp0kx9R6o81GmgP",
+  "assetPrefix": "https://assets.flexjobs.com",
+  "isFallback": false,
+  "isExperimentalCompile": false,
+  "dynamicIds": [18658, 19224],
+  "gssp": true,
+  "appGip": true,
+  "scriptLoader": [
+    {
+      "id": "app-js",
+      "strategy": "lazyOnload",
+      "dangerouslySetInnerHTML": {
+        "__html": "\n                if (window.navigator.userAgent.indexOf('MSIE ') \u003e -1 || window.navigator.userAgent.indexOf('Trident/') \u003e -1) {\n                  var script = document.createElement('script');\n                  script.src = '/blobcontent/flexjobs/externals/segment/app.js';\n                  script.async = true;\n                  document.head.appendChild(script);\n                }\n              "
+      }
+    },
+    {
+      "id": "splash-metrics-js",
+      "strategy": "lazyOnload",
+      "dangerouslySetInnerHTML": {
+        "__html": "(function(){function InitializeMetricsForPage(e,f,a){(null==a|| void 0==a)\u0026\u0026(a={useDevJs:!1}),(\"\"==a.commonScriptsUrl|| void 0==a.commonScriptsUrl)\u0026\u0026(a.commonScriptsUrl=location.protocol+\"//\"+location.host+\"/blob/common\"),(\"\"==a.clientEventsAPIUrl|| void 0==a.clientEventsAPIUrl)\u0026\u0026(a.clientEventsAPIUrl=location.protocol+\"//\"+location.host+\"/clientevents\");var c=a.commonScriptsUrl+\"/scripts/splashEventStream\"+(!0==a.useDevJs?\"\":\".min\")+\".js?v=\"+(void 0==a.besVer?\"latest\":a.besVer),d=a.commonScriptsUrl+\"/scripts/splashMetrics\"+(!0==a.useDevJs?\"\":\".min\")+\".js?v=\"+(void 0==a.muVer?\"latest\":a.muVer),b=[];b.push(loadDynamicScriptFileAsync(c,!0)),b.push(loadDynamicScriptFileAsync(d,!0)),Promise.all(b).then(function(){var b=MetricsUtil.ClassInitializers.getNewConfigurationObject(a.MuCfg);b.Value_PortalCD=e,b.Value_ProductCD=f,b.splashEventsUrl=c,b.useForcePushForAllEvents=void 0==a.useForcePushForAllEvents||a.useForcePushForAllEvents,b.SplashConfig.AjaxDetails.eventsPostEndpointUrl=a.clientEventsAPIUrl+\"/\"+b.SplashConfig.AjaxDetails.eventsPostEndpointUrl,MetricsUtil.initializeAsync(window,b)})}function loadDynamicScriptFileAsync(a,b){return new Promise(function(e,f){try{var c=document.createElement(\"script\");c.src=a,c.onload=e,c.async=null==b||null==b||b,c.onerror=function(a){f(a,c)};var d=document.getElementsByTagName(\"script\")[0];d.parentNode.insertBefore(c,d)}catch(g){f(g)}})}\n                var addParamsData={MuCfg:{enableWebVitals:true}, commonScriptsUrl:\"https://assets.flexjobs.com/blob/common\"};\n                function initMetrics(){InitializeMetricsForPage(\"FXJ \",\"FJS\",addParamsData);}\n                if(document.readyState==='complete'){window.requestIdleCallback?window.requestIdleCallback(initMetrics,{timeout:2000}):setTimeout(initMetrics,100);}else if(document.readyState==='interactive'){window.addEventListener('load',function(){window.requestIdleCallback?window.requestIdleCallback(initMetrics,{timeout:2000}):setTimeout(initMetrics,100);});}else{window.addEventListener('load',function(){window.requestIdleCallback?window.requestIdleCallback(initMetrics,{timeout:2000}):setTimeout(initMetrics,100);});}})();"
+      }
+    }
+  ]
+}

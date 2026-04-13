@@ -117,6 +117,9 @@ func ParseRawHTML(htmlText, _ string) (map[string]any, error) {
 	locationCities := stringSlice(jobDetails["cities"])
 	locationStates := stringSlice(jobDetails["states"])
 	locationCountries := stringSlice(jobDetails["countries"])
+	if len(locationCountries) == 0 {
+		locationCountries = extractApplicantLocationCountriesFromFirstLDJSON(htmlText)
+	}
 	locationStates = filterUSStates(locationStates)
 	isEntry, isJunior, isMid, isSenior, isLead := inferSeniorityFromCareerLevel(jobDetails["careerLevel"])
 
@@ -669,6 +672,95 @@ func extractSalaryRangeFromJobPostingLDJSON(htmlText string) any {
 		}
 	}
 	return nil
+}
+
+func extractApplicantLocationCountriesFromFirstLDJSON(htmlText string) []string {
+	matches := jsonLDPattern.FindAllStringSubmatch(htmlText, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	for _, match := range matches {
+		payloadRaw := strings.TrimSpace(match[1])
+		if payloadRaw == "" {
+			continue
+		}
+		var decoded any
+		if err := json.Unmarshal([]byte(payloadRaw), &decoded); err != nil {
+			continue
+		}
+		jobPosting := extractFirstJobPostingNode(decoded)
+		if jobPosting == nil {
+			continue
+		}
+		if countries := normalizeApplicantLocationCountries(jobPosting["applicantLocationRequirements"]); len(countries) > 0 {
+			return countries
+		}
+	}
+	return nil
+}
+
+func extractFirstJobPostingNode(node any) map[string]any {
+	switch value := node.(type) {
+	case []any:
+		for _, item := range value {
+			if posting := extractFirstJobPostingNode(item); posting != nil {
+				return posting
+			}
+		}
+	case map[string]any:
+		if strings.EqualFold(stringValue(value["@type"]), "JobPosting") {
+			return value
+		}
+		if graph, ok := value["@graph"].([]any); ok {
+			for _, item := range graph {
+				if posting := extractFirstJobPostingNode(item); posting != nil {
+					return posting
+				}
+			}
+		}
+		for _, child := range value {
+			if posting := extractFirstJobPostingNode(child); posting != nil {
+				return posting
+			}
+		}
+	}
+	return nil
+}
+
+func normalizeApplicantLocationCountries(value any) []string {
+	out := []string{}
+	seen := map[string]struct{}{}
+	addCountry := func(raw string) {
+		normalized := locationnorm.NormalizeCountryName(raw)
+		if normalized == "" {
+			return
+		}
+		key := strings.ToLower(normalized)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, normalized)
+	}
+	switch items := value.(type) {
+	case []any:
+		for _, item := range items {
+			switch entry := item.(type) {
+			case map[string]any:
+				if strings.EqualFold(stringValue(entry["@type"]), "Country") {
+					addCountry(stringValue(entry["name"]))
+				}
+			}
+		}
+	case map[string]any:
+		if strings.EqualFold(stringValue(items["@type"]), "Country") {
+			addCountry(stringValue(items["name"]))
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func extractEducationCredentialCategory(htmlText string) any {

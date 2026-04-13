@@ -237,6 +237,23 @@ func TestParseRawHTMLRoleDescriptionFromFixtureRawJob3(t *testing.T) {
 	}
 }
 
+func TestParseRawHTMLFallsBackToApplicantLocationRequirements(t *testing.T) {
+	htmlPath := filepath.Join("..", "..", "..", "test-extract", "remotedotco", "raw-job-4.html")
+	htmlBytes, err := os.ReadFile(htmlPath)
+	if err != nil {
+		t.Fatalf("read html: %v", err)
+	}
+
+	payload, err := ParseRawHTML(string(htmlBytes), "")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
+	gotCountries, _ := payload["locationCountries"].([]string)
+	if len(gotCountries) == 0 {
+		t.Fatalf("expected fallback locationCountries from LD JSON, got %#v", payload["locationCountries"])
+	}
+}
+
 func TestParseRawHTMLEducationRequirementFromFixtures(t *testing.T) {
 	testCases := []struct {
 		name     string

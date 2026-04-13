@@ -3,6 +3,7 @@ package plugins
 import (
 	"goapplyjob-golang-backend/internal/sources/builtin"
 	"goapplyjob-golang-backend/internal/sources/dailyremote"
+	"goapplyjob-golang-backend/internal/sources/flexjobs"
 	"goapplyjob-golang-backend/internal/sources/hiringcafe"
 	"goapplyjob-golang-backend/internal/sources/parseerr"
 	"goapplyjob-golang-backend/internal/sources/remotedotco"
@@ -131,6 +132,20 @@ var registry = map[string]SourcePlugin{
 		IsJobClosed:                  remotedotco.IsJobClosed,
 		ParseImportRows:              remotedotco.ParseImportRows,
 		SerializeImportRows:          remotedotco.SerializeImportRows,
+		UseExternalCompanyID:         true,
+		UseCompanyMatchKeys:          true,
+		RunDuplicateCheck:            true,
+		InferCategories:              true,
+		UseManualTechStackExtraction: true,
+	},
+	flexjobs.Source: {
+		Source:                       flexjobs.Source,
+		PayloadType:                  flexjobs.PayloadType,
+		ToTargetJobURL:               flexjobs.ToTargetJobURL,
+		ParseRawHTML:                 flexjobs.ParseRawHTML,
+		IsJobClosed:                  flexjobs.IsJobClosed,
+		ParseImportRows:              flexjobs.ParseImportRows,
+		SerializeImportRows:          flexjobs.SerializeImportRows,
 		UseExternalCompanyID:         true,
 		UseCompanyMatchKeys:          true,
 		RunDuplicateCheck:            true,

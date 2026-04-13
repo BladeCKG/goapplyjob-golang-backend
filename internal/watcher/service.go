@@ -12,6 +12,7 @@ import (
 	"goapplyjob-golang-backend/internal/scraper"
 	"goapplyjob-golang-backend/internal/sources/builtin"
 	"goapplyjob-golang-backend/internal/sources/dailyremote"
+	"goapplyjob-golang-backend/internal/sources/flexjobs"
 	"goapplyjob-golang-backend/internal/sources/hiringcafe"
 	"goapplyjob-golang-backend/internal/sources/remotedotco"
 	"goapplyjob-golang-backend/internal/sources/remotive"
@@ -35,6 +36,7 @@ const (
 	sourceWorkable         = "workable"
 	sourceDailyremote      = "dailyremote"
 	sourceRemotedotco      = "remotedotco"
+	sourceFlexjobs         = "flexjobs"
 	payloadTypeDelta       = "delta"
 	payloadTypeXML         = "delta_xml"
 )
@@ -70,6 +72,7 @@ type Config struct {
 	DailyRemoteMaxPage               int
 	DailyRemotePagesPerCycle         int
 	RemoteDotCoSitemapURL            string
+	FlexJobsSitemapURL               string
 	HiringCafeSearchAPIURL           string
 	HiringCafeTotalCountURL          string
 	HiringCafePageSize               int
@@ -79,6 +82,7 @@ type Config struct {
 type (
 	FetchSampleFunc func(context.Context, string) ([]byte, error)
 	FetchFullFunc   func(context.Context, string) ([]byte, error)
+	FetchTextFunc   func(context.Context, string) (string, error)
 )
 
 type HTMLFetcher interface {
@@ -91,6 +95,7 @@ type Service struct {
 	DB                                       *database.DB
 	RemoteRocketShipUSJobsSitemapFetchSample FetchSampleFunc
 	RemoteRocketShipUSJobsSitemapFetchFull   FetchFullFunc
+	FlexJobsSitemapFetchText                 FetchTextFunc
 	Fetcher                                  HTMLFetcher
 	status                                   map[string]any
 }
@@ -119,6 +124,7 @@ func New(config Config, db *database.DB) *Service {
 		"dailyremote_max_page":                         config.DailyRemoteMaxPage,
 		"dailyremote_pages_per_cycle":                  config.DailyRemotePagesPerCycle,
 		"remotedotco_sitemap_url":                      config.RemoteDotCoSitemapURL,
+		"flexjobs_sitemap_url":                         config.FlexJobsSitemapURL,
 		"hiringcafe_search_api_url":                    config.HiringCafeSearchAPIURL,
 		"hiringcafe_total_count_url":                   config.HiringCafeTotalCountURL,
 		"hiringcafe_page_size":                         config.HiringCafePageSize,
@@ -151,6 +157,9 @@ func New(config Config, db *database.DB) *Service {
 			return data, nil
 		}
 		return nil, errors.New("scraper fetch failed")
+	}
+	svc.FlexJobsSitemapFetchText = func(ctx context.Context, sitemapURL string) (string, error) {
+		return svc.fetchTextWithTLSClient(ctx, sitemapURL)
 	}
 
 	return svc
@@ -200,6 +209,21 @@ func (s *Service) fetchTextWithTLSClientCookie(ctx context.Context, rawURL strin
 	htmlText, status, err := fetcher.ReadHTMLWithHeaders(ctx, rawURL, map[string]string{
 		"Cookie": cookie,
 	})
+	if err != nil {
+		return "", err
+	}
+	if status < 200 || status >= 300 {
+		return "", errors.New("http status " + strconv.Itoa(status))
+	}
+	return htmlText, nil
+}
+
+func (s *Service) fetchTextWithTLSClient(ctx context.Context, rawURL string) (string, error) {
+	fetcher, err := scraper.NewTLSClientFetcher(scraper.TLSClientConfig{Timeout: 30 * time.Second})
+	if err != nil {
+		return "", err
+	}
+	htmlText, status, err := fetcher.ReadHTML(ctx, rawURL)
 	if err != nil {
 		return "", err
 	}
@@ -279,6 +303,13 @@ func (s *Service) RunOnceWithContext(ctx context.Context) error {
 			source: sourceRemotedotco,
 			name:   "runOnceRemoteDotCo",
 			fn:     s.runOnceRemoteDotCo,
+		})
+	}
+	if strings.TrimSpace(s.Config.FlexJobsSitemapURL) != "" && s.isSourceEnabled(sourceFlexjobs) {
+		tasks = append(tasks, task{
+			source: sourceFlexjobs,
+			name:   "runOnceFlexJobs",
+			fn:     s.runOnceFlexJobs,
 		})
 	}
 	if s.isRemotiveConfigured() && s.isSourceEnabled(sourceRemotive) {
@@ -626,6 +657,67 @@ func (s *Service) runOnceRemoteDotCo(ctx context.Context) error {
 	}
 	logf("payload_saved payload_id=%v rows=%d", payloadID, len(rows))
 	return s.saveStatePayload(ctx, sourceRemotedotco, map[string]any{
+		"sitemap_hash":          currentHash,
+		"last_scan_at":          utcNowISO(),
+		"last_delta_count":      len(rows),
+		"last_delta_payload_id": payloadID,
+		"last_delta_source":     "full",
+	})
+}
+
+func (s *Service) runOnceFlexJobs(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	logf := func(format string, args ...any) {
+		log.Printf("watcher FlexJobs "+format, args...)
+	}
+	statePayload, err := s.loadStatePayload(ctx, sourceFlexjobs)
+	if err != nil {
+		return err
+	}
+	previousHash, _ := statePayload["sitemap_hash"].(string)
+
+	logf("sitemap_fetch_start url=%s", s.Config.FlexJobsSitemapURL)
+	fetchText := s.FlexJobsSitemapFetchText
+	if fetchText == nil {
+		fetchText = s.fetchTextWithTLSClient
+	}
+	xmlText, err := fetchText(ctx, s.Config.FlexJobsSitemapURL)
+	if err != nil {
+		logf("sitemap_fetch_failed error=%v", err)
+		return err
+	}
+	logf("sitemap_fetch_done bytes=%d", len(xmlText))
+
+	currentHash := sha256Hex([]byte(xmlText))
+	logf("sitemap_hash current=%s previous=%s", currentHash, previousHash)
+	if currentHash == previousHash {
+		logf("sitemap_unchanged skip_payload")
+		return s.saveStatePayload(ctx, sourceFlexjobs, map[string]any{
+			"sitemap_hash":          currentHash,
+			"last_scan_at":          utcNowISO(),
+			"last_delta_count":      0,
+			"last_delta_payload_id": nil,
+		})
+	}
+
+	rows, skipped := flexjobs.ParseSitemapRows(xmlText, time.Now().UTC())
+	logf("delta_rows_ready count=%d skipped=%d source=full", len(rows), skipped)
+	bodyText := flexjobs.SerializeImportRows(rows)
+	payloadID, err := s.saveDeltaPayloadForSource(
+		ctx,
+		sourceFlexjobs,
+		s.Config.FlexJobsSitemapURL,
+		flexjobs.PayloadType,
+		bodyText,
+	)
+	if err != nil {
+		logf("payload_save_failed error=%v", err)
+		return err
+	}
+	logf("payload_saved payload_id=%v rows=%d", payloadID, len(rows))
+	return s.saveStatePayload(ctx, sourceFlexjobs, map[string]any{
 		"sitemap_hash":          currentHash,
 		"last_scan_at":          utcNowISO(),
 		"last_delta_count":      len(rows),

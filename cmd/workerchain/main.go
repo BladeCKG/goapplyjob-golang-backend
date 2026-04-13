@@ -13,6 +13,7 @@ import (
 	"goapplyjob-golang-backend/internal/parsedjobavailability"
 	"goapplyjob-golang-backend/internal/raw"
 	"goapplyjob-golang-backend/internal/scraper"
+	"goapplyjob-golang-backend/internal/sources/flexjobs"
 	"goapplyjob-golang-backend/internal/sources/remotedotco"
 	"goapplyjob-golang-backend/internal/watcher"
 	"goapplyjob-golang-backend/internal/workerlog"
@@ -64,18 +65,18 @@ func main() {
 			"https://www.remoterocketship.com/sitemap_job_openings_at.xml",
 		}
 
-		enabledSources := config.GetenvCSVSet("ENABLED_SOURCES", "remoterocketship")
-		errorBackoffSeconds := config.GetenvInt("WORKER_ERROR_BACKOFF_SECONDS", 10)
+		enabledSources := cfg.EnabledSources
+		errorBackoffSeconds := cfg.WorkerErrorBackoffSeconds
 		if errorBackoffSeconds < 1 {
 			errorBackoffSeconds = 1
 		}
-		chainSleepSeconds := config.GetenvInt("WORKER_CHAIN_SLEEP_SECONDS", 5)
+		chainSleepSeconds := cfg.WorkerChainSleepSeconds
 		if chainSleepSeconds < 0 {
 			chainSleepSeconds = 0
 		}
-		runOnce := config.GetenvBool("WORKER_CHAIN_RUN_ONCE", false)
+		runOnce := cfg.WorkerChainRunOnce
 
-		importerInterval := config.GetenvFloat("RAW_IMPORT_INTERVAL_MINUTES", 1)
+		importerInterval := cfg.RawImportIntervalMinutes
 		if importerInterval < 0 {
 			importerInterval = 1
 		}
@@ -83,81 +84,82 @@ func main() {
 		if importerSleep < time.Second {
 			importerSleep = time.Second
 		}
-		retries429 := config.GetenvInt("RAW_JOB_HTTP_429_RETRIES", 3)
+		retries429 := cfg.RawJobHTTP429Retries
 		if retries429 < 0 {
 			retries429 = 0
 		}
-		retryDelaySeconds := config.GetenvInt("RAW_JOB_HTTP_429_RETRY_DELAY_SECONDS", 10)
+		retryDelaySeconds := cfg.RawJobHTTP429RetryDelaySeconds
 		if retryDelaySeconds < 0 {
 			retryDelaySeconds = 0
 		}
-		stepTimeoutSeconds := config.GetenvInt("WORKER_CHAIN_STEP_TIMEOUT_SECONDS", 900)
+		stepTimeoutSeconds := cfg.WorkerChainStepTimeoutSeconds
 		if stepTimeoutSeconds < 0 {
 			stepTimeoutSeconds = 0
 		}
 
 		runChain := func() {
 			for {
-				parsedAIClassifierEnabled := config.GetenvBool("PARSED_JOB_AI_CLASSIFIER_ENABLED", false)
+				parsedAIClassifierEnabled := cfg.ParsedJobAIClassifierEnabled
 				parsedJobAvailabilityEnabled := cfg.ParsedJobAvailabilityEnabled
 				watcherSvc := watcher.New(watcher.Config{
-					Enabled:                          config.GetenvBool("WATCH_ENABLED", true),
+					Enabled:                          cfg.WatchEnabled,
 					RemoteRocketshipUSJobSitemapURLs: defaultRemoteRocketshipURLs,
-					IntervalMinutes:                  config.GetenvFloat("WATCH_INTERVAL_MINUTES", 1),
-					SampleKB:                         config.GetenvInt("WATCH_SAMPLE_KB", 40),
-					TimeoutSeconds:                   config.GetenvFloat("WATCH_TIMEOUT_SECONDS", 30),
+					IntervalMinutes:                  cfg.WatchIntervalMinutes,
+					SampleKB:                         cfg.WatchSampleKB,
+					TimeoutSeconds:                   cfg.WatchTimeoutSeconds,
 					BuiltinBaseURL:                   defaultBuiltinBaseURL,
-					BuiltinMaxPage:                   config.GetenvInt("WATCH_BUILTIN_MAX_PAGE", 1000),
-					BuiltinPagesPerCycle:             config.GetenvInt("WATCH_BUILTIN_PAGES_PER_CYCLE", 200),
-					BuiltinCheckpointPages:           config.GetenvInt("WATCH_BUILTIN_STATE_CHECKPOINT_PAGES", 5),
-					BuiltinFetchIntervalSeconds:      config.GetenvFloat("WATCH_BUILTIN_FETCH_INTERVAL_SECONDS", 0),
-					Builtin429RetryCount:             config.GetenvInt("WATCH_BUILTIN_429_RETRY_COUNT", 3),
-					Builtin429BackoffSeconds:         config.GetenvFloat("WATCH_BUILTIN_429_BACKOFF_SECONDS", 10),
+					BuiltinMaxPage:                   cfg.WatchBuiltinMaxPage,
+					BuiltinPagesPerCycle:             cfg.WatchBuiltinPagesPerCycle,
+					BuiltinCheckpointPages:           cfg.WatchBuiltinCheckpointPages,
+					BuiltinFetchIntervalSeconds:      cfg.WatchBuiltinFetchIntervalSeconds,
+					Builtin429RetryCount:             cfg.WatchBuiltin429RetryCount,
+					Builtin429BackoffSeconds:         cfg.WatchBuiltin429BackoffSeconds,
 					WorkableAPIURL:                   defaultWorkableAPIURL,
-					WorkablePageLimit:                config.GetenvInt("WATCH_WORKABLE_PAGE_LIMIT", 100),
+					WorkablePageLimit:                cfg.WatchWorkablePageLimit,
 					RemotiveSitemapURLTemplate:       defaultRemotiveSitemapURLTemplate,
-					RemotiveSitemapMaxIndex:          config.GetenvInt("WATCH_REMOTIVE_SITEMAP_MAX_INDEX", defaultRemotiveSitemapMaxIndex),
-					RemotiveSitemapMinIndex:          config.GetenvInt("WATCH_REMOTIVE_SITEMAP_MIN_INDEX", defaultRemotiveSitemapMinIndex),
+					RemotiveSitemapMaxIndex:          cfg.WatchRemotiveSitemapMaxIndex,
+					RemotiveSitemapMinIndex:          cfg.WatchRemotiveSitemapMinIndex,
 					DailyRemoteBaseURL:               defaultDailyRemoteBaseURL,
-					DailyRemoteMaxPage:               config.GetenvInt("WATCH_DAILYREMOTE_MAX_PAGE", 5000),
-					DailyRemotePagesPerCycle:         config.GetenvInt("WATCH_DAILYREMOTE_PAGES_PER_CYCLE", 300),
-					RemoteDotCoSitemapURL:            config.Getenv("WATCH_REMOTEDOTCO_SITEMAP_URL", defaultRemoteDotCoSitemapURL),
+					DailyRemoteMaxPage:               cfg.WatchDailyRemoteMaxPage,
+					DailyRemotePagesPerCycle:         cfg.WatchDailyRemotePagesPerCycle,
+					RemoteDotCoSitemapURL:            cfg.WatchRemoteDotCoSitemapURL,
+					FlexJobsSitemapURL:               cfg.FlexJobsSitemapURL,
 					HiringCafeSearchAPIURL:           defaultHiringCafeSearchURL,
 					HiringCafeTotalCountURL:          defaultHiringCafeCountURL,
-					HiringCafePageSize:               config.GetenvInt("WATCH_HIRINGCAFE_PAGE_SIZE", 200),
+					HiringCafePageSize:               cfg.WatchHiringCafePageSize,
 					EnabledSources:                   enabledSources,
 				}, db)
 
 				importerSvc := importer.New(importer.Config{
 					IntervalMinutes:     importerInterval,
 					SleepDuration:       importerSleep,
-					BatchSize:           config.GetenvInt("RAW_IMPORT_BATCH_SIZE", 1000),
-					PayloadsPerCycle:    config.GetenvInt("RAW_IMPORT_PAYLOADS_PER_CYCLE", 40),
+					BatchSize:           cfg.RawImportBatchSize,
+					PayloadsPerCycle:    cfg.RawImportPayloadsPerCycle,
 					EnabledSources:      enabledSources,
 					RunOnce:             true,
 					ErrorBackoffSeconds: errorBackoffSeconds,
-					WorkerCount:         config.GetenvInt("RAW_IMPORT_WORKER_COUNT", 2),
+					WorkerCount:         cfg.RawImportWorkerCount,
 				}, db)
 
 				rawSvc := raw.New(raw.Config{
-					BatchSize:             config.GetenvInt("RAW_JOB_WORKER_BATCH_SIZE", 500),
-					PollSeconds:           config.GetenvInt("RAW_JOB_WORKER_POLL_SECONDS", 5),
+					BatchSize:             cfg.RawJobWorkerBatchSize,
+					PollSeconds:           cfg.RawJobWorkerPollSeconds,
 					RunOnce:               true,
 					ErrorBackoffSeconds:   errorBackoffSeconds,
-					FetchTimeoutSeconds:   config.GetenvInt("RAW_JOB_FETCH_TIMEOUT_SECONDS", 45),
-					RetentionDays:         config.GetenvInt("RAW_JOB_RETENTION_DAYS", 365),
-					RetentionCleanupBatch: config.GetenvInt("RAW_JOB_RETENTION_CLEANUP_BATCH", 5000),
-					WorkerCount:           config.GetenvInt("RAW_JOB_WORKER_COUNT", 4),
+					FetchTimeoutSeconds:   cfg.RawJobFetchTimeoutSeconds,
+					RetentionDays:         cfg.RawJobRetentionDays,
+					RetentionCleanupBatch: cfg.RawJobRetentionCleanupBatch,
+					WorkerCount:           cfg.RawJobWorkerCount,
 				}, db)
 				rawSvc.EnabledSources = enabledSources
 				rawSvc.ReadHTMLForSource = makeReadHTMLForSourceWith429Retry(retries429, time.Duration(retryDelaySeconds)*time.Second)
 
 				parsedSvc := parsed.New(parsed.Config{
-					BatchSize:               config.GetenvInt("PARSED_JOB_WORKER_BATCH_SIZE", 200),
-					PollSeconds:             config.GetenvFloat("PARSED_JOB_WORKER_POLL_SECONDS", 5),
+					BatchSize:               cfg.ParsedJobWorkerBatchSize,
+					PollSeconds:             cfg.ParsedJobWorkerPollSeconds,
 					RunOnce:                 true,
 					ErrorBackoffSeconds:     errorBackoffSeconds,
-					WorkerCount:             config.GetenvInt("PARSED_JOB_WORKER_COUNT", 1),
+					WorkerCount:             cfg.ParsedJobWorkerCount,
 					CategorySignalTokensURL: cfg.CategorySignalTokensURL,
 					DuplicateJobURLRulesURL: cfg.DuplicateJobURLRulesURL,
 					TechStackCatalogURL:     cfg.TechStackCatalogURL,
@@ -166,8 +168,8 @@ func main() {
 				var parsedAIClassifierSvc *parsedaiclassifier.Service
 				if parsedAIClassifierEnabled {
 					parsedAIClassifierSvc = parsedaiclassifier.New(parsedaiclassifier.Config{
-						BatchSize:            config.GetenvInt("PARSED_JOB_AI_CLASSIFIER_BATCH_SIZE", 200),
-						PollSeconds:          config.GetenvFloat("PARSED_JOB_AI_CLASSIFIER_POLL_SECONDS", 5),
+						BatchSize:            cfg.ParsedJobAIClassifierBatchSize,
+						PollSeconds:          cfg.ParsedJobAIClassifierPollSeconds,
 						RunOnce:              true,
 						ErrorBackoffSeconds:  errorBackoffSeconds,
 						Provider:             cfg.AIClassifierProvider,
@@ -203,11 +205,11 @@ func main() {
 				var parsedAvailabilitySvc *parsedjobavailability.Service
 				if parsedJobAvailabilityEnabled {
 					parsedAvailabilitySvc = parsedjobavailability.New(parsedjobavailability.Config{
-						BatchSize:           config.GetenvInt("PARSED_JOB_AVAILABILITY_BATCH_SIZE", 200),
-						PollSeconds:         config.GetenvFloat("PARSED_JOB_AVAILABILITY_POLL_SECONDS", 5),
+						BatchSize:           cfg.ParsedJobAvailabilityBatchSize,
+						PollSeconds:         cfg.ParsedJobAvailabilityPollSeconds,
 						RunOnce:             true,
 						ErrorBackoffSeconds: errorBackoffSeconds,
-						WorkerCount:         config.GetenvInt("PARSED_JOB_AVAILABILITY_WORKER_COUNT", 4),
+						WorkerCount:         cfg.ParsedJobAvailabilityWorkerCount,
 						FetchTimeoutSeconds: cfg.ParsedJobAvailabilityFetchTimeoutSeconds,
 					}, db)
 					parsedAvailabilitySvc.EnabledSources = enabledSources
@@ -452,6 +454,9 @@ func makeReadHTMLForSourceWith429Retry(max429Retries int, retryDelay time.Durati
 	}
 
 	return func(ctx context.Context, source, targetURL string) (string, int, error) {
+		if tlsErr == nil && source == flexjobs.Source {
+			return tlsFetcher.ReadHTML(ctx, targetURL)
+		}
 		if tlsErr == nil && source == remotedotco.Source {
 			return tlsFetcher.ReadHTMLWithHeaders(ctx, targetURL, map[string]string{
 				"Cookie": remotedotco.Cookie,

@@ -88,6 +88,27 @@ func TestParseRawHTMLFixtureUsesDisplayedWorldwideInsteadOfApplicantCountryList(
 	}
 }
 
+func TestParseRawHTMLFixtureUsesDisplayedSouthKorea(t *testing.T) {
+	orig := resolveRedirectURLDailyRemoteFunc
+	resolveRedirectURLDailyRemoteFunc = func(_url string) string { return "https://boards.greenhouse.io/acme/jobs/4857919" }
+	defer func() { resolveRedirectURLDailyRemoteFunc = orig }()
+
+	fixturePath := filepath.Join("..", "..", "..", "test-extract", "dailyremote", "raw-job-4.html")
+	html, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	payload, err := ParseRawHTML(string(html), "https://dailyremote.com/remote-job/regional-account-executive-seoul-4857919")
+	if err != nil {
+		t.Fatalf("ParseRawHTML failed: %v", err)
+	}
+	values, _ := payload["locationCountries"].([]string)
+	if len(values) != 1 || values[0] != "Korea, Republic Of" {
+		t.Fatalf("expected displayed South Korea locationCountries, got %#v", payload["locationCountries"])
+	}
+}
+
 func TestToTargetJobURL(t *testing.T) {
 	target := ToTargetJobURL("https://dailyremote.com/remote-job/backend-engineer-12345?ref=a#section")
 	if !strings.Contains(target, "/apply/12345") {

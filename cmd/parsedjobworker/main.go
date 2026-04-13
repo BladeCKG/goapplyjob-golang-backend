@@ -23,16 +23,16 @@ func main() {
 	defer db.Close()
 
 	svc := parsed.New(parsed.Config{
-		BatchSize:               config.GetenvInt("PARSED_JOB_WORKER_BATCH_SIZE", 260),
-		PollSeconds:             config.GetenvFloat("PARSED_JOB_WORKER_POLL_SECONDS", 5),
-		RunOnce:                 config.GetenvBool("PARSED_JOB_RUN_ONCE", false),
-		ErrorBackoffSeconds:     config.GetenvInt("WORKER_ERROR_BACKOFF_SECONDS", 10),
-		WorkerCount:             config.GetenvInt("PARSED_JOB_WORKER_COUNT", 1),
+		BatchSize:               cfg.ParsedJobWorkerBatchSize,
+		PollSeconds:             cfg.ParsedJobWorkerPollSeconds,
+		RunOnce:                 cfg.ParsedJobRunOnce,
+		ErrorBackoffSeconds:     cfg.WorkerErrorBackoffSeconds,
+		WorkerCount:             cfg.ParsedJobWorkerCount,
 		CategorySignalTokensURL: cfg.CategorySignalTokensURL,
 		DuplicateJobURLRulesURL: cfg.DuplicateJobURLRulesURL,
 		TechStackCatalogURL:     cfg.TechStackCatalogURL,
 	}, db)
-	svc.EnabledSources = config.GetenvCSVSet("ENABLED_SOURCES", "remoterocketship")
+	svc.EnabledSources = cfg.EnabledSources
 	if err := svc.RunForever(); err != nil {
 		log.Fatal(err)
 	}

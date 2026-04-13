@@ -7,6 +7,7 @@ import (
 	"goapplyjob-golang-backend/internal/parsedjobavailability"
 	"goapplyjob-golang-backend/internal/raw"
 	"goapplyjob-golang-backend/internal/scraper"
+	"goapplyjob-golang-backend/internal/sources/flexjobs"
 	"goapplyjob-golang-backend/internal/sources/remotedotco"
 	"goapplyjob-golang-backend/internal/workerlog"
 	"log"
@@ -32,24 +33,24 @@ func main() {
 	}
 	defer db.Close()
 
-	retries429 := config.GetenvInt("RAW_JOB_HTTP_429_RETRIES", 3)
+	retries429 := cfg.RawJobHTTP429Retries
 	if retries429 < 0 {
 		retries429 = 0
 	}
-	retryDelaySeconds := config.GetenvInt("RAW_JOB_HTTP_429_RETRY_DELAY_SECONDS", 10)
+	retryDelaySeconds := cfg.RawJobHTTP429RetryDelaySeconds
 	if retryDelaySeconds < 0 {
 		retryDelaySeconds = 0
 	}
 
 	svc := parsedjobavailability.New(parsedjobavailability.Config{
-		BatchSize:           config.GetenvInt("PARSED_JOB_AVAILABILITY_BATCH_SIZE", 200),
-		PollSeconds:         config.GetenvFloat("PARSED_JOB_AVAILABILITY_POLL_SECONDS", 5),
-		RunOnce:             config.GetenvBool("PARSED_JOB_AVAILABILITY_RUN_ONCE", false),
-		ErrorBackoffSeconds: config.GetenvInt("WORKER_ERROR_BACKOFF_SECONDS", 10),
-		WorkerCount:         config.GetenvInt("PARSED_JOB_AVAILABILITY_WORKER_COUNT", 4),
+		BatchSize:           cfg.ParsedJobAvailabilityBatchSize,
+		PollSeconds:         cfg.ParsedJobAvailabilityPollSeconds,
+		RunOnce:             cfg.ParsedJobAvailabilityRunOnce,
+		ErrorBackoffSeconds: cfg.WorkerErrorBackoffSeconds,
+		WorkerCount:         cfg.ParsedJobAvailabilityWorkerCount,
 		FetchTimeoutSeconds: cfg.ParsedJobAvailabilityFetchTimeoutSeconds,
 	}, db)
-	svc.EnabledSources = config.GetenvCSVSet("ENABLED_SOURCES", "remoterocketship")
+	svc.EnabledSources = cfg.EnabledSources
 	readHTMLForSource := makeReadHTMLForSourceWith429Retry(retries429, time.Duration(retryDelaySeconds)*time.Second)
 	svc.ReadHTMLForSource = func(ctx context.Context, source, targetURL string) (string, int, error) {
 		return readHTMLForSource(ctx, source, targetURL)
@@ -79,6 +80,9 @@ func makeReadHTMLForSourceWith429Retry(max429Retries int, retryDelay time.Durati
 	}
 
 	return func(ctx context.Context, source, targetURL string) (string, int, error) {
+		if tlsErr == nil && source == flexjobs.Source {
+			return tlsFetcher.ReadHTML(ctx, targetURL)
+		}
 		if tlsErr == nil && source == remotedotco.Source {
 			return tlsFetcher.ReadHTMLWithHeaders(ctx, targetURL, map[string]string{
 				"Cookie": remotedotco.Cookie,

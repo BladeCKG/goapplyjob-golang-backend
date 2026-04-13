@@ -7,6 +7,7 @@ import (
 	"goapplyjob-golang-backend/internal/database"
 	"goapplyjob-golang-backend/internal/raw"
 	"goapplyjob-golang-backend/internal/scraper"
+	"goapplyjob-golang-backend/internal/sources/flexjobs"
 	"goapplyjob-golang-backend/internal/sources/remotedotco"
 	"goapplyjob-golang-backend/internal/workerlog"
 	"log"
@@ -27,26 +28,26 @@ func main() {
 	}
 	defer db.Close()
 
-	retries429 := config.GetenvInt("RAW_JOB_HTTP_429_RETRIES", 3)
+	retries429 := cfg.RawJobHTTP429Retries
 	if retries429 < 0 {
 		retries429 = 0
 	}
-	retryDelaySeconds := config.GetenvInt("RAW_JOB_HTTP_429_RETRY_DELAY_SECONDS", 10)
+	retryDelaySeconds := cfg.RawJobHTTP429RetryDelaySeconds
 	if retryDelaySeconds < 0 {
 		retryDelaySeconds = 0
 	}
 
 	svc := raw.New(raw.Config{
-		BatchSize:             config.GetenvInt("RAW_JOB_WORKER_BATCH_SIZE", 320),
-		PollSeconds:           config.GetenvInt("RAW_JOB_WORKER_POLL_SECONDS", 5),
-		RunOnce:               config.GetenvBool("RAW_JOB_RUN_ONCE", false),
-		ErrorBackoffSeconds:   config.GetenvInt("WORKER_ERROR_BACKOFF_SECONDS", 10),
-		FetchTimeoutSeconds:   config.GetenvInt("RAW_JOB_FETCH_TIMEOUT_SECONDS", 45),
-		RetentionDays:         config.GetenvInt("RAW_JOB_RETENTION_DAYS", 365),
-		RetentionCleanupBatch: config.GetenvInt("RAW_JOB_RETENTION_CLEANUP_BATCH", 5000),
-		WorkerCount:           config.GetenvInt("RAW_JOB_WORKER_COUNT", 4),
+		BatchSize:             cfg.RawJobWorkerBatchSize,
+		PollSeconds:           cfg.RawJobWorkerPollSeconds,
+		RunOnce:               cfg.RawJobRunOnce,
+		ErrorBackoffSeconds:   cfg.WorkerErrorBackoffSeconds,
+		FetchTimeoutSeconds:   cfg.RawJobFetchTimeoutSeconds,
+		RetentionDays:         cfg.RawJobRetentionDays,
+		RetentionCleanupBatch: cfg.RawJobRetentionCleanupBatch,
+		WorkerCount:           cfg.RawJobWorkerCount,
 	}, db)
-	svc.EnabledSources = config.GetenvCSVSet("ENABLED_SOURCES", "remoterocketship")
+	svc.EnabledSources = cfg.EnabledSources
 	svc.ReadHTMLForSource = makeReadHTMLForSourceWith429Retry(retries429, time.Duration(retryDelaySeconds)*time.Second)
 	if err := svc.RunForever(); err != nil {
 		log.Fatal(err)
@@ -72,6 +73,9 @@ func makeReadHTMLForSourceWith429Retry(max429Retries int, retryDelay time.Durati
 	}
 
 	return func(ctx context.Context, source, targetURL string) (string, int, error) {
+		if tlsErr == nil && source == flexjobs.Source {
+			return tlsFetcher.ReadHTML(ctx, targetURL)
+		}
 		if tlsErr == nil && source == remotedotco.Source {
 			return tlsFetcher.ReadHTMLWithHeaders(ctx, targetURL, map[string]string{
 				"Cookie": remotedotco.Cookie,

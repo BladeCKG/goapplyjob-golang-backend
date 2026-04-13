@@ -51,33 +51,34 @@ func main() {
 	}
 
 	svc := watcher.New(watcher.Config{
-		Enabled:                          config.GetenvBool("WATCH_ENABLED", true),
+		Enabled:                          cfg.WatchEnabled,
 		RemoteRocketshipUSJobSitemapURLs: defaultRemoteRocketshipURLs,
-		IntervalMinutes:                  config.GetenvFloat("WATCH_INTERVAL_MINUTES", 1),
-		SampleKB:                         config.GetenvInt("WATCH_SAMPLE_KB", 40),
-		TimeoutSeconds:                   config.GetenvFloat("WATCH_TIMEOUT_SECONDS", 30),
+		IntervalMinutes:                  cfg.WatchIntervalMinutes,
+		SampleKB:                         cfg.WatchSampleKB,
+		TimeoutSeconds:                   cfg.WatchTimeoutSeconds,
 		BuiltinBaseURL:                   defaultBuiltinBaseURL,
-		BuiltinMaxPage:                   config.GetenvInt("WATCH_BUILTIN_MAX_PAGE", 1000),
-		BuiltinPagesPerCycle:             config.GetenvInt("WATCH_BUILTIN_PAGES_PER_CYCLE", 200),
-		BuiltinCheckpointPages:           config.GetenvInt("WATCH_BUILTIN_STATE_CHECKPOINT_PAGES", 5),
-		BuiltinFetchIntervalSeconds:      config.GetenvFloat("WATCH_BUILTIN_FETCH_INTERVAL_SECONDS", 0),
-		Builtin429RetryCount:             config.GetenvInt("WATCH_BUILTIN_429_RETRY_COUNT", 3),
-		Builtin429BackoffSeconds:         config.GetenvFloat("WATCH_BUILTIN_429_BACKOFF_SECONDS", 10),
+		BuiltinMaxPage:                   cfg.WatchBuiltinMaxPage,
+		BuiltinPagesPerCycle:             cfg.WatchBuiltinPagesPerCycle,
+		BuiltinCheckpointPages:           cfg.WatchBuiltinCheckpointPages,
+		BuiltinFetchIntervalSeconds:      cfg.WatchBuiltinFetchIntervalSeconds,
+		Builtin429RetryCount:             cfg.WatchBuiltin429RetryCount,
+		Builtin429BackoffSeconds:         cfg.WatchBuiltin429BackoffSeconds,
 		WorkableAPIURL:                   defaultWorkableAPIURL,
-		WorkablePageLimit:                config.GetenvInt("WATCH_WORKABLE_PAGE_LIMIT", 100),
+		WorkablePageLimit:                cfg.WatchWorkablePageLimit,
 		RemotiveSitemapURLTemplate:       defaultRemotiveSitemapURLTemplate,
-		RemotiveSitemapMaxIndex:          config.GetenvInt("WATCH_REMOTIVE_SITEMAP_MAX_INDEX", defaultRemotiveSitemapMaxIndex),
-		RemotiveSitemapMinIndex:          config.GetenvInt("WATCH_REMOTIVE_SITEMAP_MIN_INDEX", defaultRemotiveSitemapMinIndex),
+		RemotiveSitemapMaxIndex:          cfg.WatchRemotiveSitemapMaxIndex,
+		RemotiveSitemapMinIndex:          cfg.WatchRemotiveSitemapMinIndex,
 		DailyRemoteBaseURL:               defaultDailyRemoteBaseURL,
-		DailyRemoteMaxPage:               config.GetenvInt("WATCH_DAILYREMOTE_MAX_PAGE", 5000),
-		DailyRemotePagesPerCycle:         config.GetenvInt("WATCH_DAILYREMOTE_PAGES_PER_CYCLE", 300),
-		RemoteDotCoSitemapURL:            config.Getenv("WATCH_REMOTEDOTCO_SITEMAP_URL", defaultRemoteDotCoSitemapURL),
+		DailyRemoteMaxPage:               cfg.WatchDailyRemoteMaxPage,
+		DailyRemotePagesPerCycle:         cfg.WatchDailyRemotePagesPerCycle,
+		RemoteDotCoSitemapURL:            cfg.WatchRemoteDotCoSitemapURL,
+		FlexJobsSitemapURL:               cfg.FlexJobsSitemapURL,
 		HiringCafeSearchAPIURL:           defaultHiringCafeSearchURL,
 		HiringCafeTotalCountURL:          defaultHiringCafeCountURL,
-		HiringCafePageSize:               config.GetenvInt("WATCH_HIRINGCAFE_PAGE_SIZE", 200),
-		EnabledSources:                   config.GetenvCSVSet("ENABLED_SOURCES", "remoterocketship"),
+		HiringCafePageSize:               cfg.WatchHiringCafePageSize,
+		EnabledSources:                   cfg.EnabledSources,
 	}, db)
-	runOnce := config.GetenvBool("WATCH_RUN_ONCE", false)
+	runOnce := cfg.WatchRunOnce
 	if err := svc.RunForever(runOnce); err != nil {
 		log.Fatal(err)
 	}
