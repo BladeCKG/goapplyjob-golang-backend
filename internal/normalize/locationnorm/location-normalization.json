@@ -758,10 +758,14 @@
       "VIETNAM": "Viet Nam",
       "ELSALVADOR": "El Salvador",
       "CZECHIA": "Czech Republic",
+      "Czech": "Czech Republic",
+      "BRASIL": "Brazil",
       "KOREA": "Korea, Republic Of",
       "SOUTH KOREA": "Korea, Republic Of",
+      "KOREA SOUTH": "Korea, Republic Of",
       "SOUTHKOREA": "Korea, Republic Of",
       "NORTH KOREA": "Korea, Democratic People's Republic Of",
+      "KOREA NORTH": "Korea, Democratic People's Republic Of",
       "NORTHKOREA": "Korea, Democratic People's Republic Of",
       "SOUTHAFRICA": "South Africa",
       "SOUTHSUDAN": "South Sudan",
@@ -805,7 +809,8 @@
       "IRAN": "Iran, Islamic Republic Of",
       "TANZANIA": "Tanzania, United Republic Of",
       "BRUNEI": "Brunei Darussalam",
-      "MICRONESIA": "Micronesia, Federated States Of"
+      "MICRONESIA": "Micronesia, Federated States Of",
+      "IVORY COAST": "Côte D'ivoire"
     }
   },
   "us_states": {
