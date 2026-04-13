@@ -15,13 +15,13 @@ const (
 
 func TestNormalizeCountryNameSupportsCompactAliases(t *testing.T) {
 	tests := map[string]string{
-		"vietnam":            "Viet Nam",
+		"vietnam":            "Vietnam",
 		"elsalvador":         "El Salvador",
 		"unitedkingdom":      "United Kingdom",
 		"unitedarabemirates": "United Arab Emirates",
-		"southkorea":         "Korea, Republic Of",
-		"northkorea":         "Korea, Democratic People's Republic Of",
-		"czechia":            "Czech Republic",
+		"southkorea":         "South Korea",
+		"northkorea":         "North Korea",
+		"czechia":            "Czechia",
 		"newzealand":         "New Zealand",
 		"costarica":          "Costa Rica",
 	}
@@ -35,11 +35,11 @@ func TestNormalizeCountryNameSupportsCompactAliases(t *testing.T) {
 
 func TestNormalizeCountryNameSupportsPlainAliases(t *testing.T) {
 	tests := map[string]string{
-		"Russia":    "Russian Federation",
-		"Laos":      "Lao People's Democratic Republic",
-		"Moldova":   "Moldova, Republic Of",
-		"Taiwan":    "Taiwan, Province Of China",
-		"Venezuela": "Venezuela, Bolivarian Republic Of",
+		"Russia":    "Russia",
+		"Laos":      "Laos",
+		"Moldova":   "Moldova",
+		"Taiwan":    "Taiwan",
+		"Venezuela": "Venezuela",
 	}
 
 	for input, want := range tests {

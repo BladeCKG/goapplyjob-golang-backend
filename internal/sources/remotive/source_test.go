@@ -121,7 +121,7 @@ func TestParseRawHTMLExtractsCountriesFromLocationComponentFixtures(t *testing.T
 		fileName string
 		want     []string
 	}{
-		{name: "russia", fileName: "raw-job-1.html", want: []string{"Russian Federation"}},
+		{name: "russia", fileName: "raw-job-1.html", want: []string{"Russia"}},
 		{name: "regional plus israel", fileName: "raw-job-2.html", want: []string{"Americas", "Europe", "Israel"}},
 		{name: "worldwide", fileName: "raw-job-3.html", want: []string{"Worldwide"}},
 		{name: "usa and canada", fileName: "raw-job-4.html", want: []string{"United States", "Canada", "USA Timezones"}},

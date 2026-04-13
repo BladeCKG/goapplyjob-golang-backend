@@ -104,7 +104,7 @@ func TestParseRawHTMLFixtureUsesDisplayedSouthKorea(t *testing.T) {
 		t.Fatalf("ParseRawHTML failed: %v", err)
 	}
 	values, _ := payload["locationCountries"].([]string)
-	if len(values) != 1 || values[0] != "Korea, Republic Of" {
+	if len(values) != 1 || values[0] != "South Korea" {
 		t.Fatalf("expected displayed South Korea locationCountries, got %#v", payload["locationCountries"])
 	}
 }
