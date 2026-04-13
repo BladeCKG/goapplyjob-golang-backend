@@ -1346,7 +1346,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to list parsed jobs"})
 		return
 	}
-	query := `SELECT p.id, p.raw_us_job_id, r.source, p.company_id, p.external_job_id, p.role_title, p.role_description, p.role_requirements, p.url, p.slug, p.employment_type, p.location_type, p.location_city, p.location_us_states::text, p.location_countries::text, p.categorized_job_title, p.categorized_job_function, p.tech_stack::text, p.salary_type, p.salary_min, p.salary_max, p.salary_human_text, p.salary_currency_code, p.salary_currency_symbol, p.salary_min_usd, p.salary_max_usd, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.created_at_source, p.date_deleted, p.updated_at` +
+	query := `SELECT p.id, p.raw_us_job_id, r.source, r.url, p.company_id, p.external_job_id, p.role_title, p.role_description, p.role_requirements, p.url, p.slug, p.employment_type, p.location_type, p.location_city, p.location_us_states::text, p.location_countries::text, p.categorized_job_title, p.categorized_job_function, p.tech_stack::text, p.salary_type, p.salary_min, p.salary_max, p.salary_human_text, p.salary_currency_code, p.salary_currency_symbol, p.salary_min_usd, p.salary_max_usd, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.created_at_source, p.date_deleted, p.updated_at` +
 		baseFrom + where + orderClause + ` LIMIT ? OFFSET ?`
 	queryArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, queryArgs...)
@@ -1360,6 +1360,7 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 		var (
 			id, rawUSJobID    int64
 			sourceVal         string
+			rawURL            sql.NullString
 			companyID         sql.NullInt64
 			externalJobID     sql.NullString
 			roleTitle         sql.NullString
@@ -1392,13 +1393,14 @@ func (h *Handler) listParsedJobs(c *gin.Context) {
 			dateDeleted       sql.NullString
 			updatedAt         sql.NullString
 		)
-		if err := rows.Scan(&id, &rawUSJobID, &sourceVal, &companyID, &externalJobID, &roleTitle, &roleDesc, &roleRequirements, &url, &slug, &employmentType, &locationType, &locationCity, &locationStates, &locationCountries, &categoryTitle, &categoryFunc, &techStack, &salaryType, &salaryMin, &salaryMax, &salaryHumanText, &salaryCurrency, &salarySymbol, &salaryMinUSD, &salaryMaxUSD, &isEntry, &isJunior, &isMid, &isSenior, &isLead, &createdAt, &dateDeleted, &updatedAt); err != nil {
+		if err := rows.Scan(&id, &rawUSJobID, &sourceVal, &rawURL, &companyID, &externalJobID, &roleTitle, &roleDesc, &roleRequirements, &url, &slug, &employmentType, &locationType, &locationCity, &locationStates, &locationCountries, &categoryTitle, &categoryFunc, &techStack, &salaryType, &salaryMin, &salaryMax, &salaryHumanText, &salaryCurrency, &salarySymbol, &salaryMinUSD, &salaryMaxUSD, &isEntry, &isJunior, &isMid, &isSenior, &isLead, &createdAt, &dateDeleted, &updatedAt); err != nil {
 			continue
 		}
 		items = append(items, gin.H{
 			"id":                       id,
 			"raw_us_job_id":            rawUSJobID,
 			"source":                   sourceVal,
+			"raw_us_job_url":           nullableString(rawURL),
 			"company_id":               nullableInt(companyID),
 			"external_job_id":          nullableString(externalJobID),
 			"role_title":               nullableString(roleTitle),
