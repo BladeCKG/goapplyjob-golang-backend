@@ -11,6 +11,7 @@ import (
 	"goapplyjob-golang-backend/internal/email"
 	"goapplyjob-golang-backend/internal/jobs"
 	"goapplyjob-golang-backend/internal/parsedaiclassifier"
+	"goapplyjob-golang-backend/internal/sources/plugins"
 	"net/http"
 	"net/mail"
 	"sort"
@@ -41,6 +42,7 @@ func NewHandler(cfg config.Config, db *database.DB, authHandler *auth.Handler) *
 
 func (h *Handler) Register(router gin.IRouter) {
 	router.GET("/admin/status", h.status)
+	router.GET("/admin/supported-sources", h.listSupportedSources)
 	router.GET("/admin/users", h.listUsers)
 	router.PATCH("/admin/users/:userID/subscription", h.upsertUserSubscription)
 	router.DELETE("/admin/users/:userID", h.deleteUser)
@@ -74,6 +76,15 @@ func (h *Handler) status(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"is_admin": isAdminEmail(user.Email)})
+}
+
+func (h *Handler) listSupportedSources(c *gin.Context) {
+	if _, ok := h.requireAdmin(c); !ok {
+		return
+	}
+	sources := plugins.List()
+	sort.Strings(sources)
+	c.JSON(http.StatusOK, gin.H{"items": sources})
 }
 
 func (h *Handler) listUsers(c *gin.Context) {
