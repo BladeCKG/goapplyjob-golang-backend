@@ -322,6 +322,9 @@ func (h *Handler) verifyLink(c *gin.Context) {
 }
 
 func (h *Handler) passwordSignup(c *gin.Context) {
+	c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "Password authentication is disabled"})
+	return
+
 	var payload struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -433,6 +436,9 @@ func (h *Handler) supabaseGoogleLogin(c *gin.Context) {
 }
 
 func (h *Handler) passwordLogin(c *gin.Context) {
+	c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "Password authentication is disabled"})
+	return
+
 	var payload struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -550,6 +556,9 @@ func (h *Handler) updateMe(c *gin.Context) {
 	})
 }
 func (h *Handler) passwordChange(c *gin.Context) {
+	c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "Password authentication is disabled"})
+	return
+
 	user, err := h.CurrentUser(c)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"detail": "Not authenticated"})

@@ -2063,84 +2063,53 @@ func TestCancelDodoSubscriptionUpdatesPayload(t *testing.T) {
 	}
 }
 
-func TestPasswordSignupAndLoginFlow(t *testing.T) {
+func TestPasswordAuthEndpointsDisabled(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
-	signupBody, _ := json.Marshal(map[string]string{"email": "pw-user@example.com", "password": "StrongPass123"})
-	signupReq := httptest.NewRequest(http.MethodPost, "/auth/password/signup", bytes.NewReader(signupBody))
-	signupReq.Header.Set("Content-Type", "application/json")
-	signupRec := httptest.NewRecorder()
-	router.ServeHTTP(signupRec, signupReq)
-	assertStatus(t, signupRec.Code, http.StatusOK)
-
-	meAfterSignupReq := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
-	meAfterSignupReq.AddCookie(signupRec.Result().Cookies()[0])
-	meAfterSignupRec := httptest.NewRecorder()
-	router.ServeHTTP(meAfterSignupRec, meAfterSignupReq)
-	assertStatus(t, meAfterSignupRec.Code, http.StatusOK)
-	var meAfterSignup map[string]any
-	decodeBody(t, meAfterSignupRec.Body.Bytes(), &meAfterSignup)
-	if meAfterSignup["email"].(string) != "pw-user@example.com" {
-		t.Fatalf("unexpected me signup payload %#v", meAfterSignup)
+	requests := []struct {
+		name   string
+		method string
+		path   string
+		body   map[string]string
+		cookie *http.Cookie
+	}{
+		{
+			name:   "signup",
+			method: http.MethodPost,
+			path:   "/auth/password/signup",
+			body:   map[string]string{"email": "pw-user@example.com", "password": "StrongPass123"},
+		},
+		{
+			name:   "login",
+			method: http.MethodPost,
+			path:   "/auth/password/login",
+			body:   map[string]string{"email": "pw-user@example.com", "password": "StrongPass123"},
+		},
+		{
+			name:   "change",
+			method: http.MethodPost,
+			path:   "/auth/password/change",
+			body:   map[string]string{"current_password": "StrongPass123", "new_password": "NewStrongPass123"},
+			cookie: verifyLoginCode(t, router, "pw-user@example.com", requestLoginCode(t, router, "pw-user@example.com")),
+		},
 	}
 
-	cookie := signupRec.Result().Cookies()[0]
-	logoutReq := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
-	logoutReq.AddCookie(cookie)
-	logoutRec := httptest.NewRecorder()
-	router.ServeHTTP(logoutRec, logoutReq)
-	assertStatus(t, logoutRec.Code, http.StatusOK)
-
-	loginBody, _ := json.Marshal(map[string]string{"email": "pw-user@example.com", "password": "StrongPass123"})
-	loginReq := httptest.NewRequest(http.MethodPost, "/auth/password/login", bytes.NewReader(loginBody))
-	loginReq.Header.Set("Content-Type", "application/json")
-	loginRec := httptest.NewRecorder()
-	router.ServeHTTP(loginRec, loginReq)
-	assertStatus(t, loginRec.Code, http.StatusOK)
-
-	loginCookie := loginRec.Result().Cookies()[0]
-	badChangeBody, _ := json.Marshal(map[string]string{"current_password": "WrongPass123", "new_password": "NewStrongPass123"})
-	badChangeReq := httptest.NewRequest(http.MethodPost, "/auth/password/change", bytes.NewReader(badChangeBody))
-	badChangeReq.Header.Set("Content-Type", "application/json")
-	badChangeReq.AddCookie(loginCookie)
-	badChangeRec := httptest.NewRecorder()
-	router.ServeHTTP(badChangeRec, badChangeReq)
-	assertStatus(t, badChangeRec.Code, http.StatusUnauthorized)
-
-	changeBody, _ := json.Marshal(map[string]string{"current_password": "StrongPass123", "new_password": "NewStrongPass123"})
-	changeReq := httptest.NewRequest(http.MethodPost, "/auth/password/change", bytes.NewReader(changeBody))
-	changeReq.Header.Set("Content-Type", "application/json")
-	changeReq.AddCookie(loginCookie)
-	changeRec := httptest.NewRecorder()
-	router.ServeHTTP(changeRec, changeReq)
-	assertStatus(t, changeRec.Code, http.StatusOK)
-
-	logoutReq2 := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
-	logoutReq2.AddCookie(loginCookie)
-	logoutRec2 := httptest.NewRecorder()
-	router.ServeHTTP(logoutRec2, logoutReq2)
-	assertStatus(t, logoutRec2.Code, http.StatusOK)
-
-	oldPasswordBody, _ := json.Marshal(map[string]string{"email": "pw-user@example.com", "password": "StrongPass123"})
-	oldPasswordReq := httptest.NewRequest(http.MethodPost, "/auth/password/login", bytes.NewReader(oldPasswordBody))
-	oldPasswordReq.Header.Set("Content-Type", "application/json")
-	oldPasswordRec := httptest.NewRecorder()
-	router.ServeHTTP(oldPasswordRec, oldPasswordReq)
-	assertStatus(t, oldPasswordRec.Code, http.StatusUnauthorized)
-
-	newPasswordBody, _ := json.Marshal(map[string]string{"email": "pw-user@example.com", "password": "NewStrongPass123"})
-	newPasswordReq := httptest.NewRequest(http.MethodPost, "/auth/password/login", bytes.NewReader(newPasswordBody))
-	newPasswordReq.Header.Set("Content-Type", "application/json")
-	newPasswordRec := httptest.NewRecorder()
-	router.ServeHTTP(newPasswordRec, newPasswordReq)
-	assertStatus(t, newPasswordRec.Code, http.StatusOK)
-
-	badBody, _ := json.Marshal(map[string]string{"email": "pw-user@example.com", "password": "WrongPass123"})
-	badReq := httptest.NewRequest(http.MethodPost, "/auth/password/login", bytes.NewReader(badBody))
-	badReq.Header.Set("Content-Type", "application/json")
-	badRec := httptest.NewRecorder()
-	router.ServeHTTP(badRec, badReq)
-	assertStatus(t, badRec.Code, http.StatusUnauthorized)
+	for _, item := range requests {
+		body, _ := json.Marshal(item.body)
+		req := httptest.NewRequest(item.method, item.path, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if item.cookie != nil {
+			req.AddCookie(item.cookie)
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		assertStatus(t, rec.Code, http.StatusServiceUnavailable)
+		var payload map[string]any
+		decodeBody(t, rec.Body.Bytes(), &payload)
+		if payload["detail"] != "Password authentication is disabled" {
+			t.Fatalf("%s: unexpected payload %#v", item.name, payload)
+		}
+	}
 }
 
 func TestSupabaseGoogleLoginFlow(t *testing.T) {
@@ -2211,7 +2180,7 @@ func TestCodeLoginDisabled(t *testing.T) {
 	assertStatus(t, rec.Code, http.StatusServiceUnavailable)
 }
 
-func TestPasswordSignupValidatesPasswordLength(t *testing.T) {
+func TestPasswordSignupDisabled(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
 	body, _ := json.Marshal(map[string]string{"email": "short-pass@example.com", "password": "short"})
@@ -2219,7 +2188,7 @@ func TestPasswordSignupValidatesPasswordLength(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
-	assertStatus(t, rec.Code, http.StatusBadRequest)
+	assertStatus(t, rec.Code, http.StatusServiceUnavailable)
 }
 
 func TestEmployerPostingFlow(t *testing.T) {
