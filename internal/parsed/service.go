@@ -170,6 +170,11 @@ type Service struct {
 	techStackExtractor    techstack.Extractor
 }
 
+type parsedJobURLDuplicateMatch struct {
+	id         int64
+	sameSource bool
+}
+
 type Config struct {
 	BatchSize               int
 	PollSeconds             float64
@@ -1572,6 +1577,7 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			duplicateID                    int64
 			isDuplicate                    bool
 			duplicateErr                   error
+			isSameSourceURLDuplicate       bool
 			sameSourceExternalDuplicateID  int64
 			isSameSourceExternalDuplicate  bool
 			sameSourceExternalDuplicateErr error
@@ -1584,18 +1590,21 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			}
 		}
 		if !hasExistingParsedForRawID && !isSameSourceExternalDuplicate {
-			duplicateID, isDuplicate, duplicateErr = s.findDuplicateCrossSourceParsedJob(ctx, row.id, row.source, payload, companyID)
+			var duplicateMatch parsedJobURLDuplicateMatch
+			duplicateMatch, isDuplicate, duplicateErr = s.findDuplicateParsedJobByURL(ctx, row.id, row.source, payload, companyID)
 			if duplicateErr != nil {
 				log.Printf("parsed-job-worker row_failed raw_job_id=%d source=%s error=%v", row.id, row.source, duplicateErr)
 				return processedInc, skippedInc + 1, nil
 			}
+			duplicateID = duplicateMatch.id
+			isSameSourceURLDuplicate = duplicateMatch.sameSource
 		}
 
 		// isRemoteRocketshipDuplicate := false
 		isNonRemoterocketshipDuplicate := false
-		if isSameSourceExternalDuplicate {
-			isNonRemoterocketshipDuplicate = true
-			duplicateID = sameSourceExternalDuplicateID
+			if isSameSourceExternalDuplicate {
+				isNonRemoterocketshipDuplicate = true
+				duplicateID = sameSourceExternalDuplicateID
 		}
 		if isDuplicate {
 			if strings.EqualFold(row.source, sourceRemoteRocketship) {
@@ -1827,6 +1836,8 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 			if isNonRemoterocketshipDuplicate {
 				if isSameSourceExternalDuplicate {
 					log.Printf("parsed-job-worker duplicate_same_source_external_job_id_merge raw_job_id=%d source=%s duplicate_parsed_job_id=%d", row.id, row.source, duplicateID)
+				} else if isSameSourceURLDuplicate {
+					log.Printf("parsed-job-worker duplicate_same_source_url_merge raw_job_id=%d source=%s duplicate_parsed_job_id=%d", row.id, row.source, duplicateID)
 				} else {
 					log.Printf("parsed-job-worker duplicate_cross_source_merge raw_job_id=%d source=%s duplicate_parsed_job_id=%d", row.id, row.source, duplicateID)
 				}
@@ -2640,32 +2651,30 @@ func isEmailApplyTarget(value string) bool {
 	return err == nil && parsed.Address != ""
 }
 
-func (s *Service) findDuplicateCrossSourceParsedJob(ctx context.Context, rawJobID int64, source string, payload map[string]any, companyID any) (int64, bool, error) {
+func (s *Service) findDuplicateParsedJobByURL(ctx context.Context, rawJobID int64, source string, payload map[string]any, companyID any) (parsedJobURLDuplicateMatch, bool, error) {
 	plugin, ok := plugins.Get(strings.TrimSpace(source))
 	if ok && !plugin.RunDuplicateCheck {
-		return 0, false, nil
+		return parsedJobURLDuplicateMatch{}, false, nil
 	}
 	sourceURL := stringValue(payload["url"])
 	// sourceCreatedAt := parseDT(payload["created_at"])
 	sourceURLNorm := normalizeJobURLForMatch(sourceURL)
 	if sourceURLNorm == "" {
-		return 0, false, nil
+		return parsedJobURLDuplicateMatch{}, false, nil
 	}
 	sourceURLParts := parseJobURLForMatch(sourceURL)
 	if !sourceURLParts.valid {
-		return 0, false, nil
+		return parsedJobURLDuplicateMatch{}, false, nil
 	}
 	sourceURLSignatures := extractDuplicateJobURLSignatures(sourceURL, s.duplicateJobURLRules)
 
 	buildDuplicateSignaturePrefilter := func(signature duplicateJobURLSignature, ignoreCompanyID bool) (string, []any) {
-		query := `SELECT p.id, p.url
+		query := `SELECT p.id, r.source, p.url
 		   FROM parsed_jobs p
 		   JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
-		  WHERE r.source <> ?
-		    AND p.url IS NOT NULL
+		  WHERE p.url IS NOT NULL
 		    AND p.raw_us_job_id <> ?`
 		args := []any{
-			source,
 			rawJobID,
 		}
 		for _, term := range signature.prefilterTerms {
@@ -2694,61 +2703,63 @@ func (s *Service) findDuplicateCrossSourceParsedJob(ctx context.Context, rawJobI
 		return query, args
 	}
 
-	findDuplicateByURLSignatures := func(ignoreCompanyID bool) (int64, bool, error) {
+	findDuplicateByURLSignatures := func(ignoreCompanyID bool) (parsedJobURLDuplicateMatch, bool, error) {
 		for _, signature := range sourceURLSignatures {
 			query, args := buildDuplicateSignaturePrefilter(signature, ignoreCompanyID)
 			rows, err := s.DB.SQL.QueryContext(ctx, query, args...)
 			if err != nil {
-				return 0, false, err
+				return parsedJobURLDuplicateMatch{}, false, err
 			}
 			for rows.Next() {
 				var duplicateID int64
+				var candidateSource sql.NullString
 				var candidateURL sql.NullString
-				if scanErr := rows.Scan(&duplicateID, &candidateURL); scanErr != nil {
+				if scanErr := rows.Scan(&duplicateID, &candidateSource, &candidateURL); scanErr != nil {
 					rows.Close()
-					return 0, false, scanErr
+					return parsedJobURLDuplicateMatch{}, false, scanErr
 				}
 				candidateSignatures := extractDuplicateJobURLSignatures(candidateURL.String, s.duplicateJobURLRules)
 				for _, candidateSignature := range candidateSignatures {
 					if candidateSignature.key == signature.key {
 						rows.Close()
-						return duplicateID, true, nil
+						return parsedJobURLDuplicateMatch{
+							id:         duplicateID,
+							sameSource: strings.EqualFold(strings.TrimSpace(candidateSource.String), source),
+						}, true, nil
 					}
 				}
 			}
 			if err := rows.Err(); err != nil {
 				rows.Close()
-				return 0, false, err
+				return parsedJobURLDuplicateMatch{}, false, err
 			}
 			rows.Close()
 		}
-		return 0, false, nil
+		return parsedJobURLDuplicateMatch{}, false, nil
 	}
 
 	if len(sourceURLSignatures) > 0 {
-		if duplicateID, isDuplicate, err := findDuplicateByURLSignatures(true); err != nil {
-			return 0, false, err
+		if duplicateMatch, isDuplicate, err := findDuplicateByURLSignatures(true); err != nil {
+			return parsedJobURLDuplicateMatch{}, false, err
 		} else if isDuplicate {
-			return duplicateID, true, nil
+			return duplicateMatch, true, nil
 		}
-		if duplicateID, isDuplicate, err := findDuplicateByURLSignatures(false); err != nil {
-			return 0, false, err
+		if duplicateMatch, isDuplicate, err := findDuplicateByURLSignatures(false); err != nil {
+			return parsedJobURLDuplicateMatch{}, false, err
 		} else if isDuplicate {
-			return duplicateID, true, nil
+			return duplicateMatch, true, nil
 		}
 	}
 
 	buildDuplicateURLPrefilter := func(ignoreCompanyID bool) (string, []any) {
-		query := `SELECT p.id, p.url
+		query := `SELECT p.id, r.source, p.url
 		   FROM parsed_jobs p
 		   JOIN raw_us_jobs r ON r.id = p.raw_us_job_id
-		  WHERE r.source <> ?
-		    AND p.url IS NOT NULL
+		  WHERE p.url IS NOT NULL
 		    AND LOWER(p.url) LIKE ?
 		    AND LOWER(p.url) LIKE ?
 		    AND p.raw_us_job_id <> ?`
 		args := []any{
-			source,
 			"%" + sourceURLParts.registrableHost + "%",
 			"%" + sourceURLParts.path + "%",
 			rawJobID,
@@ -2781,23 +2792,27 @@ func (s *Service) findDuplicateCrossSourceParsedJob(ctx context.Context, rawJobI
 		query, args := buildDuplicateURLPrefilter(true)
 		rows, err := s.DB.SQL.QueryContext(ctx, query, args...)
 		if err != nil {
-			return 0, false, err
+			return parsedJobURLDuplicateMatch{}, false, err
 		}
 		for rows.Next() {
 			var duplicateID int64
+			var candidateSource sql.NullString
 			var candidateURL sql.NullString
-			if scanErr := rows.Scan(&duplicateID, &candidateURL); scanErr != nil {
+			if scanErr := rows.Scan(&duplicateID, &candidateSource, &candidateURL); scanErr != nil {
 				rows.Close()
-				return 0, false, scanErr
+				return parsedJobURLDuplicateMatch{}, false, scanErr
 			}
 			if normalizeJobURLForMatch(candidateURL.String) == sourceURLNorm {
 				rows.Close()
-				return duplicateID, true, nil
+				return parsedJobURLDuplicateMatch{
+					id:         duplicateID,
+					sameSource: strings.EqualFold(strings.TrimSpace(candidateSource.String), source),
+				}, true, nil
 			}
 		}
 		if err := rows.Err(); err != nil {
 			rows.Close()
-			return 0, false, err
+			return parsedJobURLDuplicateMatch{}, false, err
 		}
 		rows.Close()
 	}
@@ -2820,23 +2835,38 @@ func (s *Service) findDuplicateCrossSourceParsedJob(ctx context.Context, rawJobI
 	// )
 	rows, err := s.DB.SQL.QueryContext(ctx, query, args...)
 	if err != nil {
-		return 0, false, err
+		return parsedJobURLDuplicateMatch{}, false, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var duplicateID int64
+		var candidateSource sql.NullString
 		var candidateURL sql.NullString
-		if scanErr := rows.Scan(&duplicateID, &candidateURL); scanErr != nil {
-			return 0, false, scanErr
+		if scanErr := rows.Scan(&duplicateID, &candidateSource, &candidateURL); scanErr != nil {
+			return parsedJobURLDuplicateMatch{}, false, scanErr
 		}
 		if normalizeJobURLForMatch(candidateURL.String) == sourceURLNorm {
-			return duplicateID, true, nil
+			return parsedJobURLDuplicateMatch{
+				id:         duplicateID,
+				sameSource: strings.EqualFold(strings.TrimSpace(candidateSource.String), source),
+			}, true, nil
 		}
 	}
 	if err := rows.Err(); err != nil {
+		return parsedJobURLDuplicateMatch{}, false, err
+	}
+	return parsedJobURLDuplicateMatch{}, false, nil
+}
+
+func (s *Service) findDuplicateCrossSourceParsedJob(ctx context.Context, rawJobID int64, source string, payload map[string]any, companyID any) (int64, bool, error) {
+	duplicateMatch, isDuplicate, err := s.findDuplicateParsedJobByURL(ctx, rawJobID, source, payload, companyID)
+	if err != nil || !isDuplicate {
 		return 0, false, err
 	}
-	return 0, false, nil
+	if duplicateMatch.sameSource {
+		return 0, false, nil
+	}
+	return duplicateMatch.id, true, nil
 }
 
 func (s *Service) findDuplicateSameSourceParsedJobByExternalJobID(ctx context.Context, rawJobID int64, source string, payload map[string]any) (int64, bool, error) {

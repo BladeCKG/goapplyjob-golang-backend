@@ -1840,6 +1840,83 @@ func TestProcessPendingSameSourceExternalJobIDDuplicateSkipsNewParsedRow(t *test
 	}
 }
 
+func TestProcessPendingSameSourceURLDuplicateSkipsNewParsedRow(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_parsed_same_source_url_duplicate"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
+		 VALUES (1, 'builtin', 'https://example.com/jobs/original', ?, true, false, true, 0, '{}'),
+		        (2, 'builtin', 'https://example.com/jobs/new', ?, true, false, false, 0, '{}')`,
+		now,
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO parsed_jobs (id, raw_us_job_id, url, role_title, role_description, updated_at)
+		 VALUES (1, 1, 'https://boards.example.com/jobs/shared?utm_source=alpha', 'Backend Engineer', '', ?)`,
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"url":             "https://boards.example.com/jobs/shared?utm_source=beta",
+		"roleTitle":       "Backend Engineer",
+		"roleDescription": "Filled from same source url duplicate",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.SQL.ExecContext(context.Background(), `UPDATE raw_us_jobs SET raw_json = ? WHERE id = 2`, string(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(Config{}, db)
+	svc.EnabledSources = map[string]struct{}{"builtin": {}}
+	processed, err := svc.ProcessPending(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected processed=1 for same-source url duplicate skip path, got %d", processed)
+	}
+
+	var isParsed, isSkippable bool
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT is_parsed, is_skippable FROM raw_us_jobs WHERE id = 2`).Scan(&isParsed, &isSkippable); err != nil {
+		t.Fatal(err)
+	}
+	if !isParsed || !isSkippable {
+		t.Fatalf("expected same-source url duplicate raw row marked parsed+skippable, got is_parsed=%t is_skippable=%t", isParsed, isSkippable)
+	}
+
+	var roleDescription sql.NullString
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT role_description FROM parsed_jobs WHERE id = 1`).Scan(&roleDescription); err != nil {
+		t.Fatal(err)
+	}
+	if roleDescription.String != "Filled from same source url duplicate" {
+		t.Fatalf("expected role_description to be merged from same-source url duplicate, got %q", roleDescription.String)
+	}
+
+	var parsedCount int
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM parsed_jobs`).Scan(&parsedCount); err != nil {
+		t.Fatal(err)
+	}
+	if parsedCount != 1 {
+		t.Fatalf("expected no new parsed rows for same-source url duplicate, got count=%d", parsedCount)
+	}
+}
+
 func TestProcessPendingUpsertMergesExistingParsedRowColumns(t *testing.T) {
 	db, err := database.Open(testDatabaseURL(t, "test_parsed_upsert_overwrite_existing"))
 	if err != nil {
