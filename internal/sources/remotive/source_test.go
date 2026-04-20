@@ -78,8 +78,11 @@ func TestParseRawHTMLExtractsSectionsAndSalaryHandling(t *testing.T) {
 		t.Fatalf("expected validUntilDate mapping, got %#v", payload)
 	}
 	company, _ := payload["company"].(map[string]any)
-	if company == nil || company["profilePicURL"] == nil || company["tagline"] == nil {
+	if company == nil || company["tagline"] == nil {
 		t.Fatalf("expected remotive company enrichment, got %#v", payload["company"])
+	}
+	if company["profilePicURL"] != nil {
+		t.Fatalf("expected remotive company logo to stay nil, got %#v", company["profilePicURL"])
 	}
 }
 

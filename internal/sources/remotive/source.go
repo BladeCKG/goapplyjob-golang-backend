@@ -313,17 +313,13 @@ func normalizeLocationCountries(locationText string) []string {
 	return out
 }
 
-func parseCompany(value any, remotiveJobID string, tagline any) map[string]any {
+func parseCompany(value any, _ string, tagline any) map[string]any {
 	item, _ := value.(map[string]any)
 	name := stringValue(item["name"])
 	slug := regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(strings.ToLower(name), "-")
 	slug = strings.Trim(slug, "-")
 	if slug == "" {
 		slug = "unknown"
-	}
-	profilePicURL := ""
-	if strings.TrimSpace(remotiveJobID) != "" {
-		profilePicURL = "https://remotive.com/job_board/job/logo/" + strings.TrimSpace(remotiveJobID)
 	}
 	return map[string]any{
 		"id":            "remotive_company_" + slug,
@@ -334,7 +330,7 @@ func parseCompany(value any, remotiveJobID string, tagline any) map[string]any {
 		"linkedInURL":   nil,
 		"employeeRange": nil,
 		"sponsorsH1B":   nil,
-		"profilePicURL": nilIfEmpty(profilePicURL),
+		"profilePicURL": nil,
 	}
 }
 
