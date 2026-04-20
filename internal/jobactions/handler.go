@@ -11,6 +11,7 @@ import (
 
 	"goapplyjob-golang-backend/internal/auth"
 	"goapplyjob-golang-backend/internal/database"
+	jobspayload "goapplyjob-golang-backend/internal/jobs"
 	gensqlc "goapplyjob-golang-backend/pkg/generated/sqlc"
 
 	"github.com/gin-gonic/gin"
@@ -33,35 +34,8 @@ type actionItem struct {
 }
 
 type companyCompanionJobItem struct {
-	ForJobID               int64      `json:"for_job_id"`
-	ID                     int64      `json:"id"`
-	RoleTitle              *string    `json:"role_title"`
-	JobDescriptionSummary  *string    `json:"job_description_summary"`
-	CompanyName            *string    `json:"company_name"`
-	CompanySlug            *string    `json:"company_slug"`
-	CompanyTagline         *string    `json:"company_tagline"`
-	CompanyProfilePicURL   *string    `json:"company_profile_pic_url"`
-	CompanyHomePageURL     *string    `json:"company_home_page_url"`
-	CompanyLinkedInURL     *string    `json:"company_linkedin_url"`
-	CompanyEmployeeRange   *string    `json:"company_employee_range"`
-	CompanyFoundedYear     *string    `json:"company_founded_year"`
-	CompanySponsorsH1B     *bool      `json:"company_sponsors_h1b"`
-	CategorizedJobTitle    *string    `json:"categorized_job_title"`
-	CategorizedJobFunction *string    `json:"categorized_job_function"`
-	LocationType           *string    `json:"location_type"`
-	LocationUsStates       []string   `json:"location_us_states"`
-	LocationCountries      []string   `json:"location_countries"`
-	EmploymentType         *string    `json:"employment_type"`
-	SalaryMin              *float64   `json:"salary_min"`
-	SalaryMax              *float64   `json:"salary_max"`
-	SalaryMinUSD           *float64   `json:"salary_min_usd"`
-	SalaryMaxUSD           *float64   `json:"salary_max_usd"`
-	SalaryCurrencyCode     *string    `json:"salary_currency_code"`
-	SalaryCurrencySymbol   *string    `json:"salary_currency_symbol"`
-	SalaryType             *string    `json:"salary_type"`
-	TechStack              []string   `json:"tech_stack"`
-	CreatedAtSource        *time.Time `json:"created_at_source"`
-	URL                    *string    `json:"url"`
+	ForJobID int64 `json:"for_job_id"`
+	jobspayload.ListingJobItem
 }
 
 func NewHandler(db *database.DB, authHandler *auth.Handler) *Handler {
@@ -156,6 +130,8 @@ func (h *Handler) getCompanyCompanionJobs(c *gin.Context) {
 			r.base_job_id,
 			p.id,
 			p.role_title,
+			p.role_description,
+			p.role_requirements,
 			p.job_description_summary,
 			c.name,
 			c.slug,
@@ -179,7 +155,12 @@ func (h *Handler) getCompanyCompanionJobs(c *gin.Context) {
 			p.salary_currency_code,
 			p.salary_currency_symbol,
 			p.salary_type,
+			p.education_requirements_credential_category,
+			p.experience_requirements_months,
+			p.experience_in_place_of_education,
+			p.required_languages,
 			p.tech_stack,
+			p.benefits,
 			p.created_at_source,
 			p.url
 		FROM ranked r
@@ -201,6 +182,8 @@ func (h *Handler) getCompanyCompanionJobs(c *gin.Context) {
 		var (
 			item                 companyCompanionJobItem
 			roleTitle            pgtype.Text
+			roleDescription      pgtype.Text
+			roleRequirements     pgtype.Text
 			jobDescription       pgtype.Text
 			companyName          pgtype.Text
 			companySlug          pgtype.Text
@@ -224,7 +207,12 @@ func (h *Handler) getCompanyCompanionJobs(c *gin.Context) {
 			salaryCurrencyCode   pgtype.Text
 			salaryCurrencySymbol pgtype.Text
 			salaryType           pgtype.Text
+			educationRequirement pgtype.Text
+			experienceMonths     pgtype.Int4
+			experienceInLieu     pgtype.Bool
+			requiredLanguages    []byte
 			techStack            []byte
+			benefits             pgtype.Text
 			createdAtSource      pgtype.Timestamptz
 			jobURL               pgtype.Text
 		)
@@ -232,6 +220,8 @@ func (h *Handler) getCompanyCompanionJobs(c *gin.Context) {
 			&item.ForJobID,
 			&item.ID,
 			&roleTitle,
+			&roleDescription,
+			&roleRequirements,
 			&jobDescription,
 			&companyName,
 			&companySlug,
@@ -255,7 +245,12 @@ func (h *Handler) getCompanyCompanionJobs(c *gin.Context) {
 			&salaryCurrencyCode,
 			&salaryCurrencySymbol,
 			&salaryType,
+			&educationRequirement,
+			&experienceMonths,
+			&experienceInLieu,
+			&requiredLanguages,
 			&techStack,
+			&benefits,
 			&createdAtSource,
 			&jobURL,
 		); err != nil {
@@ -263,6 +258,8 @@ func (h *Handler) getCompanyCompanionJobs(c *gin.Context) {
 			return
 		}
 		item.RoleTitle = pgTextPtr(roleTitle)
+		item.RoleDescription = pgTextPtr(roleDescription)
+		item.RoleRequirements = pgTextPtr(roleRequirements)
 		item.JobDescriptionSummary = pgTextPtr(jobDescription)
 		item.CompanyName = pgTextPtr(companyName)
 		item.CompanySlug = pgTextPtr(companySlug)
@@ -273,8 +270,8 @@ func (h *Handler) getCompanyCompanionJobs(c *gin.Context) {
 		item.CompanyEmployeeRange = pgTextPtr(companyEmployeeRange)
 		item.CompanyFoundedYear = pgTextPtr(companyFoundedYear)
 		item.CompanySponsorsH1B = pgBoolPtr(companySponsorsH1B)
-		item.CategorizedJobTitle = pgTextPtr(categoryTitle)
-		item.CategorizedJobFunction = pgTextPtr(categoryFunction)
+		item.CategorizedTitle = pgTextPtr(categoryTitle)
+		item.CategorizedFunction = pgTextPtr(categoryFunction)
 		item.LocationType = pgTextPtr(locationType)
 		item.EmploymentType = pgTextPtr(employmentType)
 		item.SalaryMin = pgFloat64Ptr(salaryMin)
@@ -284,10 +281,18 @@ func (h *Handler) getCompanyCompanionJobs(c *gin.Context) {
 		item.SalaryCurrencyCode = pgTextPtr(salaryCurrencyCode)
 		item.SalaryCurrencySymbol = pgTextPtr(salaryCurrencySymbol)
 		item.SalaryType = pgTextPtr(salaryType)
+		item.EducationRequirementsCredentialCategory = pgTextPtr(educationRequirement)
+		if experienceMonths.Valid {
+			v := int(experienceMonths.Int32)
+			item.ExperienceRequirementsMonths = &v
+		}
+		item.ExperienceInPlaceOfEducation = pgBoolPtr(experienceInLieu)
+		item.Benefits = pgTextPtr(benefits)
 		item.CreatedAtSource = pgTimePtr(createdAtSource)
 		item.URL = pgTextPtr(jobURL)
-		_ = json.Unmarshal(locationUSStates, &item.LocationUsStates)
+		_ = json.Unmarshal(locationUSStates, &item.LocationUSStates)
 		_ = json.Unmarshal(locationCountries, &item.LocationCountries)
+		_ = json.Unmarshal(requiredLanguages, &item.RequiredLanguages)
 		_ = json.Unmarshal(techStack, &item.TechStack)
 		items = append(items, item)
 	}

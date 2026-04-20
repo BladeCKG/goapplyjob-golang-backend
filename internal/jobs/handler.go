@@ -96,7 +96,7 @@ var (
 	nonAlphaTitleChars = regexp.MustCompile(`[^A-Za-z\s]+`)
 )
 
-type jobItem struct {
+type ListingJobItem struct {
 	ID                    int64      `json:"id"`
 	RawUSJobID            int64      `json:"raw_us_job_id"`
 	RoleTitle             *string    `json:"role_title"`
@@ -141,6 +141,8 @@ type jobItem struct {
 	CreatedAtSource       *time.Time `json:"created_at_source"`
 	URL                   *string    `json:"url"`
 }
+
+type jobItem = ListingJobItem
 
 type jobDetail struct {
 	ID                                      int64    `json:"id"`
