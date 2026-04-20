@@ -100,6 +100,8 @@ type jobItem struct {
 	ID                    int64      `json:"id"`
 	RawUSJobID            int64      `json:"raw_us_job_id"`
 	RoleTitle             *string    `json:"role_title"`
+	RoleDescription       *string    `json:"role_description"`
+	RoleRequirements      *string    `json:"role_requirements"`
 	JobDescriptionSummary *string    `json:"job_description_summary"`
 	CompanyName           *string    `json:"company_name"`
 	CompanySlug           *string    `json:"company_slug"`
@@ -129,7 +131,12 @@ type jobItem struct {
 	IsMidLevel            *bool      `json:"is_mid_level"`
 	IsSenior              *bool      `json:"is_senior"`
 	IsLead                *bool      `json:"is_lead"`
+	EducationRequirementsCredentialCategory *string `json:"education_requirements_credential_category"`
+	ExperienceRequirementsMonths            *int    `json:"experience_requirements_months"`
+	ExperienceInPlaceOfEducation            *bool   `json:"experience_in_place_of_education"`
+	RequiredLanguages                       []string `json:"required_languages"`
 	TechStack             []string   `json:"tech_stack"`
+	Benefits              *string    `json:"benefits"`
 	UpdatedAt             *time.Time `json:"updated_at"`
 	CreatedAtSource       *time.Time `json:"created_at_source"`
 	URL                   *string    `json:"url"`
@@ -930,6 +937,8 @@ type listJobsQueryRow struct {
 	ID                     int32
 	RawUSJobID             int32
 	RoleTitle              pgtype.Text
+	RoleDescription        pgtype.Text
+	RoleRequirements       pgtype.Text
 	JobDescriptionSummary  pgtype.Text
 	CompanyName            pgtype.Text
 	CompanySlug            pgtype.Text
@@ -959,7 +968,12 @@ type listJobsQueryRow struct {
 	IsMidLevel             pgtype.Bool
 	IsSenior               pgtype.Bool
 	IsLead                 pgtype.Bool
+	EducationRequirementsCredentialCategory pgtype.Text
+	ExperienceRequirementsMonths            pgtype.Int4
+	ExperienceInPlaceOfEducation            pgtype.Bool
+	RequiredLanguages                       []byte
 	TechStack              []byte
+	Benefits               pgtype.Text
 	UpdatedAt              pgtype.Timestamptz
 	CreatedAtSource        pgtype.Timestamptz
 	Url                    pgtype.Text
@@ -970,6 +984,8 @@ func mapListJobsQueryRow(row listJobsQueryRow) jobItem {
 		ID:                    int64(row.ID),
 		RawUSJobID:            int64(row.RawUSJobID),
 		RoleTitle:             pgTextPtr(row.RoleTitle),
+		RoleDescription:       pgTextPtr(row.RoleDescription),
+		RoleRequirements:      pgTextPtr(row.RoleRequirements),
 		JobDescriptionSummary: pgTextPtr(row.JobDescriptionSummary),
 		CompanyName:           pgTextPtr(row.CompanyName),
 		CompanySlug:           pgTextPtr(row.CompanySlug),
@@ -993,6 +1009,9 @@ func mapListJobsQueryRow(row listJobsQueryRow) jobItem {
 		IsMidLevel:            pgBoolPtr(row.IsMidLevel),
 		IsSenior:              pgBoolPtr(row.IsSenior),
 		IsLead:                pgBoolPtr(row.IsLead),
+		EducationRequirementsCredentialCategory: pgTextPtr(row.EducationRequirementsCredentialCategory),
+		ExperienceInPlaceOfEducation:            pgBoolPtr(row.ExperienceInPlaceOfEducation),
+		Benefits:                                pgTextPtr(row.Benefits),
 		URL:                   pgTextPtr(row.Url),
 	}
 	if row.SalaryMin.Valid {
@@ -1014,11 +1033,18 @@ func mapListJobsQueryRow(row listJobsQueryRow) jobItem {
 	if len(row.TechStack) > 0 {
 		_ = json.Unmarshal(row.TechStack, &item.TechStack)
 	}
+	if row.ExperienceRequirementsMonths.Valid {
+		v := int(row.ExperienceRequirementsMonths.Int32)
+		item.ExperienceRequirementsMonths = &v
+	}
 	if len(row.LocationUsStates) > 0 {
 		_ = json.Unmarshal(row.LocationUsStates, &item.LocationUSStates)
 	}
 	if len(row.LocationCountries) > 0 {
 		_ = json.Unmarshal(row.LocationCountries, &item.LocationCountries)
+	}
+	if len(row.RequiredLanguages) > 0 {
+		_ = json.Unmarshal(row.RequiredLanguages, &item.RequiredLanguages)
 	}
 	item.CreatedAtSource = timestamptzTimePtr(row.CreatedAtSource)
 	if row.UpdatedAt.Valid {
@@ -1237,12 +1263,13 @@ func queryJobIDs(ctx context.Context, pool *pgxpool.Pool, sqlText string, args [
 
 func queryJobsByIDsInOrder(ctx context.Context, pool *pgxpool.Pool, ids []int64) ([]jobItem, error) {
 	sqlText := `
-SELECT p.id, p.raw_us_job_id, p.role_title, p.job_description_summary,
+SELECT p.id, p.raw_us_job_id, p.role_title, p.role_description, p.role_requirements, p.job_description_summary,
        c.name, c.slug, c.tagline, c.profile_pic_url, c.home_page_url, c.linkedin_url, c.employee_range, c.founded_year, c.sponsors_h1b,
        p.categorized_job_title, p.categorized_job_function, p.location_city, p.location_type, p.location_us_states, p.location_countries, p.employment_type,
        p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_currency_code, p.salary_currency_symbol, p.salary_type,
        p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead,
-       p.tech_stack, p.updated_at, p.created_at_source, p.url
+       p.education_requirements_credential_category, p.experience_requirements_months, p.experience_in_place_of_education,
+       p.required_languages, p.tech_stack, p.benefits, p.updated_at, p.created_at_source, p.url
 FROM parsed_jobs p
 LEFT JOIN parsed_companies c ON c.id = p.company_id
 WHERE p.id = ANY($1::bigint[])
@@ -1262,6 +1289,8 @@ ORDER BY array_position($1::bigint[], p.id)
 			&row.ID,
 			&row.RawUSJobID,
 			&row.RoleTitle,
+			&row.RoleDescription,
+			&row.RoleRequirements,
 			&row.JobDescriptionSummary,
 			&row.CompanyName,
 			&row.CompanySlug,
@@ -1291,7 +1320,12 @@ ORDER BY array_position($1::bigint[], p.id)
 			&row.IsMidLevel,
 			&row.IsSenior,
 			&row.IsLead,
+			&row.EducationRequirementsCredentialCategory,
+			&row.ExperienceRequirementsMonths,
+			&row.ExperienceInPlaceOfEducation,
+			&row.RequiredLanguages,
 			&row.TechStack,
+			&row.Benefits,
 			&row.UpdatedAt,
 			&row.CreatedAtSource,
 			&row.Url,
