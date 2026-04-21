@@ -139,6 +139,7 @@ type ListingJobItem struct {
 	Benefits              *string    `json:"benefits"`
 	UpdatedAt             *time.Time `json:"updated_at"`
 	CreatedAtSource       *time.Time `json:"created_at_source"`
+	DateDeleted           *string    `json:"date_deleted"`
 	URL                   *string    `json:"url"`
 }
 
@@ -178,6 +179,7 @@ type jobDetail struct {
 	IsLead                                  *bool    `json:"is_lead"`
 	UpdatedAt                               *string  `json:"updated_at"`
 	CreatedAtSource                         *string  `json:"created_at_source"`
+	DateDeleted                             *string  `json:"date_deleted"`
 	RoleDescription                         *string  `json:"role_description"`
 	RoleRequirements                        *string  `json:"role_requirements"`
 	EducationRequirementsCredentialCategory *string  `json:"education_requirements_credential_category"`
@@ -827,21 +829,6 @@ func (h *Handler) jobDetail(c *gin.Context) {
 	}
 	row, err := h.q.GetJobDetailByID(c.Request.Context(), int32(jobID))
 	if err != nil {
-		var closed bool
-		closedErr := h.db.SQL.QueryRowContext(
-			c.Request.Context(),
-			`SELECT EXISTS (
-				SELECT 1
-				FROM parsed_jobs
-				WHERE id = ?
-				  AND date_deleted IS NOT NULL
-			)`,
-			jobID,
-		).Scan(&closed)
-		if closedErr == nil && closed {
-			c.JSON(http.StatusGone, gin.H{"detail": "Job is closed"})
-			return
-		}
 		c.JSON(http.StatusNotFound, gin.H{"detail": "Job not found"})
 		return
 	}
@@ -978,6 +965,7 @@ type listJobsQueryRow struct {
 	Benefits               pgtype.Text
 	UpdatedAt              pgtype.Timestamptz
 	CreatedAtSource        pgtype.Timestamptz
+	DateDeleted            pgtype.Timestamptz
 	Url                    pgtype.Text
 }
 
@@ -1014,6 +1002,7 @@ func mapListJobsQueryRow(row listJobsQueryRow) jobItem {
 		EducationRequirementsCredentialCategory: pgTextPtr(row.EducationRequirementsCredentialCategory),
 		ExperienceInPlaceOfEducation:            pgBoolPtr(row.ExperienceInPlaceOfEducation),
 		Benefits:                                pgTextPtr(row.Benefits),
+		DateDeleted:                             timestamptzStringPtr(row.DateDeleted),
 		URL:                   pgTextPtr(row.Url),
 	}
 	if row.SalaryMin.Valid {
@@ -1068,7 +1057,6 @@ func (b *sqlArgsBuilder) add(value any) string {
 func buildJobsWhereSQL(input listingFilterInput) (string, []any) {
 	b := sqlArgsBuilder{args: []any{}}
 	clauses := make([]string, 0, 16)
-	clauses = append(clauses, "p.date_deleted IS NULL")
 
 	titleOr := make([]string, 0, 8)
 	if len(input.JobCategories) > 0 {
@@ -1271,11 +1259,10 @@ SELECT p.id, p.raw_us_job_id, p.role_title, p.role_description, p.role_requireme
        p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_currency_code, p.salary_currency_symbol, p.salary_type,
        p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead,
        p.education_requirements_credential_category, p.experience_requirements_months, p.experience_in_place_of_education,
-       p.required_languages, p.tech_stack, p.benefits, p.updated_at, p.created_at_source, p.url
+       p.required_languages, p.tech_stack, p.benefits, p.updated_at, p.created_at_source, p.date_deleted, p.url
 FROM parsed_jobs p
 LEFT JOIN parsed_companies c ON c.id = p.company_id
 WHERE p.id = ANY($1::bigint[])
-  AND p.date_deleted IS NULL
 ORDER BY array_position($1::bigint[], p.id)
 `
 	rows, err := pool.Query(ctx, sqlText, ids)
@@ -1330,6 +1317,7 @@ ORDER BY array_position($1::bigint[], p.id)
 			&row.Benefits,
 			&row.UpdatedAt,
 			&row.CreatedAtSource,
+			&row.DateDeleted,
 			&row.Url,
 		); err != nil {
 			return nil, err
@@ -1504,7 +1492,6 @@ func (h *Handler) topCategories(c *gin.Context) {
 
 	args := []any{cutoff}
 	clauses := []string{
-		"p.date_deleted IS NULL",
 		"p.categorized_job_title IS NOT NULL",
 		"p.categorized_job_title != ''",
 		"p.created_at_source IS NOT NULL",
@@ -1610,7 +1597,6 @@ func (h *Handler) topFunctions(c *gin.Context) {
 
 	args := []any{cutoff}
 	clauses := []string{
-		"p.date_deleted IS NULL",
 		"p.categorized_job_function IS NOT NULL",
 		"p.categorized_job_function != ''",
 		"p.created_at_source IS NOT NULL",
@@ -2149,6 +2135,7 @@ func mapJobDetailRow(row *gensqlc.GetJobDetailByIDRow) jobDetail {
 		IsLead:                                  pgBoolPtr(row.IsLead),
 		UpdatedAt:                               timestamptzStringPtr(row.UpdatedAt),
 		CreatedAtSource:                         timestamptzStringPtr(row.CreatedAtSource),
+		DateDeleted:                             timestamptzStringPtr(row.DateDeleted),
 		RoleDescription:                         pgTextPtr(row.RoleDescription),
 		RoleRequirements:                        pgTextPtr(row.RoleRequirements),
 		EducationRequirementsCredentialCategory: pgTextPtr(row.EducationRequirementsCredentialCategory),
@@ -2216,6 +2203,7 @@ func mapListJobRow(row *gensqlc.ListJobsByIDsInOrderRow) jobItem {
 		IsMidLevel:            pgBoolPtr(row.IsMidLevel),
 		IsSenior:              pgBoolPtr(row.IsSenior),
 		IsLead:                pgBoolPtr(row.IsLead),
+		DateDeleted:           timestamptzStringPtr(row.DateDeleted),
 		URL:                   pgTextPtr(row.Url),
 	}
 	if row.SalaryMin.Valid {

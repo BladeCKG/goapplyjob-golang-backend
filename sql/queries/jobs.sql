@@ -24,11 +24,10 @@ FROM parsed_jobs
 WHERE location_type IS NOT NULL;
 
 -- name: GetJobDetailByID :one
-SELECT p.id, p.raw_us_job_id, c.name, c.slug, c.tagline, c.profile_pic_url, c.home_page_url, c.linkedin_url, c.employee_range, c.founded_year, c.sponsors_h1b, p.categorized_job_title, p.categorized_job_function, p.role_title, p.location_city, p.location_type, p.location_us_states, p.location_countries, p.employment_type, p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_currency_code, p.salary_currency_symbol, p.salary_type, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.updated_at, p.created_at_source, p.role_description, p.role_requirements, p.education_requirements_credential_category, p.experience_requirements_months, p.experience_in_place_of_education, p.required_languages, p.tech_stack, p.benefits, p.url
+SELECT p.id, p.raw_us_job_id, c.name, c.slug, c.tagline, c.profile_pic_url, c.home_page_url, c.linkedin_url, c.employee_range, c.founded_year, c.sponsors_h1b, p.categorized_job_title, p.categorized_job_function, p.role_title, p.location_city, p.location_type, p.location_us_states, p.location_countries, p.employment_type, p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_currency_code, p.salary_currency_symbol, p.salary_type, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.updated_at, p.created_at_source, p.date_deleted, p.role_description, p.role_requirements, p.education_requirements_credential_category, p.experience_requirements_months, p.experience_in_place_of_education, p.required_languages, p.tech_stack, p.benefits, p.url
 FROM parsed_jobs p
 LEFT JOIN parsed_companies c ON c.id = p.company_id
 WHERE p.id = $1
-  AND p.date_deleted IS NULL
 LIMIT 1;
 
 -- name: GetActiveSubscriptionIDForUser :one
@@ -41,14 +40,12 @@ LIMIT 1;
 
 -- name: CountParsedJobs :one
 SELECT COUNT(id)::bigint AS count
-FROM parsed_jobs
-WHERE date_deleted IS NULL;
+FROM parsed_jobs;
 
 -- name: ListJobSitemapPage :many
 SELECT p.id, p.role_title, p.categorized_job_title, c.name, p.created_at_source
 FROM parsed_jobs p
 LEFT JOIN parsed_companies c ON c.id = p.company_id
-WHERE p.date_deleted IS NULL
 ORDER BY p.created_at_source DESC, p.id DESC
 LIMIT $1 OFFSET $2;
 
@@ -56,15 +53,13 @@ LIMIT $1 OFFSET $2;
 SELECT COUNT(DISTINCT c.id)::bigint AS count
 FROM parsed_companies c
 JOIN parsed_jobs p ON p.company_id = c.id
-WHERE c.slug IS NOT NULL AND trim(c.slug) != ''
-  AND p.date_deleted IS NULL;
+WHERE c.slug IS NOT NULL AND trim(c.slug) != '';
 
 -- name: ListCompanySitemapPage :many
 SELECT c.slug, c.name, MAX(p.created_at_source)::timestamptz AS latest_job_posted_at
 FROM parsed_companies c
 JOIN parsed_jobs p ON p.company_id = c.id
 WHERE c.slug IS NOT NULL AND trim(c.slug) != ''
-  AND p.date_deleted IS NULL
 GROUP BY c.id, c.slug, c.name
 ORDER BY latest_job_posted_at DESC, c.id DESC
 LIMIT $1 OFFSET $2;
@@ -84,7 +79,6 @@ WHERE company_id = $1;
 SELECT categorized_job_function
 FROM parsed_jobs
 WHERE categorized_job_title = $1
-  AND date_deleted IS NULL
   AND categorized_job_function IS NOT NULL
   AND categorized_job_function != ''
 GROUP BY categorized_job_function
@@ -95,7 +89,6 @@ LIMIT 1;
 SELECT categorized_job_title, COUNT(id)::bigint AS score
 FROM parsed_jobs
 WHERE categorized_job_title IS NOT NULL
-  AND date_deleted IS NULL
   AND categorized_job_title != ''
   AND categorized_job_function = $1
 GROUP BY categorized_job_title
@@ -108,7 +101,6 @@ LIMIT $3;
 SELECT categorized_job_title, COUNT(id)::bigint AS score
 FROM parsed_jobs
 WHERE categorized_job_title IS NOT NULL
-  AND date_deleted IS NULL
   AND categorized_job_title != ''
   AND created_at_source IS NOT NULL
   AND created_at_source >= $1
@@ -135,8 +127,6 @@ SELECT
 	END AS company_count
 FROM parsed_jobs p
 WHERE
-	p.date_deleted IS NULL
-AND
 (
 	NOT sqlc.arg(has_title_filters)::boolean
 	OR p.categorized_job_title = ANY(sqlc.arg(job_categories)::text[])
@@ -284,8 +274,6 @@ AND (
 SELECT p.id
 FROM parsed_jobs p
 WHERE
-	p.date_deleted IS NULL
-AND
 (
 	NOT sqlc.arg(has_title_filters)::boolean
 	OR p.categorized_job_title = ANY(sqlc.arg(job_categories)::text[])
@@ -462,11 +450,10 @@ ORDER BY
 LIMIT sqlc.arg(limit_rows) OFFSET sqlc.arg(offset_rows);
 
 -- name: ListJobsByIDsInOrder :many
-SELECT p.id, p.raw_us_job_id, p.role_title, p.job_description_summary, c.name, c.slug, c.tagline, c.profile_pic_url, c.home_page_url, c.linkedin_url, c.employee_range, c.founded_year, c.sponsors_h1b, p.categorized_job_title, p.location_city, p.location_type, p.location_us_states, p.location_countries, p.employment_type, p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_type, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.tech_stack, p.updated_at, p.created_at_source, p.url
+SELECT p.id, p.raw_us_job_id, p.role_title, p.job_description_summary, c.name, c.slug, c.tagline, c.profile_pic_url, c.home_page_url, c.linkedin_url, c.employee_range, c.founded_year, c.sponsors_h1b, p.categorized_job_title, p.location_city, p.location_type, p.location_us_states, p.location_countries, p.employment_type, p.salary_min, p.salary_max, p.salary_min_usd, p.salary_max_usd, p.salary_type, p.is_entry_level, p.is_junior, p.is_mid_level, p.is_senior, p.is_lead, p.tech_stack, p.updated_at, p.created_at_source, p.date_deleted, p.url
 FROM parsed_jobs p
 LEFT JOIN parsed_companies c ON c.id = p.company_id
 WHERE p.id = ANY(sqlc.arg(ids)::bigint[])
-  AND p.date_deleted IS NULL
 ORDER BY array_position(sqlc.arg(ids)::bigint[], p.id);
 
 -- name: GetJobsMetricsFiltered :one
@@ -474,8 +461,6 @@ WITH filtered AS (
 	SELECT p.id, p.company_id, p.created_at_source
 	FROM parsed_jobs p
 	WHERE
-	p.date_deleted IS NULL
-	AND
 	(
 		NOT sqlc.arg(has_title_filters)::boolean
 		OR p.categorized_job_title = ANY(sqlc.arg(job_categories)::text[])

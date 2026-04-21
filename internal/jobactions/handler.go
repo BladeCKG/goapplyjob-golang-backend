@@ -119,7 +119,6 @@ func (h *Handler) getCompanyCompanionJobs(c *gin.Context) {
 			JOIN parsed_jobs p
 				ON p.company_id = b.company_id
 				AND p.id <> b.base_job_id
-				AND p.date_deleted IS NULL
 			JOIN user_job_actions uja
 				ON uja.parsed_job_id = p.id
 				AND uja.user_id = $1
@@ -162,6 +161,7 @@ func (h *Handler) getCompanyCompanionJobs(c *gin.Context) {
 			p.tech_stack,
 			p.benefits,
 			p.created_at_source,
+			p.date_deleted,
 			p.url
 		FROM ranked r
 		JOIN parsed_jobs p ON p.id = r.companion_job_id
@@ -214,6 +214,7 @@ func (h *Handler) getCompanyCompanionJobs(c *gin.Context) {
 			techStack            []byte
 			benefits             pgtype.Text
 			createdAtSource      pgtype.Timestamptz
+			dateDeleted          pgtype.Timestamptz
 			jobURL               pgtype.Text
 		)
 		if err := rows.Scan(
@@ -252,6 +253,7 @@ func (h *Handler) getCompanyCompanionJobs(c *gin.Context) {
 			&techStack,
 			&benefits,
 			&createdAtSource,
+			&dateDeleted,
 			&jobURL,
 		); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load companion jobs"})
@@ -289,6 +291,7 @@ func (h *Handler) getCompanyCompanionJobs(c *gin.Context) {
 		item.ExperienceInPlaceOfEducation = pgBoolPtr(experienceInLieu)
 		item.Benefits = pgTextPtr(benefits)
 		item.CreatedAtSource = pgTimePtr(createdAtSource)
+		item.DateDeleted = timestamptzStringPtr(dateDeleted)
 		item.URL = pgTextPtr(jobURL)
 		_ = json.Unmarshal(locationUSStates, &item.LocationUSStates)
 		_ = json.Unmarshal(locationCountries, &item.LocationCountries)
@@ -516,4 +519,12 @@ func pgTimePtr(value pgtype.Timestamptz) *time.Time {
 	}
 	v := value.Time.UTC()
 	return &v
+}
+
+func timestamptzStringPtr(value pgtype.Timestamptz) *string {
+	if !value.Valid {
+		return nil
+	}
+	formatted := value.Time.UTC().Format(time.RFC3339Nano)
+	return &formatted
 }

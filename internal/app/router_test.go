@@ -43,7 +43,7 @@ func TestJobsPublicAccess(t *testing.T) {
 	}
 }
 
-func TestClosedJobsAreHiddenFromPublicListAndDetail(t *testing.T) {
+func TestClosedJobsRemainVisibleInPublicListAndDetail(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
 
@@ -61,15 +61,20 @@ func TestClosedJobsAreHiddenFromPublicListAndDetail(t *testing.T) {
 	var listBody map[string]any
 	decodeBody(t, listRec.Body.Bytes(), &listBody)
 	items := listBody["items"].([]any)
-	if len(items) != 1 {
-		t.Fatalf("expected only open job in listing, got %#v", listBody)
+	if len(items) != 2 {
+		t.Fatalf("expected both open and closed jobs in listing, got %#v", listBody)
 	}
 
 	closedJobID := int(2)
 	detailReq := httptest.NewRequest(http.MethodGet, "/job/"+strconv.Itoa(closedJobID), nil)
 	detailRec := httptest.NewRecorder()
 	router.ServeHTTP(detailRec, detailReq)
-	assertStatus(t, detailRec.Code, http.StatusGone)
+	assertStatus(t, detailRec.Code, http.StatusOK)
+	var detailBody map[string]any
+	decodeBody(t, detailRec.Body.Bytes(), &detailBody)
+	if _, ok := detailBody["date_deleted"].(string); !ok {
+		t.Fatalf("expected closed job detail to include date_deleted, got %#v", detailBody)
+	}
 }
 
 func TestAuthAndJobsFlow(t *testing.T) {
