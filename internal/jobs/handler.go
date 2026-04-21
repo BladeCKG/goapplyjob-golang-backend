@@ -1058,6 +1058,10 @@ func buildJobsWhereSQL(input listingFilterInput) (string, []any) {
 	b := sqlArgsBuilder{args: []any{}}
 	clauses := make([]string, 0, 16)
 
+	if !input.ShowClosedJobs {
+		clauses = append(clauses, "p.date_deleted IS NULL")
+	}
+
 	titleOr := make([]string, 0, 8)
 	if len(input.JobCategories) > 0 {
 		titleOr = append(titleOr, fmt.Sprintf("p.categorized_job_title = ANY(%s::text[])", b.add(input.JobCategories)))
@@ -1721,6 +1725,7 @@ type listingFilterInput struct {
 	SeniorityMid          bool
 	SenioritySenior       bool
 	SeniorityLead         bool
+	ShowClosedJobs        bool
 	HasUser               bool
 	UserActionFilter      string
 	UserID                int64
@@ -1740,6 +1745,7 @@ func (h *Handler) buildListingFilterInput(c *gin.Context, currentUser *auth.User
 		LocationTypes:        []string{},
 		EmploymentTypes:      []string{},
 		StrictLocation:       queryBoolDefault(c, "strict_location", false),
+		ShowClosedJobs:       queryBoolDefault(c, "show_closed_jobs", true),
 	}
 
 	if categories := uniqueStrings(parseCSVQuery(c.Query("job_categories"))); len(categories) > 0 {
