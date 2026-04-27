@@ -7,6 +7,19 @@ var location = {
     protocol: "https:"
 };
 var __documentElements = {};
+var __collectByTagName = function(node, tagName, out) {
+    if (!node || !out) return out;
+    var wanted = String(tagName || "*").toUpperCase();
+    if (node.tagName && (wanted === "*" || node.tagName === wanted)) {
+        out.push(node);
+    }
+    if (node.children && node.children.length) {
+        for (var i = 0; i < node.children.length; i++) {
+            __collectByTagName(node.children[i], wanted, out);
+        }
+    }
+    return out;
+};
 var __createElementNode = function(tag) {
     var node = {
         tagName: String(tag || "").toUpperCase(),
@@ -26,6 +39,15 @@ var __createElementNode = function(tag) {
         },
         getAttribute: function(name) {
             return this[name];
+        },
+        getElementsByTagName: function(tagName) {
+            var out = [];
+            if (this.children && this.children.length) {
+                for (var i = 0; i < this.children.length; i++) {
+                    __collectByTagName(this.children[i], tagName, out);
+                }
+            }
+            return out;
         }
     };
     if (node.tagName === "A") {
@@ -34,11 +56,20 @@ var __createElementNode = function(tag) {
     }
     return node;
 };
+var __documentElement = __createElementNode("html");
+var __headElement = __createElementNode("head");
+var __bodyElement = __createElementNode("body");
+__documentElement.appendChild(__headElement);
+__documentElement.appendChild(__bodyElement);
 var document = {
+    documentElement: __documentElement,
+    head: __headElement,
+    body: __bodyElement,
     getElementById: function(id) {
         if (!__documentElements[id]) {
             __documentElements[id] = __createElementNode("input");
             __documentElements[id].id = id;
+            __bodyElement.appendChild(__documentElements[id]);
         }
         return __documentElements[id];
     },
@@ -51,6 +82,9 @@ var document = {
     },
     createElement: function(tag) {
         return __createElementNode(tag);
+    },
+    getElementsByTagName: function(tagName) {
+        return __collectByTagName(__documentElement, tagName, []);
     },
     cookie: ""
 };
