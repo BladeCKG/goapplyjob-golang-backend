@@ -10,6 +10,7 @@ import (
 	"goapplyjob-golang-backend/internal/sources/currency"
 	"goapplyjob-golang-backend/internal/sources/parseerr"
 	"html"
+	"log"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -347,25 +348,35 @@ func parseCompany(value any) map[string]any {
 func resolveRedirectURLDailyRemote(rawURL string) string {
 	trimmed := strings.TrimSpace(rawURL)
 	if trimmed == "" {
+		log.Printf("dailyremote resolve_redirect skip reason=empty_url")
 		return trimmed
 	}
+	log.Printf("dailyremote resolve_redirect start apply_url=%s", trimmed)
 	parsed, err := url.Parse(trimmed)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		log.Printf("dailyremote resolve_redirect invalid_url apply_url=%s err=%v", trimmed, err)
 		return trimmed
 	}
 	fetcher, err := scraper.NewCloudscraperFetcher(scraper.CloudscraperConfig{
 		Timeout: 5 * time.Second,
 	})
 	if err != nil {
+		log.Printf("dailyremote resolve_redirect fetcher_init_failed apply_url=%s err=%v", trimmed, err)
 		return trimmed
 	}
 	finalURL, _, err := fetcher.ResolveFinalURL(context.Background(), trimmed)
 	if err != nil {
+		if strings.Contains(err.Error(), "v2 challenge solver failed: goja: answer value is empty or undefined") {
+			log.Printf("dailyremote resolve_redirect cloudscraper_goja_empty_answer apply_url=%s", trimmed)
+		}
+		log.Printf("dailyremote resolve_redirect resolve_failed apply_url=%s err=%v", trimmed, err)
 		return trimmed
 	}
 	if strings.TrimSpace(finalURL) != "" {
+		log.Printf("dailyremote resolve_redirect success apply_url=%s final_url=%s", trimmed, strings.TrimSpace(finalURL))
 		return strings.TrimSpace(finalURL)
 	}
+	log.Printf("dailyremote resolve_redirect empty_final_url apply_url=%s", trimmed)
 	return trimmed
 }
 

@@ -81,6 +81,13 @@ func (s *Service) readHTMLForSource(ctx context.Context, source, targetURL strin
 	return s.ReadHTML(ctx, targetURL)
 }
 
+func isCloudscraperGojaEmptyAnswerError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "v2 challenge solver failed: goja: answer value is empty or undefined")
+}
+
 func (s *Service) fetchTimeout() time.Duration {
 	if s.Config.FetchTimeoutSeconds > 0 {
 		return time.Duration(s.Config.FetchTimeoutSeconds) * time.Second
@@ -396,7 +403,10 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 						continue
 					}
 					targetURL := toTargetJobURLForSource(job.source, job.url)
-					log.Printf("raw-us-job-worker fetch_start job_id=%d source=%s target_url=%s", job.id, job.source, targetURL)
+					log.Printf("raw-us-job-worker fetch_start job_id=%d source=%s source_url=%s target_url=%s", job.id, job.source, job.url, targetURL)
+					if job.source == sourceDailyRemote {
+						log.Printf("raw-us-job-worker dailyremote_fetch_context job_id=%d source_url=%s target_apply_url=%s", job.id, job.url, targetURL)
+					}
 					fetchCtx, cancelFetch := context.WithTimeout(ctx, s.fetchTimeout())
 					html, statusCode, err := s.readHTMLForSource(fetchCtx, job.source, targetURL)
 					cancelFetch()
@@ -405,7 +415,10 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 							reportErr(ctx.Err())
 							return
 						}
-						log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s retry_later error=%v", job.id, job.source, err)
+						if isCloudscraperGojaEmptyAnswerError(err) {
+							log.Printf("raw-us-job-worker cloudscraper_goja_empty_answer job_id=%d source=%s source_url=%s target_url=%s", job.id, job.source, job.url, targetURL)
+						}
+						log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s source_url=%s target_url=%s retry_later error=%v", job.id, job.source, job.url, targetURL, err)
 						if err := setRetry(job.id); err != nil {
 							reportErr(err)
 							return
@@ -441,19 +454,19 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 							return
 						}
 					case statusCode == statusGone && isDailyRemoteGoneJobHTML(job.source, html):
-						log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s status=410 detected_no_longer_available", job.id, job.source)
+						log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s source_url=%s target_url=%s status=410 detected_no_longer_available", job.id, job.source, job.url, targetURL)
 						if err := setSkippable(job.id); err != nil {
 							reportErr(err)
 							return
 						}
 					case statusCode == statusNotFound:
-						log.Printf("raw-us-job-worker fetch_result job_id=%d status=404", job.id)
+						log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s source_url=%s target_url=%s status=404", job.id, job.source, job.url, targetURL)
 						if err := setSkippable(job.id); err != nil {
 							reportErr(err)
 							return
 						}
 					case statusCode == statusTooManyRequests:
-						log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s status=429 retry_later", job.id, job.source)
+						log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s source_url=%s target_url=%s status=429 retry_later", job.id, job.source, job.url, targetURL)
 						throttledMu.Lock()
 						throttledSources[job.source] = struct{}{}
 						throttledMu.Unlock()
@@ -462,13 +475,13 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 							return
 						}
 					case statusCode < 200 || statusCode >= 300:
-						log.Printf("raw-us-job-worker fetch_result job_id=%d status=%d empty_html_or_error", job.id, statusCode)
+						log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s source_url=%s target_url=%s status=%d empty_html_or_error", job.id, job.source, job.url, targetURL, statusCode)
 						if err := setRetry(job.id); err != nil {
 							reportErr(err)
 							return
 						}
 					case strings.TrimSpace(html) == "":
-						log.Printf("raw-us-job-worker fetch_result job_id=%d status=%d empty_html_or_error", job.id, statusCode)
+						log.Printf("raw-us-job-worker fetch_result job_id=%d source=%s source_url=%s target_url=%s status=%d empty_html_or_error", job.id, job.source, job.url, targetURL, statusCode)
 						if err := setRetry(job.id); err != nil {
 							reportErr(err)
 							return

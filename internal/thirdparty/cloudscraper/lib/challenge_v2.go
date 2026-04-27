@@ -18,20 +18,35 @@ var v2ScriptRegex = regexp.MustCompile(`(?s)<script[^>]*>(.*?window\._cf_chl_opt
 func solveV2Logic(ctx context.Context, body, domain string, engine js.Engine, logger *log.Logger) (string, error) {
 	scriptMatches := v2ScriptRegex.FindAllStringSubmatch(body, -1)
 	if len(scriptMatches) == 0 {
+		if logger != nil {
+			logger.Printf("cloudscraper: solveV2Logic no_scripts domain=%q body_len=%d", domain, len(body))
+		}
 		return "", fmt.Errorf("could not find modern JS challenge scripts")
+	}
+	if logger != nil {
+		logger.Printf("cloudscraper: solveV2Logic scripts_found domain=%q script_blocks=%d", domain, len(scriptMatches))
 	}
 
 	// Security: Check total script size to prevent DoS
 	if err := security.ValidateTotalScriptSize(scriptMatches, security.MaxChallengeScriptSize); err != nil {
+		if logger != nil {
+			logger.Printf("cloudscraper: solveV2Logic script_size_validation_failed domain=%q err=%v", domain, err)
+		}
 		return "", err
 	}
 
 	// Use a special synchronous path for Goja, which can't handle async setTimeout.
 	if gojaEngine, ok := engine.(*js.GojaEngine); ok {
+		if logger != nil {
+			logger.Printf("cloudscraper: solveV2Logic using_goja domain=%q", domain)
+		}
 		return gojaEngine.SolveV2Challenge(ctx, body, domain, scriptMatches, logger)
 	}
 
 	// Use a modern asynchronous path for external runtimes (node, deno, bun).
+	if logger != nil {
+		logger.Printf("cloudscraper: solveV2Logic using_external_runtime domain=%q", domain)
+	}
 	return solveV2WithExternal(ctx, domain, scriptMatches, engine)
 }
 

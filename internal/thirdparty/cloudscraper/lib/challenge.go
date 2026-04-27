@@ -90,10 +90,13 @@ func (s *Scraper) solveClassicJSChallenge(ctx context.Context, originalURL *url.
 }
 
 func (s *Scraper) solveModernJSChallenge(resp *http.Response, body string) (*http.Response, error) {
+	s.logger.Printf("cloudscraper: solveModernJSChallenge start url=%q host=%q body_len=%d", resp.Request.URL.String(), resp.Request.URL.Host, len(body))
 	answer, err := solveV2Logic(resp.Request.Context(), body, resp.Request.URL.Host, s.jsEngine, s.logger)
 	if err != nil {
+		s.logger.Printf("cloudscraper: solveModernJSChallenge solveV2Logic failed url=%q host=%q err=%v", resp.Request.URL.String(), resp.Request.URL.Host, err)
 		return nil, fmt.Errorf("v2 challenge solver failed: %w", err)
 	}
+	s.logger.Printf("cloudscraper: solveModernJSChallenge answer_ready url=%q host=%q answer_len=%d", resp.Request.URL.String(), resp.Request.URL.Host, len(answer))
 
 	// Try to find the challenge form (old style)
 	formMatch := challengeFormRegex.FindStringSubmatch(body)
@@ -114,6 +117,7 @@ func (s *Scraper) solveModernJSChallenge(resp *http.Response, body string) (*htt
 		// Use the standard modern challenge submission URL pattern
 		submitURL = s.buildModernSubmitURL(resp.Request.URL)
 	}
+	s.logger.Printf("cloudscraper: solveModernJSChallenge submit_prepared url=%q submit_url=%q has_form=%t jschl_vc_present=%t pass_present=%t", resp.Request.URL.String(), submitURL, len(formMatch) >= 2, len(jschlVcRegex.FindStringSubmatch(body)) >= 2, len(passRegex.FindStringSubmatch(body)) >= 2)
 
 	// Extract optional fields that may not be present in modern challenges
 	var jschlVc, pass string

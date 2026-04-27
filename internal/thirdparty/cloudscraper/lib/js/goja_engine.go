@@ -91,31 +91,47 @@ func (e *GojaEngine) Run(ctx context.Context, script string) (string, error) {
 func (e *GojaEngine) SolveV2Challenge(ctx context.Context, body, domain string, scriptMatches [][]string, logger *log.Logger) (string, error) {
 	// Security: Check total script size
 	if err := security.ValidateTotalScriptSize(scriptMatches, security.MaxGojaScriptSize); err != nil {
+		if logger != nil {
+			logger.Printf("cloudscraper: goja SolveV2Challenge script_size_validation_failed domain=%q err=%v", domain, err)
+		}
 		return "", fmt.Errorf("goja: %w", err)
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if logger != nil {
+		logger.Printf("cloudscraper: goja SolveV2Challenge start domain=%q script_blocks=%d body_len=%d", domain, len(scriptMatches), len(body))
+	}
 
 	vm := goja.New()
 	if err := vm.Set("__cloudscraper_domain__", domain); err != nil {
+		if logger != nil {
+			logger.Printf("cloudscraper: goja SolveV2Challenge set_domain_failed domain=%q err=%v", domain, err)
+		}
 		return "", fmt.Errorf("goja: failed to set domain: %w", err)
 	}
 
 	// Security: Running setup script in VM.
 	if _, err := vm.RunString(setupScript); err != nil {
+		if logger != nil {
+			logger.Printf("cloudscraper: goja SolveV2Challenge setup_failed domain=%q err=%v", domain, err)
+		}
 		return "", fmt.Errorf("goja: failed to set up DOM shim: %w", err)
 	}
 
 	// Execute all extracted Cloudflare scripts in the same VM context.
-	for _, match := range scriptMatches {
+	for idx, match := range scriptMatches {
 		if len(match) > 1 {
 			scriptContent := match[1]
 			scriptContent = strings.ReplaceAll(scriptContent, `document.getElementById('challenge-form');`, "({})")
 			// Security: This executes JavaScript from the Cloudflare challenge page.
 			// The goja VM is sandboxed, but this is an inherent risk of the library's function.
 			if _, err := vm.RunString(scriptContent); err != nil {
-				logger.Printf("goja: warning, a script block failed to run: %v\n", err)
+				if logger != nil {
+					logger.Printf("cloudscraper: goja SolveV2Challenge script_block_failed domain=%q index=%d err=%v", domain, idx, err)
+				}
+			} else if logger != nil {
+				logger.Printf("cloudscraper: goja SolveV2Challenge script_block_ok domain=%q index=%d script_len=%d", domain, idx, len(scriptContent))
 			}
 		}
 	}
@@ -142,12 +158,40 @@ func (e *GojaEngine) SolveV2Challenge(ctx context.Context, body, domain string, 
 })()
 `)
 	if err != nil {
+		if logger != nil {
+			logger.Printf("cloudscraper: goja SolveV2Challenge answer_extract_failed domain=%q err=%v", domain, err)
+		}
 		return "", fmt.Errorf("goja: could not retrieve final answer from VM: %w", err)
 	}
 
 	answer := answerVal.String()
 	if answer == "" || answer == "undefined" {
+		if logger != nil {
+			debugVal, debugErr := vm.RunString(`
+(function() {
+	var ids = ['jschl-answer', 'jschl_answer', 'cf-chl-answer', 'cf_chl_answer'];
+	var out = [];
+	for (var i = 0; i < ids.length; i++) {
+		var el = document.getElementById(ids[i]);
+		var value = '';
+		if (el && typeof el.value !== 'undefined') {
+			value = String(el.value);
+		}
+		out.push(ids[i] + '=' + value);
+	}
+	return out.join(', ');
+})()
+`)
+			if debugErr != nil {
+				logger.Printf("cloudscraper: goja SolveV2Challenge empty_answer domain=%q answer=%q fields_debug_err=%v", domain, answer, debugErr)
+			} else {
+				logger.Printf("cloudscraper: goja SolveV2Challenge empty_answer domain=%q answer=%q fields=%q", domain, answer, debugVal.String())
+			}
+		}
 		return "", fmt.Errorf("goja: answer value is empty or undefined")
+	}
+	if logger != nil {
+		logger.Printf("cloudscraper: goja SolveV2Challenge success domain=%q answer_len=%d", domain, len(answer))
 	}
 
 	return answer, nil
