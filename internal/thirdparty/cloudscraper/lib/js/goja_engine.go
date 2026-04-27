@@ -98,6 +98,9 @@ func (e *GojaEngine) SolveV2Challenge(ctx context.Context, body, domain string, 
 	}
 
 	vm := goja.New()
+	if err := vm.Set("__cloudscraper_domain__", domain); err != nil {
+		return "", fmt.Errorf("goja: failed to set domain: %w", err)
+	}
 
 	// Security: Running setup script in VM.
 	if _, err := vm.RunString(setupScript); err != nil {
@@ -124,9 +127,20 @@ func (e *GojaEngine) SolveV2Challenge(ctx context.Context, body, domain string, 
 	case <-time.After(4 * time.Second):
 	}
 
-	// Get the final answer from the 'jschl_answer' field in the dummy document.
+	// Get the final answer from the most likely challenge fields in the dummy document.
 	// Security: This executes a small, controlled script to retrieve a value.
-	answerVal, err := vm.RunString(`document.getElementById('jschl-answer').value`)
+	answerVal, err := vm.RunString(`
+(function() {
+	var ids = ['jschl-answer', 'jschl_answer', 'cf-chl-answer', 'cf_chl_answer'];
+	for (var i = 0; i < ids.length; i++) {
+		var el = document.getElementById(ids[i]);
+		if (el && typeof el.value === 'string' && el.value) {
+			return el.value;
+		}
+	}
+	return '';
+})()
+`)
 	if err != nil {
 		return "", fmt.Errorf("goja: could not retrieve final answer from VM: %w", err)
 	}
