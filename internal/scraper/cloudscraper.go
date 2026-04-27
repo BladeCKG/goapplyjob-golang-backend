@@ -5,6 +5,7 @@ import (
 	"errors"
 	"goapplyjob-golang-backend/internal/thirdparty/cloudscraper/lib/stealth"
 	"io"
+	"log"
 	"time"
 
 	cloudscraper "goapplyjob-golang-backend/internal/thirdparty/cloudscraper/lib"
@@ -41,6 +42,7 @@ func NewCloudscraperFetcher(cfg CloudscraperConfig) (*CloudscraperFetcher, error
 		// Keep retries bounded while allowing more recovery attempts on
 		// throttled/blocked sessions.
 		cloudscraper.WithSessionConfig(true, time.Hour, 4),
+		cloudscraper.WithLogger(log.Default()),
 	)
 	if err != nil {
 		return nil, err
