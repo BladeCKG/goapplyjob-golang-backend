@@ -187,6 +187,16 @@ func TestParseRawHTMLExtractsSalaryFromSummaryFixtures(t *testing.T) {
 			"minSalaryAsUSD":          int64(160000),
 			"maxSalaryAsUSD":          int64(180000),
 		}},
+		{name: "labeled yearly amounts", fileName: "raw-job-5.html", want: map[string]any{
+			"min":                     int64(86000),
+			"max":                     int64(114000),
+			"salaryType":              "per year",
+			"currencyCode":            "USD",
+			"currencySymbol":          "$",
+			"salaryHumanReadableText": "minimum: $86,000 midpoint: $114,000 maximum: $142,000, plus annual bonus opportunity.",
+			"minSalaryAsUSD":          int64(86000),
+			"maxSalaryAsUSD":          int64(114000),
+		}},
 	}
 
 	for _, tc := range tests {

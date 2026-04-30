@@ -11,7 +11,6 @@ import (
 	"html"
 	"math"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -189,7 +188,7 @@ func ParseRawHTML(htmlText, _ string) (map[string]any, error) {
 		"company":                      company,
 		"salaryRange":                  salaryRange,
 		"educationRequirementsCredentialCategory": educationRequirementsCredentialCategory,
-		"descriptionLanguage":          "en",
+		"descriptionLanguage":                     "en",
 	}
 	return payload, nil
 }
@@ -555,23 +554,13 @@ func parseSalaryRangeFromText(value string) any {
 	}
 	normalizedText := normalizeSalaryText(raw)
 	normalized := strings.ToLower(normalizedText)
-	matches := currency.SalaryNumberPattern.FindAllStringSubmatch(raw, -1)
-	if len(matches) == 0 {
-		matches = currency.SalaryNumberPattern.FindAllStringSubmatch(normalizedText, -1)
+	amounts := currency.ExtractSalaryAmounts(raw)
+	if len(amounts) == 0 {
+		amounts = currency.ExtractSalaryAmounts(normalizedText)
 	}
-	if len(matches) == 0 {
+	if len(amounts) == 0 {
 		return map[string]any{
 			"salaryHumanReadableText": raw,
-		}
-	}
-	amounts := make([]float64, 0, len(matches))
-	for _, match := range matches {
-		if len(match) < 4 {
-			continue
-		}
-		amount := parseAmount(match[2], match[3])
-		if amount > 0 {
-			amounts = append(amounts, amount)
 		}
 	}
 	if len(amounts) == 0 {
@@ -636,24 +625,6 @@ func normalizeSalaryText(value string) string {
 		"Ã¢â€šÂ¹", "â‚¹",
 	)
 	return replacer.Replace(text)
-}
-
-func parseAmount(numberText, suffix string) float64 {
-	clean := strings.TrimSpace(strings.ReplaceAll(numberText, ",", ""))
-	if clean == "" {
-		return 0
-	}
-	value, err := strconv.ParseFloat(clean, 64)
-	if err != nil {
-		return 0
-	}
-	switch strings.ToLower(strings.TrimSpace(suffix)) {
-	case "k":
-		value *= 1000
-	case "m":
-		value *= 1000000
-	}
-	return value
 }
 
 func extractSalaryRangeFromJobPostingLDJSON(htmlText string) any {

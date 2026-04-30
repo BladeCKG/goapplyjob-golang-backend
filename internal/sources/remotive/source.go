@@ -12,7 +12,6 @@ import (
 	"math"
 	"net/url"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -408,22 +407,9 @@ func parseSalaryRangeFromText(value string) any {
 	}
 	normalizedText := normalizeSalaryText(raw)
 	normalized := strings.ToLower(normalizedText)
-	matches := currency.SalaryNumberPattern.FindAllStringSubmatch(raw, -1)
-	if len(matches) == 0 {
-		matches = currency.SalaryNumberPattern.FindAllStringSubmatch(normalizedText, -1)
-	}
-	if len(matches) == 0 {
-		return nil
-	}
-	amounts := make([]float64, 0, len(matches))
-	for _, match := range matches {
-		if len(match) < 4 {
-			continue
-		}
-		amount := parseAmount(match[2], match[3])
-		if amount > 0 {
-			amounts = append(amounts, amount)
-		}
+	amounts := currency.ExtractSalaryAmounts(raw)
+	if len(amounts) == 0 {
+		amounts = currency.ExtractSalaryAmounts(normalizedText)
 	}
 	if len(amounts) == 0 {
 		return nil
@@ -485,24 +471,6 @@ func normalizeSalaryText(value string) string {
 		"â‚¹", "₹",
 	)
 	return replacer.Replace(text)
-}
-
-func parseAmount(numberText, suffix string) float64 {
-	clean := strings.TrimSpace(strings.ReplaceAll(numberText, ",", ""))
-	if clean == "" {
-		return 0
-	}
-	value, err := strconv.ParseFloat(clean, 64)
-	if err != nil {
-		return 0
-	}
-	switch strings.ToLower(strings.TrimSpace(suffix)) {
-	case "k":
-		value *= 1000
-	case "m":
-		value *= 1000000
-	}
-	return value
 }
 
 func textContent(node *nethtml.Node) string {

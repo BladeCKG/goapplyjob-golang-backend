@@ -2,7 +2,10 @@ package currency
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 var SymbolToCode = map[string]string{
@@ -234,6 +237,67 @@ func SplitTokens(value string) []string {
 	}
 	flush()
 	return tokens
+}
+
+func ExtractSalaryAmounts(text string) []float64 {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	matches := SalaryNumberPattern.FindAllStringSubmatchIndex(text, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	amounts := make([]float64, 0, len(matches))
+	for _, match := range matches {
+		if len(match) < 8 || match[4] < 0 || match[5] < 0 {
+			continue
+		}
+		numberText := text[match[4]:match[5]]
+		suffix := ""
+		if match[6] >= 0 && match[7] >= 0 {
+			candidateSuffix := text[match[6]:match[7]]
+			if suffixIsStandalone(text, match[7]) {
+				suffix = candidateSuffix
+			}
+		}
+		amount := ParseSalaryAmount(numberText, suffix)
+		if amount > 0 {
+			amounts = append(amounts, amount)
+		}
+	}
+	if len(amounts) == 0 {
+		return nil
+	}
+	return amounts
+}
+
+func ParseSalaryAmount(numberText, suffix string) float64 {
+	clean := strings.TrimSpace(strings.ReplaceAll(numberText, ",", ""))
+	if clean == "" {
+		return 0
+	}
+	value, err := strconv.ParseFloat(clean, 64)
+	if err != nil {
+		return 0
+	}
+	switch strings.ToLower(strings.TrimSpace(suffix)) {
+	case "k":
+		value *= 1000
+	case "m":
+		value *= 1000000
+	}
+	return value
+}
+
+func suffixIsStandalone(text string, suffixEnd int) bool {
+	if suffixEnd < 0 || suffixEnd >= len(text) {
+		return true
+	}
+	r, _ := utf8.DecodeRuneInString(text[suffixEnd:])
+	if r == utf8.RuneError {
+		return true
+	}
+	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 }
 
 func firstNonEmpty(values ...string) string {
