@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
 	"goapplyjob-golang-backend/internal/database"
 )
@@ -530,6 +531,100 @@ func TestProcessPendingFetchErrorRetriesJobWithoutFailingCycle(t *testing.T) {
 	}
 	if rawJSON.Valid {
 		t.Fatalf("expected raw_json unchanged/null, got %#v", rawJSON.String)
+	}
+}
+
+func TestProcessPendingRetryPreservesParsedJobAndUserAction(t *testing.T) {
+	db, err := database.Open(testDatabaseURL(t, "test_raw_retry_preserves_parsed_and_actions"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+
+	if _, err := db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO auth_users (id, email, created_at) VALUES (1, 'retry-preserve@example.com', ?)`,
+		now,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO raw_us_jobs (id, source, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
+		 VALUES (1, 'remoterocketship', 'https://remote.example/job/retry-preserve', '2026-02-12T10:00:00Z', false, false, true, 0, '{"old":"payload"}')`,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO parsed_jobs (id, raw_us_job_id, url, slug) VALUES (1, 1, 'https://remote.example/job/retry-preserve', 'retry-preserve')`,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.SQL.ExecContext(
+		context.Background(),
+		`INSERT INTO user_job_actions (user_id, parsed_job_id, is_applied, is_saved, is_hidden, created_at, updated_at)
+		 VALUES (1, 1, true, false, false, ?, ?)`,
+		now,
+		now,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(Config{}, db)
+	svc.EnabledSources = map[string]struct{}{"remoterocketship": {}}
+	svc.ReadHTMLForSource = func(ctx context.Context, _ string, targetURL string) (string, int, error) {
+		return "", 0, errors.New("dial tcp timeout")
+	}
+
+	processed, err := svc.ProcessPending(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected one processed job, got %d", processed)
+	}
+
+	var retryCount int
+	var isParsed bool
+	if err := db.SQL.QueryRowContext(
+		context.Background(),
+		`SELECT retry_count, is_parsed FROM raw_us_jobs WHERE id = 1`,
+	).Scan(&retryCount, &isParsed); err != nil {
+		t.Fatal(err)
+	}
+	if retryCount != 1 {
+		t.Fatalf("expected retry_count increment, got %d", retryCount)
+	}
+	if isParsed {
+		t.Fatal("expected raw row to be marked not parsed for retry")
+	}
+
+	var parsedCount int
+	if err := db.SQL.QueryRowContext(
+		context.Background(),
+		`SELECT COUNT(*) FROM parsed_jobs WHERE id = 1`,
+	).Scan(&parsedCount); err != nil {
+		t.Fatal(err)
+	}
+	if parsedCount != 1 {
+		t.Fatalf("expected parsed job to remain, got count=%d", parsedCount)
+	}
+
+	var actionCount int
+	if err := db.SQL.QueryRowContext(
+		context.Background(),
+		`SELECT COUNT(*) FROM user_job_actions WHERE user_id = 1 AND parsed_job_id = 1`,
+	).Scan(&actionCount); err != nil {
+		t.Fatal(err)
+	}
+	if actionCount != 1 {
+		t.Fatalf("expected user action to remain, got count=%d", actionCount)
 	}
 }
 

@@ -365,9 +365,6 @@ func (s *Service) ProcessPending(ctx context.Context, batchSize int) (int, error
 						})
 					}
 					setRetry := func(jobID int64) error {
-						if err := clearParsed(jobID); err != nil {
-							return err
-						}
 						return database.RetryLockedWithContext(ctx, 8, 50*time.Millisecond, func() error {
 							_, err := s.DB.SQL.ExecContext(
 								ctx,
