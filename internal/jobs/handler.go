@@ -97,50 +97,50 @@ var (
 )
 
 type ListingJobItem struct {
-	ID                    int64      `json:"id"`
-	RawUSJobID            int64      `json:"raw_us_job_id"`
-	RoleTitle             *string    `json:"role_title"`
-	RoleDescription       *string    `json:"role_description"`
-	RoleRequirements      *string    `json:"role_requirements"`
-	JobDescriptionSummary *string    `json:"job_description_summary"`
-	CompanyName           *string    `json:"company_name"`
-	CompanySlug           *string    `json:"company_slug"`
-	CompanyTagline        *string    `json:"company_tagline"`
-	CompanyProfilePicURL  *string    `json:"company_profile_pic_url"`
-	CompanyHomePageURL    *string    `json:"company_home_page_url"`
-	CompanyLinkedInURL    *string    `json:"company_linkedin_url"`
-	CompanyEmployeeRange  *string    `json:"company_employee_range"`
-	CompanyFoundedYear    *string    `json:"company_founded_year"`
-	CompanySponsorsH1B    *bool      `json:"company_sponsors_h1b"`
-	CategorizedTitle      *string    `json:"categorized_job_title"`
-	CategorizedFunction   *string    `json:"categorized_job_function"`
-	LocationCity          *string    `json:"location_city"`
-	LocationType          *string    `json:"location_type"`
-	LocationUSStates      []string   `json:"location_us_states"`
-	LocationCountries     []string   `json:"location_countries"`
-	EmploymentType        *string    `json:"employment_type"`
-	SalaryMin             *float64   `json:"salary_min"`
-	SalaryMax             *float64   `json:"salary_max"`
-	SalaryMinUSD          *float64   `json:"salary_min_usd"`
-	SalaryMaxUSD          *float64   `json:"salary_max_usd"`
-	SalaryCurrencyCode    *string    `json:"salary_currency_code"`
-	SalaryCurrencySymbol  *string    `json:"salary_currency_symbol"`
-	SalaryType            *string    `json:"salary_type"`
-	IsEntryLevel          *bool      `json:"is_entry_level"`
-	IsJunior              *bool      `json:"is_junior"`
-	IsMidLevel            *bool      `json:"is_mid_level"`
-	IsSenior              *bool      `json:"is_senior"`
-	IsLead                *bool      `json:"is_lead"`
-	EducationRequirementsCredentialCategory *string `json:"education_requirements_credential_category"`
-	ExperienceRequirementsMonths            *int    `json:"experience_requirements_months"`
-	ExperienceInPlaceOfEducation            *bool   `json:"experience_in_place_of_education"`
-	RequiredLanguages                       []string `json:"required_languages"`
-	TechStack             []string   `json:"tech_stack"`
-	Benefits              *string    `json:"benefits"`
-	UpdatedAt             *time.Time `json:"updated_at"`
-	CreatedAtSource       *time.Time `json:"created_at_source"`
-	DateDeleted           *string    `json:"date_deleted"`
-	URL                   *string    `json:"url"`
+	ID                                      int64      `json:"id"`
+	RawUSJobID                              int64      `json:"raw_us_job_id"`
+	RoleTitle                               *string    `json:"role_title"`
+	RoleDescription                         *string    `json:"role_description"`
+	RoleRequirements                        *string    `json:"role_requirements"`
+	JobDescriptionSummary                   *string    `json:"job_description_summary"`
+	CompanyName                             *string    `json:"company_name"`
+	CompanySlug                             *string    `json:"company_slug"`
+	CompanyTagline                          *string    `json:"company_tagline"`
+	CompanyProfilePicURL                    *string    `json:"company_profile_pic_url"`
+	CompanyHomePageURL                      *string    `json:"company_home_page_url"`
+	CompanyLinkedInURL                      *string    `json:"company_linkedin_url"`
+	CompanyEmployeeRange                    *string    `json:"company_employee_range"`
+	CompanyFoundedYear                      *string    `json:"company_founded_year"`
+	CompanySponsorsH1B                      *bool      `json:"company_sponsors_h1b"`
+	CategorizedTitle                        *string    `json:"categorized_job_title"`
+	CategorizedFunction                     *string    `json:"categorized_job_function"`
+	LocationCity                            *string    `json:"location_city"`
+	LocationType                            *string    `json:"location_type"`
+	LocationUSStates                        []string   `json:"location_us_states"`
+	LocationCountries                       []string   `json:"location_countries"`
+	EmploymentType                          *string    `json:"employment_type"`
+	SalaryMin                               *float64   `json:"salary_min"`
+	SalaryMax                               *float64   `json:"salary_max"`
+	SalaryMinUSD                            *float64   `json:"salary_min_usd"`
+	SalaryMaxUSD                            *float64   `json:"salary_max_usd"`
+	SalaryCurrencyCode                      *string    `json:"salary_currency_code"`
+	SalaryCurrencySymbol                    *string    `json:"salary_currency_symbol"`
+	SalaryType                              *string    `json:"salary_type"`
+	IsEntryLevel                            *bool      `json:"is_entry_level"`
+	IsJunior                                *bool      `json:"is_junior"`
+	IsMidLevel                              *bool      `json:"is_mid_level"`
+	IsSenior                                *bool      `json:"is_senior"`
+	IsLead                                  *bool      `json:"is_lead"`
+	EducationRequirementsCredentialCategory *string    `json:"education_requirements_credential_category"`
+	ExperienceRequirementsMonths            *int       `json:"experience_requirements_months"`
+	ExperienceInPlaceOfEducation            *bool      `json:"experience_in_place_of_education"`
+	RequiredLanguages                       []string   `json:"required_languages"`
+	TechStack                               []string   `json:"tech_stack"`
+	Benefits                                *string    `json:"benefits"`
+	UpdatedAt                               *time.Time `json:"updated_at"`
+	CreatedAtSource                         *time.Time `json:"created_at_source"`
+	DateDeleted                             *string    `json:"date_deleted"`
+	URL                                     *string    `json:"url"`
 }
 
 type jobItem = ListingJobItem
@@ -752,8 +752,16 @@ func (h *Handler) refreshFilterCache(ctx context.Context) error {
 }
 
 func (h *Handler) ensureFilterCacheFresh(ctx context.Context, force bool) error {
-	h.filterCache.mu.Lock()
+	if force {
+		h.filterCache.mu.Lock()
+	} else {
+		if !h.filterCache.mu.TryLock() {
+			return nil
+		}
+	}
+
 	defer h.filterCache.mu.Unlock()
+
 	maxID, err := h.getMaxParsedJobID(ctx)
 	if err != nil {
 		return err
@@ -923,87 +931,87 @@ LIMIT 1
 }
 
 type listJobsQueryRow struct {
-	ID                     int32
-	RawUSJobID             int32
-	RoleTitle              pgtype.Text
-	RoleDescription        pgtype.Text
-	RoleRequirements       pgtype.Text
-	JobDescriptionSummary  pgtype.Text
-	CompanyName            pgtype.Text
-	CompanySlug            pgtype.Text
-	CompanyTagline         pgtype.Text
-	CompanyProfilePicURL   pgtype.Text
-	CompanyHomePageURL     pgtype.Text
-	CompanyLinkedInURL     pgtype.Text
-	CompanyEmployeeRange   pgtype.Text
-	CompanyFoundedYear     pgtype.Text
-	CompanySponsorsH1B     pgtype.Bool
-	CategorizedJobTitle    pgtype.Text
-	CategorizedJobFunction pgtype.Text
-	LocationCity           pgtype.Text
-	LocationType           pgtype.Text
-	LocationUsStates       []byte
-	LocationCountries      []byte
-	EmploymentType         pgtype.Text
-	SalaryMin              pgtype.Float8
-	SalaryMax              pgtype.Float8
-	SalaryMinUsd           pgtype.Float8
-	SalaryMaxUsd           pgtype.Float8
-	SalaryCurrencyCode     pgtype.Text
-	SalaryCurrencySymbol   pgtype.Text
-	SalaryType             pgtype.Text
-	IsEntryLevel           pgtype.Bool
-	IsJunior               pgtype.Bool
-	IsMidLevel             pgtype.Bool
-	IsSenior               pgtype.Bool
-	IsLead                 pgtype.Bool
+	ID                                      int32
+	RawUSJobID                              int32
+	RoleTitle                               pgtype.Text
+	RoleDescription                         pgtype.Text
+	RoleRequirements                        pgtype.Text
+	JobDescriptionSummary                   pgtype.Text
+	CompanyName                             pgtype.Text
+	CompanySlug                             pgtype.Text
+	CompanyTagline                          pgtype.Text
+	CompanyProfilePicURL                    pgtype.Text
+	CompanyHomePageURL                      pgtype.Text
+	CompanyLinkedInURL                      pgtype.Text
+	CompanyEmployeeRange                    pgtype.Text
+	CompanyFoundedYear                      pgtype.Text
+	CompanySponsorsH1B                      pgtype.Bool
+	CategorizedJobTitle                     pgtype.Text
+	CategorizedJobFunction                  pgtype.Text
+	LocationCity                            pgtype.Text
+	LocationType                            pgtype.Text
+	LocationUsStates                        []byte
+	LocationCountries                       []byte
+	EmploymentType                          pgtype.Text
+	SalaryMin                               pgtype.Float8
+	SalaryMax                               pgtype.Float8
+	SalaryMinUsd                            pgtype.Float8
+	SalaryMaxUsd                            pgtype.Float8
+	SalaryCurrencyCode                      pgtype.Text
+	SalaryCurrencySymbol                    pgtype.Text
+	SalaryType                              pgtype.Text
+	IsEntryLevel                            pgtype.Bool
+	IsJunior                                pgtype.Bool
+	IsMidLevel                              pgtype.Bool
+	IsSenior                                pgtype.Bool
+	IsLead                                  pgtype.Bool
 	EducationRequirementsCredentialCategory pgtype.Text
 	ExperienceRequirementsMonths            pgtype.Int4
 	ExperienceInPlaceOfEducation            pgtype.Bool
 	RequiredLanguages                       []byte
-	TechStack              []byte
-	Benefits               pgtype.Text
-	UpdatedAt              pgtype.Timestamptz
-	CreatedAtSource        pgtype.Timestamptz
-	DateDeleted            pgtype.Timestamptz
-	Url                    pgtype.Text
+	TechStack                               []byte
+	Benefits                                pgtype.Text
+	UpdatedAt                               pgtype.Timestamptz
+	CreatedAtSource                         pgtype.Timestamptz
+	DateDeleted                             pgtype.Timestamptz
+	Url                                     pgtype.Text
 }
 
 func mapListJobsQueryRow(row listJobsQueryRow) jobItem {
 	item := jobItem{
-		ID:                    int64(row.ID),
-		RawUSJobID:            int64(row.RawUSJobID),
-		RoleTitle:             pgTextPtr(row.RoleTitle),
-		RoleDescription:       pgTextPtr(row.RoleDescription),
-		RoleRequirements:      pgTextPtr(row.RoleRequirements),
-		JobDescriptionSummary: pgTextPtr(row.JobDescriptionSummary),
-		CompanyName:           pgTextPtr(row.CompanyName),
-		CompanySlug:           pgTextPtr(row.CompanySlug),
-		CompanyTagline:        pgTextPtr(row.CompanyTagline),
-		CompanyProfilePicURL:  pgTextPtr(row.CompanyProfilePicURL),
-		CompanyHomePageURL:    pgTextPtr(row.CompanyHomePageURL),
-		CompanyLinkedInURL:    pgTextPtr(row.CompanyLinkedInURL),
-		CompanyEmployeeRange:  pgTextPtr(row.CompanyEmployeeRange),
-		CompanyFoundedYear:    pgTextPtr(row.CompanyFoundedYear),
-		CompanySponsorsH1B:    pgBoolPtr(row.CompanySponsorsH1B),
-		CategorizedTitle:      pgTextPtr(row.CategorizedJobTitle),
-		CategorizedFunction:   pgTextPtr(row.CategorizedJobFunction),
-		LocationCity:          pgTextPtr(row.LocationCity),
-		LocationType:          pgTextPtr(row.LocationType),
-		EmploymentType:        pgTextPtr(row.EmploymentType),
-		SalaryCurrencyCode:    pgTextPtr(row.SalaryCurrencyCode),
-		SalaryCurrencySymbol:  pgTextPtr(row.SalaryCurrencySymbol),
-		SalaryType:            pgTextPtr(row.SalaryType),
-		IsEntryLevel:          pgBoolPtr(row.IsEntryLevel),
-		IsJunior:              pgBoolPtr(row.IsJunior),
-		IsMidLevel:            pgBoolPtr(row.IsMidLevel),
-		IsSenior:              pgBoolPtr(row.IsSenior),
-		IsLead:                pgBoolPtr(row.IsLead),
+		ID:                                      int64(row.ID),
+		RawUSJobID:                              int64(row.RawUSJobID),
+		RoleTitle:                               pgTextPtr(row.RoleTitle),
+		RoleDescription:                         pgTextPtr(row.RoleDescription),
+		RoleRequirements:                        pgTextPtr(row.RoleRequirements),
+		JobDescriptionSummary:                   pgTextPtr(row.JobDescriptionSummary),
+		CompanyName:                             pgTextPtr(row.CompanyName),
+		CompanySlug:                             pgTextPtr(row.CompanySlug),
+		CompanyTagline:                          pgTextPtr(row.CompanyTagline),
+		CompanyProfilePicURL:                    pgTextPtr(row.CompanyProfilePicURL),
+		CompanyHomePageURL:                      pgTextPtr(row.CompanyHomePageURL),
+		CompanyLinkedInURL:                      pgTextPtr(row.CompanyLinkedInURL),
+		CompanyEmployeeRange:                    pgTextPtr(row.CompanyEmployeeRange),
+		CompanyFoundedYear:                      pgTextPtr(row.CompanyFoundedYear),
+		CompanySponsorsH1B:                      pgBoolPtr(row.CompanySponsorsH1B),
+		CategorizedTitle:                        pgTextPtr(row.CategorizedJobTitle),
+		CategorizedFunction:                     pgTextPtr(row.CategorizedJobFunction),
+		LocationCity:                            pgTextPtr(row.LocationCity),
+		LocationType:                            pgTextPtr(row.LocationType),
+		EmploymentType:                          pgTextPtr(row.EmploymentType),
+		SalaryCurrencyCode:                      pgTextPtr(row.SalaryCurrencyCode),
+		SalaryCurrencySymbol:                    pgTextPtr(row.SalaryCurrencySymbol),
+		SalaryType:                              pgTextPtr(row.SalaryType),
+		IsEntryLevel:                            pgBoolPtr(row.IsEntryLevel),
+		IsJunior:                                pgBoolPtr(row.IsJunior),
+		IsMidLevel:                              pgBoolPtr(row.IsMidLevel),
+		IsSenior:                                pgBoolPtr(row.IsSenior),
+		IsLead:                                  pgBoolPtr(row.IsLead),
 		EducationRequirementsCredentialCategory: pgTextPtr(row.EducationRequirementsCredentialCategory),
 		ExperienceInPlaceOfEducation:            pgBoolPtr(row.ExperienceInPlaceOfEducation),
 		Benefits:                                pgTextPtr(row.Benefits),
 		DateDeleted:                             timestamptzStringPtr(row.DateDeleted),
-		URL:                   pgTextPtr(row.Url),
+		URL:                                     pgTextPtr(row.Url),
 	}
 	if row.SalaryMin.Valid {
 		v := row.SalaryMin.Float64
