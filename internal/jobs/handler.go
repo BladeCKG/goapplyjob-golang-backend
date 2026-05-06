@@ -44,7 +44,6 @@ type filterOptionsCache struct {
 	locationTypes      []string
 	employmentTypes    []string
 	lastRefreshAt      time.Time
-	refreshRunning     bool
 }
 
 const (
@@ -205,12 +204,13 @@ func NewHandler(cfg config.Config, db *database.DB, authHandler *auth.Handler) *
 		db:                        db,
 		auth:                      authHandler,
 		q:                         gensqlc.New(db.PGX),
-		filterCacheRefreshSeconds: max(config.GetenvInt("FILTER_OPTIONS_CACHE_REFRESH_SECONDS", defaultFilterCacheRefreshSeconds), 1),
+		filterCacheRefreshSeconds: cfg.FilterOptionsCacheRefreshSeconds,
 		filterCache: filterOptionsCache{
 			jobCategoryParents: map[string]any{},
 			locationParents:    map[string][]string{},
 			techStacks:         []string{},
 			employmentTypes:    []string{},
+			lastRefreshAt:      time.Time{},
 		},
 	}
 }
@@ -752,25 +752,14 @@ func (h *Handler) refreshFilterCache(ctx context.Context) error {
 }
 
 func (h *Handler) ensureFilterCacheFresh(ctx context.Context, force bool) error {
-	if force {
-		h.filterCache.mu.Lock()
-	} else {
-		if !h.filterCache.mu.TryLock() {
-			return nil
-		}
-	}
-
-	defer h.filterCache.mu.Unlock()
-
 	maxID, err := h.getMaxParsedJobID(ctx)
 	if err != nil {
 		return err
 	}
 	if !force && parsedJobFilterRowsEqual(h.filterCache.maxParsedJobID, maxID) {
-		if !h.filterCache.lastRefreshAt.IsZero() &&
-			time.Since(h.filterCache.lastRefreshAt) < time.Duration(h.filterCacheRefreshSeconds)*time.Second {
-			return nil
-		}
+		return nil
+	}
+	if !force && !h.filterCache.lastRefreshAt.IsZero() && time.Since(h.filterCache.lastRefreshAt) < time.Duration(h.filterCacheRefreshSeconds)*time.Second {
 		return nil
 	}
 	if err := h.refreshFilterCache(ctx); err != nil {
@@ -782,36 +771,29 @@ func (h *Handler) ensureFilterCacheFresh(ctx context.Context, force bool) error 
 }
 
 func (h *Handler) scheduleFilterCacheRefresh(force bool) {
-	h.filterCache.mu.Lock()
-	if h.filterCache.refreshRunning {
-		h.filterCache.mu.Unlock()
-		return
-	}
-	h.filterCache.refreshRunning = true
-	h.filterCache.mu.Unlock()
-
 	go func() {
-		defer func() {
+		if force {
 			h.filterCache.mu.Lock()
-			h.filterCache.refreshRunning = false
-			h.filterCache.mu.Unlock()
-		}()
+		} else {
+			if !h.filterCache.mu.TryLock() {
+				return
+			}
+		}
+
+		defer h.filterCache.mu.Unlock()
 		if err := h.ensureFilterCacheFresh(context.Background(), force); err != nil {
 			fmt.Printf("failed refreshing jobs filter cache: %v\n", err)
 		}
 	}()
 }
 
-func (h *Handler) WarmFilterCache(_ context.Context) error {
-	h.scheduleFilterCacheRefresh(true)
-	return nil
+func (h *Handler) WarmFilterCache(ctx context.Context) error {
+	return h.ensureFilterCacheFresh(ctx, true)
 }
 
 func (h *Handler) filterOptions(c *gin.Context) {
-	if err := h.ensureFilterCacheFresh(c.Request.Context(), false); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load filter options"})
-		return
-	}
+	h.scheduleFilterCacheRefresh(false)
+
 	minSalaryOptions := []int{}
 	for salary := minSalaryStart; salary <= minSalaryEnd; salary += minSalaryStep {
 		minSalaryOptions = append(minSalaryOptions, salary)

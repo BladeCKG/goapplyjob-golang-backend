@@ -163,6 +163,7 @@ type Config struct {
 	OpenAIModels                             string
 	OpenAIBaseURL                            string
 	OpenAIClassifierPromptSource             string
+	FilterOptionsCacheRefreshSeconds         int
 }
 
 func Load() Config {
@@ -322,6 +323,7 @@ func Load() Config {
 		OpenAIModels:                             getenv("OPENAI_MODELS", "gpt-4o-mini,gpt-4o"),
 		OpenAIBaseURL:                            getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
 		OpenAIClassifierPromptSource:             getenv("OPENAI_CLASSIFIER_PROMPT_SOURCE", ""),
+		FilterOptionsCacheRefreshSeconds:         getenvInt("FILTER_OPTIONS_CACHE_REFRESH_SECONDS", 300),
 	}
 }
 
@@ -439,6 +441,7 @@ func getenvBool(key string, fallback bool) bool { return GetenvBool(key, fallbac
 func getenvFloat(key string, fallback float64) float64 {
 	return GetenvFloat(key, fallback)
 }
+
 func getenvCSVSet(key, fallback string) map[string]struct{} {
 	return GetenvCSVSet(key, fallback)
 }

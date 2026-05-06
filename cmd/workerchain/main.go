@@ -50,6 +50,8 @@ func main() {
 		)
 		defaultRemoteRocketshipURLs := []string{
 			"https://www.remoterocketship.com/us/sitemap_job_openings_us_1.xml",
+			"https://www.remoterocketship.com/gb/sitemap_job_openings_gb.xml",
+			"https://www.remoterocketship.com/ca/sitemap_job_openings_ca.xml",
 			"https://www.remoterocketship.com/sitemap_job_openings_worldwide.xml",
 			"https://www.remoterocketship.com/sitemap_job_openings_rest_of_world.xml",
 			"https://www.remoterocketship.com/sitemap_job_openings_mx.xml",

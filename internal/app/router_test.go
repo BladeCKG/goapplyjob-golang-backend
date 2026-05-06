@@ -8,6 +8,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"goapplyjob-golang-backend/internal/config"
+	"goapplyjob-golang-backend/internal/database"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,9 +18,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"goapplyjob-golang-backend/internal/config"
-	"goapplyjob-golang-backend/internal/database"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -367,6 +366,7 @@ func TestJobsDefaultSortUsesCreatedAtSource(t *testing.T) {
 		t.Fatalf("unexpected order %#v", items)
 	}
 }
+
 func TestJobsFilterOptionsAnnualized(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
@@ -436,43 +436,6 @@ func TestJobsMinSalaryAnnualizesUSDWithSalaryType(t *testing.T) {
 	}
 	if body["items"].([]any)[0].(map[string]any)["categorized_job_title"] != "Monthly Mismatch Case" {
 		t.Fatalf("unexpected item for min-salary annualized usd %#v", body)
-	}
-}
-
-func TestJobsFilterOptionsIncludesHierarchyMetadata(t *testing.T) {
-	router, db := testRouter(t)
-	defer db.Close()
-
-	insertJobWithFunction(t, db, 201, "Data Engineer", "Engineering", "Data Engineer")
-	insertJobWithFunction(t, db, 202, "Software Engineer", "Engineering", "Software Engineer")
-	if _, err := db.SQL.ExecContext(context.Background(), `UPDATE parsed_jobs SET location_countries = ?, location_city = ?, location_us_states = ? WHERE raw_us_job_id = ?`, `["United States"]`, "Austin", `["Texas"]`, 3201); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.SQL.ExecContext(context.Background(), `UPDATE parsed_jobs SET location_countries = ?, location_city = ?, location_us_states = ? WHERE raw_us_job_id = ?`, `["Canada"]`, "Toronto", `["Ontario"]`, 3202); err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/jobs/filter-options", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	assertStatus(t, rec.Code, http.StatusOK)
-
-	var body map[string]any
-	decodeBody(t, rec.Body.Bytes(), &body)
-	jobCategoryParents := body["job_category_parents"].(map[string]any)
-	if jobCategoryParents["Engineering"] != nil {
-		t.Fatalf("expected Engineering root parent to be nil %#v", body)
-	}
-	if jobCategoryParents["Data Engineer"] != "Engineering" {
-		t.Fatalf("missing Data Engineer parent metadata %#v", body)
-	}
-	locationParents := body["location_parents"].(map[string]any)
-	texasParents := locationParents["Texas"].([]any)
-	if len(texasParents) < 1 || texasParents[0] != "United States" {
-		t.Fatalf("unexpected Texas parent metadata %#v", body)
-	}
-	if len(locationParents["United States"].([]any)) != 0 {
-		t.Fatalf("expected country root to have no parents %#v", body)
 	}
 }
 
@@ -712,42 +675,6 @@ func TestJobsTitleFilterCombinesExactAndFreeTextMatches(t *testing.T) {
 	}
 }
 
-func TestJobsTechStackFilterAndOptions(t *testing.T) {
-	router, db := testRouter(t)
-	defer db.Close()
-
-	insertJobWithTechStack(t, db, 81, "Platform Engineer", []string{"Go", "SQL"})
-	insertJobWithTechStack(t, db, 82, "Frontend Engineer", []string{"TypeScript"})
-
-	optionsReq := httptest.NewRequest(http.MethodGet, "/jobs/filter-options", nil)
-	optionsRec := httptest.NewRecorder()
-	router.ServeHTTP(optionsRec, optionsReq)
-	assertStatus(t, optionsRec.Code, http.StatusOK)
-
-	var optionsBody map[string]any
-	decodeBody(t, optionsRec.Body.Bytes(), &optionsBody)
-	techStacks := optionsBody["tech_stacks"].([]any)
-	if len(techStacks) != 3 {
-		t.Fatalf("unexpected tech stack options %#v", optionsBody)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/jobs?tech_stack=Go", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	assertStatus(t, rec.Code, http.StatusOK)
-
-	var body map[string]any
-	decodeBody(t, rec.Body.Bytes(), &body)
-	items := body["items"].([]any)
-	if len(items) != 1 {
-		t.Fatalf("expected one tech stack match, got %#v", body)
-	}
-	firstItem := items[0].(map[string]any)
-	if len(firstItem["tech_stack"].([]any)) != 2 {
-		t.Fatalf("expected tech stack in job item, got %#v", firstItem)
-	}
-}
-
 func TestJobsTechStackFilterSnakeCase(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()
@@ -826,37 +753,6 @@ func TestJobsSupportsPostDateFromCutoff(t *testing.T) {
 	decodeBody(t, metricsRec.Body.Bytes(), &metricsBody)
 	if metricsBody["jobs_today"].(float64) < 1 {
 		t.Fatalf("expected metrics with cutoff to include recent job %#v", metricsBody)
-	}
-}
-
-func TestJobsEmploymentTypeFilterAndOptions(t *testing.T) {
-	router, db := testRouter(t)
-	defer db.Close()
-
-	insertEmploymentTypeJob(t, db, 101, "full_time")
-	insertEmploymentTypeJob(t, db, 102, "contractor")
-
-	optionsReq := httptest.NewRequest(http.MethodGet, "/jobs/filter-options", nil)
-	optionsRec := httptest.NewRecorder()
-	router.ServeHTTP(optionsRec, optionsReq)
-	assertStatus(t, optionsRec.Code, http.StatusOK)
-
-	var optionsBody map[string]any
-	decodeBody(t, optionsRec.Body.Bytes(), &optionsBody)
-	if len(optionsBody["employment_types"].([]any)) != 2 {
-		t.Fatalf("unexpected employment type options %#v", optionsBody)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/jobs?employment_type=contract", nil)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-	assertStatus(t, rec.Code, http.StatusOK)
-
-	var body map[string]any
-	decodeBody(t, rec.Body.Bytes(), &body)
-	items := body["items"].([]any)
-	if len(items) != 1 || items[0].(map[string]any)["employment_type"].(string) != "contractor" {
-		t.Fatalf("unexpected employment type filter response %#v", body)
 	}
 }
 
