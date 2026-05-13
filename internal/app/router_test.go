@@ -1457,6 +1457,130 @@ func TestCompaniesListHandlesScalarIndustries(t *testing.T) {
 	assertStatus(t, rec.Code, http.StatusOK)
 }
 
+func TestAdminMergeParsedCompanies(t *testing.T) {
+	t.Setenv("ADMIN_EMAILS", "admin@example.com")
+
+	router, db := testRouter(t)
+	defer db.Close()
+
+	var duplicateID int64
+	if err := db.SQL.QueryRowContext(
+		context.Background(),
+		`INSERT INTO parsed_companies (external_company_id, name, slug, employee_range, industries, updated_at)
+		 VALUES ('gaj(company_dup)gaj', 'Acme', 'acme-2', '11-50', '["SaaS"]', ?)
+		 RETURNING id`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+	).Scan(&duplicateID); err != nil {
+		t.Fatal(err)
+	}
+
+	var canonicalID int64
+	if err := db.SQL.QueryRowContext(
+		context.Background(),
+		`INSERT INTO parsed_companies (external_company_id, name, slug, tagline, home_page_url, linkedin_url, updated_at)
+		 VALUES ('gaj(company_main)gaj', 'Acme', 'acme', 'Builds hiring tools', 'https://acme.example.com', 'https://linkedin.com/company/acme', ?)
+		 RETURNING id`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+	).Scan(&canonicalID); err != nil {
+		t.Fatal(err)
+	}
+
+	for index, companyID := range []int64{duplicateID, canonicalID} {
+		rawJobID := 9800 + index
+		if _, err := db.SQL.ExecContext(
+			context.Background(),
+			`INSERT INTO raw_us_jobs (id, url, post_date, is_ready, is_skippable, is_parsed, retry_count, raw_json)
+			 VALUES (?, ?, ?, true, false, true, 0, '{}')`,
+			rawJobID,
+			fmt.Sprintf("https://example.com/company-merge-%d", rawJobID),
+			time.Now().UTC().Format(time.RFC3339Nano),
+		); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.SQL.ExecContext(
+			context.Background(),
+			`INSERT INTO parsed_jobs (raw_us_job_id, company_id, role_title, created_at_source, url)
+			 VALUES (?, ?, ?, ?, ?)`,
+			rawJobID,
+			companyID,
+			fmt.Sprintf("Role %d", rawJobID),
+			time.Now().UTC().Format(time.RFC3339Nano),
+			fmt.Sprintf("https://jobs.example.com/company-merge-%d", rawJobID),
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	adminCookie := verifyLoginCode(t, router, "admin@example.com", requestLoginCode(t, router, "admin@example.com"))
+	body, _ := json.Marshal(map[string]any{
+		"company_ids": []int64{duplicateID, canonicalID},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/admin/parsed-companies/merge", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(adminCookie)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	assertStatus(t, rec.Code, http.StatusOK)
+
+	var payload map[string]any
+	decodeBody(t, rec.Body.Bytes(), &payload)
+	if int64(payload["canonical_company_id"].(float64)) != canonicalID {
+		t.Fatalf("expected canonical company id %d, got %#v", canonicalID, payload)
+	}
+	if int(payload["merged_companies"].(float64)) != 1 {
+		t.Fatalf("expected one merged company, got %#v", payload)
+	}
+	if int(payload["reassigned_jobs"].(float64)) != 1 {
+		t.Fatalf("expected one reassigned job, got %#v", payload)
+	}
+
+	var companyCount int
+	if err := db.SQL.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM parsed_companies`).Scan(&companyCount); err != nil {
+		t.Fatal(err)
+	}
+	if companyCount != 1 {
+		t.Fatalf("expected one remaining parsed company, got %d", companyCount)
+	}
+
+	var mergedExternalIDs sql.NullString
+	var mergedEmployeeRange sql.NullString
+	var mergedIndustries sql.NullString
+	if err := db.SQL.QueryRowContext(
+		context.Background(),
+		`SELECT external_company_id, employee_range, industries::text FROM parsed_companies WHERE id = ?`,
+		canonicalID,
+	).Scan(&mergedExternalIDs, &mergedEmployeeRange, &mergedIndustries); err != nil {
+		t.Fatal(err)
+	}
+	if mergedExternalIDs.String != "gaj(company_main)gaj,gaj(company_dup)gaj" {
+		t.Fatalf("unexpected merged external_company_id %q", mergedExternalIDs.String)
+	}
+	if mergedEmployeeRange.String != "11-50" {
+		t.Fatalf("expected canonical company to inherit employee_range, got %q", mergedEmployeeRange.String)
+	}
+	if mergedIndustries.String != `["SaaS"]` {
+		t.Fatalf("expected canonical company to inherit industries, got %q", mergedIndustries.String)
+	}
+
+	rows, err := db.SQL.QueryContext(context.Background(), `SELECT company_id FROM parsed_jobs ORDER BY id ASC`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var companyID sql.NullInt64
+		if err := rows.Scan(&companyID); err != nil {
+			t.Fatal(err)
+		}
+		if !companyID.Valid || companyID.Int64 != canonicalID {
+			t.Fatalf("expected merged jobs to point at canonical company id %d, got %#v", canonicalID, companyID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPricingFlow(t *testing.T) {
 	router, db := testRouter(t)
 	defer db.Close()

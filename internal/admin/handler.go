@@ -14,6 +14,7 @@ import (
 	"goapplyjob-golang-backend/internal/sources/plugins"
 	"net/http"
 	"net/mail"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +24,8 @@ import (
 )
 
 const adminEmailsEnv = "ADMIN_EMAILS"
+
+var adminCompanySlugSuffixPattern = regexp.MustCompile(`^(?P<base>.+)-(?P<num>\d+)$`)
 
 type Handler struct {
 	cfg          config.Config
@@ -65,6 +68,7 @@ func (h *Handler) Register(router gin.IRouter) {
 	router.PATCH("/admin/parsed-jobs/:jobID", h.updateParsedJob)
 	router.DELETE("/admin/parsed-jobs/:jobID", h.deleteParsedJob)
 	router.GET("/admin/parsed-companies", h.listParsedCompanies)
+	router.POST("/admin/parsed-companies/merge", h.mergeParsedCompanies)
 	router.PATCH("/admin/parsed-companies/:companyID", h.updateParsedCompany)
 	router.DELETE("/admin/parsed-companies/:companyID", h.deleteParsedCompany)
 }
@@ -1897,6 +1901,617 @@ func (h *Handler) updateParsedCompany(c *gin.Context) {
 	req.URL.RawQuery = q.Encode()
 	c.Request = req
 	h.listParsedCompanies(c)
+}
+
+type adminCompanyMergeRow struct {
+	ID                          int64
+	ExternalCompanyID           sql.NullString
+	Name                        sql.NullString
+	Slug                        sql.NullString
+	Tagline                     sql.NullString
+	FoundedYear                 sql.NullString
+	HomePageURL                 sql.NullString
+	LinkedInURL                 sql.NullString
+	CareersPageURL              sql.NullString
+	ProfilePicURL               sql.NullString
+	SponsorsH1B                 sql.NullBool
+	SponsorsUKSkilledWorkerVisa sql.NullBool
+	EmployeeRange               sql.NullString
+	NumberOfEmployeesOnLinkedIn sql.NullInt64
+	TotalFundingAmount          sql.NullInt64
+	Industries                  sql.NullString
+	HQLocation                  sql.NullString
+	TaglineBrazil               sql.NullString
+	TaglineFrance               sql.NullString
+	TaglineGermany              sql.NullString
+	ChatGPTDescription          sql.NullString
+	LinkedInDescription         sql.NullString
+	ChatGPTDescriptionBrazil    sql.NullString
+	ChatGPTDescriptionFrance    sql.NullString
+	ChatGPTDescriptionGermany   sql.NullString
+	LinkedInDescriptionBrazil   sql.NullString
+	LinkedInDescriptionFrance   sql.NullString
+	LinkedInDescriptionGermany  sql.NullString
+	FundingData                 sql.NullString
+	ChatGPTIndustries           sql.NullString
+	IndustrySpecialities        sql.NullString
+	IndustrySpecialitiesBrazil  sql.NullString
+	IndustrySpecialitiesFrance  sql.NullString
+	IndustrySpecialitiesGermany sql.NullString
+}
+
+func (h *Handler) mergeParsedCompanies(c *gin.Context) {
+	if _, ok := h.requireAdmin(c); !ok {
+		return
+	}
+
+	var payload struct {
+		CompanyIDs         []int64 `json:"company_ids"`
+		CanonicalCompanyID *int64  `json:"canonical_company_id"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid request"})
+		return
+	}
+
+	companyIDs := uniquePositiveInt64s(payload.CompanyIDs)
+	if len(companyIDs) < 2 {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "At least two parsed company ids are required"})
+		return
+	}
+
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(companyIDs)), ",")
+	query := `SELECT id, external_company_id, name, slug, tagline, founded_year, home_page_url, linkedin_url, careers_page_url, profile_pic_url,
+		sponsors_h1b, sponsors_uk_skilled_worker_visa, employee_range, number_of_employees_on_linkedin, total_funding_amount,
+		industries::text, hq_location, tagline_brazil, tagline_france, tagline_germany,
+		chatgpt_description, linkedin_description, chatgpt_description_brazil, chatgpt_description_france, chatgpt_description_germany,
+		linkedin_description_brazil, linkedin_description_france, linkedin_description_germany,
+		funding_data::text, chatgpt_industries::text, industry_specialities::text, industry_specialities_brazil::text,
+		industry_specialities_france::text, industry_specialities_germany::text
+		FROM parsed_companies
+		WHERE id IN (` + placeholders + `)`
+	args := make([]any, 0, len(companyIDs))
+	for _, companyID := range companyIDs {
+		args = append(args, companyID)
+	}
+
+	rows, err := h.db.SQL.QueryContext(c.Request.Context(), query, args...)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load parsed companies"})
+		return
+	}
+	defer rows.Close()
+
+	items := make([]adminCompanyMergeRow, 0, len(companyIDs))
+	byID := make(map[int64]adminCompanyMergeRow, len(companyIDs))
+	for rows.Next() {
+		var item adminCompanyMergeRow
+		if err := rows.Scan(
+			&item.ID,
+			&item.ExternalCompanyID,
+			&item.Name,
+			&item.Slug,
+			&item.Tagline,
+			&item.FoundedYear,
+			&item.HomePageURL,
+			&item.LinkedInURL,
+			&item.CareersPageURL,
+			&item.ProfilePicURL,
+			&item.SponsorsH1B,
+			&item.SponsorsUKSkilledWorkerVisa,
+			&item.EmployeeRange,
+			&item.NumberOfEmployeesOnLinkedIn,
+			&item.TotalFundingAmount,
+			&item.Industries,
+			&item.HQLocation,
+			&item.TaglineBrazil,
+			&item.TaglineFrance,
+			&item.TaglineGermany,
+			&item.ChatGPTDescription,
+			&item.LinkedInDescription,
+			&item.ChatGPTDescriptionBrazil,
+			&item.ChatGPTDescriptionFrance,
+			&item.ChatGPTDescriptionGermany,
+			&item.LinkedInDescriptionBrazil,
+			&item.LinkedInDescriptionFrance,
+			&item.LinkedInDescriptionGermany,
+			&item.FundingData,
+			&item.ChatGPTIndustries,
+			&item.IndustrySpecialities,
+			&item.IndustrySpecialitiesBrazil,
+			&item.IndustrySpecialitiesFrance,
+			&item.IndustrySpecialitiesGermany,
+		); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load parsed companies"})
+			return
+		}
+		items = append(items, item)
+		byID[item.ID] = item
+	}
+	if rows.Err() != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to load parsed companies"})
+		return
+	}
+	if len(items) != len(companyIDs) {
+		c.JSON(http.StatusNotFound, gin.H{"detail": "One or more parsed companies were not found"})
+		return
+	}
+
+	canonicalID := int64(0)
+	if payload.CanonicalCompanyID != nil {
+		canonicalID = *payload.CanonicalCompanyID
+		if canonicalID <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": "Invalid canonical parsed company id"})
+			return
+		}
+		if _, ok := byID[canonicalID]; !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"detail": "Canonical parsed company id must be included in company_ids"})
+			return
+		}
+	} else {
+		sort.Slice(items, func(i, j int) bool {
+			leftScore := adminCompanyCompletenessScore(items[i])
+			rightScore := adminCompanyCompletenessScore(items[j])
+			if leftScore != rightScore {
+				return leftScore > rightScore
+			}
+			return items[i].ID < items[j].ID
+		})
+		canonicalID = items[0].ID
+	}
+
+	canonical := byID[canonicalID]
+	duplicates := make([]adminCompanyMergeRow, 0, len(items)-1)
+	duplicateIDs := make([]int64, 0, len(items)-1)
+	for _, item := range items {
+		if item.ID == canonicalID {
+			continue
+		}
+		duplicates = append(duplicates, item)
+		duplicateIDs = append(duplicateIDs, item.ID)
+	}
+	if len(duplicates) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "At least one duplicate parsed company is required"})
+		return
+	}
+
+	mergedFields := mergeAdminCompanyFields(&canonical, duplicates)
+	cleanedSlug := cleanAdminCompanySlugNumericSuffix(canonical.Slug.String)
+	if cleanedSlug != "" && cleanedSlug != strings.TrimSpace(canonical.Slug.String) {
+		canonical.Slug = sql.NullString{String: cleanedSlug, Valid: true}
+		if !containsString(mergedFields, "slug") {
+			mergedFields = append(mergedFields, "slug")
+		}
+	}
+
+	tx, err := h.db.SQL.BeginTx(c.Request.Context(), nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to merge parsed companies"})
+		return
+	}
+	defer tx.Rollback()
+
+	if err := h.updateMergedParsedCompany(c.Request.Context(), tx, canonical); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to update canonical parsed company"})
+		return
+	}
+
+	reassignedJobs := 0
+	mergedCompanies := 0
+	for _, duplicateID := range duplicateIDs {
+		updateResult, err := tx.ExecContext(c.Request.Context(), `UPDATE parsed_jobs SET company_id = ? WHERE company_id = ?`, canonical.ID, duplicateID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to reassign parsed jobs"})
+			return
+		}
+		if affected, rowsErr := updateResult.RowsAffected(); rowsErr == nil {
+			reassignedJobs += int(affected)
+		}
+
+		deleteResult, err := tx.ExecContext(c.Request.Context(), `DELETE FROM parsed_companies WHERE id = ?`, duplicateID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to delete duplicate parsed company"})
+			return
+		}
+		if affected, rowsErr := deleteResult.RowsAffected(); rowsErr == nil {
+			mergedCompanies += int(affected)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"detail": "Failed to merge parsed companies"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"canonical_company_id": canonical.ID,
+		"deleted_company_ids":  duplicateIDs,
+		"merged_companies":     mergedCompanies,
+		"reassigned_jobs":      reassignedJobs,
+		"merged_fields":        mergedFields,
+	})
+}
+
+func (h *Handler) updateMergedParsedCompany(ctx context.Context, tx *database.Tx, canonical adminCompanyMergeRow) error {
+	_, err := tx.ExecContext(
+		ctx,
+		`UPDATE parsed_companies
+		    SET external_company_id = ?, name = ?, slug = ?, tagline = ?, founded_year = ?, home_page_url = ?, linkedin_url = ?,
+		        careers_page_url = ?, profile_pic_url = ?, sponsors_h1b = ?, sponsors_uk_skilled_worker_visa = ?, employee_range = ?,
+		        number_of_employees_on_linkedin = ?, total_funding_amount = ?, industries = ?, hq_location = ?,
+		        tagline_brazil = ?, tagline_france = ?, tagline_germany = ?, chatgpt_description = ?, linkedin_description = ?,
+		        chatgpt_description_brazil = ?, chatgpt_description_france = ?, chatgpt_description_germany = ?,
+		        linkedin_description_brazil = ?, linkedin_description_france = ?, linkedin_description_germany = ?,
+		        funding_data = ?, chatgpt_industries = ?, industry_specialities = ?, industry_specialities_brazil = ?,
+		        industry_specialities_france = ?, industry_specialities_germany = ?, updated_at = NOW()
+		  WHERE id = ?`,
+		nullStringValue(canonical.ExternalCompanyID),
+		nullStringValue(canonical.Name),
+		nullStringValue(canonical.Slug),
+		nullStringValue(canonical.Tagline),
+		nullStringValue(canonical.FoundedYear),
+		nullStringValue(canonical.HomePageURL),
+		nullStringValue(canonical.LinkedInURL),
+		nullStringValue(canonical.CareersPageURL),
+		nullStringValue(canonical.ProfilePicURL),
+		nullBoolValue(canonical.SponsorsH1B),
+		nullBoolValue(canonical.SponsorsUKSkilledWorkerVisa),
+		nullStringValue(canonical.EmployeeRange),
+		nullIntValue(canonical.NumberOfEmployeesOnLinkedIn),
+		nullIntValue(canonical.TotalFundingAmount),
+		nullJSONTextValue(canonical.Industries),
+		nullStringValue(canonical.HQLocation),
+		nullStringValue(canonical.TaglineBrazil),
+		nullStringValue(canonical.TaglineFrance),
+		nullStringValue(canonical.TaglineGermany),
+		nullStringValue(canonical.ChatGPTDescription),
+		nullStringValue(canonical.LinkedInDescription),
+		nullStringValue(canonical.ChatGPTDescriptionBrazil),
+		nullStringValue(canonical.ChatGPTDescriptionFrance),
+		nullStringValue(canonical.ChatGPTDescriptionGermany),
+		nullStringValue(canonical.LinkedInDescriptionBrazil),
+		nullStringValue(canonical.LinkedInDescriptionFrance),
+		nullStringValue(canonical.LinkedInDescriptionGermany),
+		nullJSONTextValue(canonical.FundingData),
+		nullJSONTextValue(canonical.ChatGPTIndustries),
+		nullJSONTextValue(canonical.IndustrySpecialities),
+		nullJSONTextValue(canonical.IndustrySpecialitiesBrazil),
+		nullJSONTextValue(canonical.IndustrySpecialitiesFrance),
+		nullJSONTextValue(canonical.IndustrySpecialitiesGermany),
+		canonical.ID,
+	)
+	return err
+}
+
+func adminCompanyCompletenessScore(row adminCompanyMergeRow) int {
+	score := 0
+	if populatedString(row.ExternalCompanyID) {
+		score++
+	}
+	if populatedString(row.Name) {
+		score++
+	}
+	if populatedString(row.Slug) {
+		score++
+	}
+	if populatedString(row.Tagline) {
+		score++
+	}
+	if populatedString(row.FoundedYear) {
+		score++
+	}
+	if populatedString(row.HomePageURL) {
+		score++
+	}
+	if populatedString(row.LinkedInURL) {
+		score++
+	}
+	if populatedString(row.CareersPageURL) {
+		score++
+	}
+	if populatedString(row.ProfilePicURL) {
+		score++
+	}
+	if row.SponsorsH1B.Valid {
+		score++
+	}
+	if row.SponsorsUKSkilledWorkerVisa.Valid {
+		score++
+	}
+	if populatedString(row.EmployeeRange) {
+		score++
+	}
+	if row.NumberOfEmployeesOnLinkedIn.Valid {
+		score++
+	}
+	if row.TotalFundingAmount.Valid {
+		score++
+	}
+	if populatedJSONText(row.Industries) {
+		score++
+	}
+	if populatedString(row.HQLocation) {
+		score++
+	}
+	if populatedString(row.TaglineBrazil) {
+		score++
+	}
+	if populatedString(row.TaglineFrance) {
+		score++
+	}
+	if populatedString(row.TaglineGermany) {
+		score++
+	}
+	if populatedString(row.ChatGPTDescription) {
+		score++
+	}
+	if populatedString(row.LinkedInDescription) {
+		score++
+	}
+	if populatedString(row.ChatGPTDescriptionBrazil) {
+		score++
+	}
+	if populatedString(row.ChatGPTDescriptionFrance) {
+		score++
+	}
+	if populatedString(row.ChatGPTDescriptionGermany) {
+		score++
+	}
+	if populatedString(row.LinkedInDescriptionBrazil) {
+		score++
+	}
+	if populatedString(row.LinkedInDescriptionFrance) {
+		score++
+	}
+	if populatedString(row.LinkedInDescriptionGermany) {
+		score++
+	}
+	if populatedJSONText(row.FundingData) {
+		score++
+	}
+	if populatedJSONText(row.ChatGPTIndustries) {
+		score++
+	}
+	if populatedJSONText(row.IndustrySpecialities) {
+		score++
+	}
+	if populatedJSONText(row.IndustrySpecialitiesBrazil) {
+		score++
+	}
+	if populatedJSONText(row.IndustrySpecialitiesFrance) {
+		score++
+	}
+	if populatedJSONText(row.IndustrySpecialitiesGermany) {
+		score++
+	}
+	return score
+}
+
+func mergeAdminCompanyFields(winner *adminCompanyMergeRow, losers []adminCompanyMergeRow) []string {
+	merged := []string{}
+	mergedExternalIDs := mergeAdminExternalCompanyIDs(winner.ExternalCompanyID, losers)
+	if mergedExternalIDs.Valid && mergedExternalIDs.String != winner.ExternalCompanyID.String {
+		winner.ExternalCompanyID = mergedExternalIDs
+		merged = append(merged, "external_company_id")
+	}
+
+	fillString := func(name string, dest *sql.NullString, getter func(adminCompanyMergeRow) sql.NullString) {
+		if populatedString(*dest) {
+			return
+		}
+		for _, loser := range losers {
+			candidate := getter(loser)
+			if populatedString(candidate) {
+				*dest = candidate
+				merged = append(merged, name)
+				return
+			}
+		}
+	}
+	fillBool := func(name string, dest *sql.NullBool, getter func(adminCompanyMergeRow) sql.NullBool) {
+		if dest.Valid {
+			return
+		}
+		for _, loser := range losers {
+			candidate := getter(loser)
+			if candidate.Valid {
+				*dest = candidate
+				merged = append(merged, name)
+				return
+			}
+		}
+	}
+	fillInt := func(name string, dest *sql.NullInt64, getter func(adminCompanyMergeRow) sql.NullInt64) {
+		if dest.Valid {
+			return
+		}
+		for _, loser := range losers {
+			candidate := getter(loser)
+			if candidate.Valid {
+				*dest = candidate
+				merged = append(merged, name)
+				return
+			}
+		}
+	}
+	fillJSON := func(name string, dest *sql.NullString, getter func(adminCompanyMergeRow) sql.NullString) {
+		if populatedJSONText(*dest) {
+			return
+		}
+		for _, loser := range losers {
+			candidate := getter(loser)
+			if populatedJSONText(candidate) {
+				*dest = candidate
+				merged = append(merged, name)
+				return
+			}
+		}
+	}
+
+	fillString("name", &winner.Name, func(c adminCompanyMergeRow) sql.NullString { return c.Name })
+	fillString("slug", &winner.Slug, func(c adminCompanyMergeRow) sql.NullString { return c.Slug })
+	fillString("tagline", &winner.Tagline, func(c adminCompanyMergeRow) sql.NullString { return c.Tagline })
+	fillString("founded_year", &winner.FoundedYear, func(c adminCompanyMergeRow) sql.NullString { return c.FoundedYear })
+	fillString("home_page_url", &winner.HomePageURL, func(c adminCompanyMergeRow) sql.NullString { return c.HomePageURL })
+	fillString("linkedin_url", &winner.LinkedInURL, func(c adminCompanyMergeRow) sql.NullString { return c.LinkedInURL })
+	fillString("careers_page_url", &winner.CareersPageURL, func(c adminCompanyMergeRow) sql.NullString { return c.CareersPageURL })
+	fillString("profile_pic_url", &winner.ProfilePicURL, func(c adminCompanyMergeRow) sql.NullString { return c.ProfilePicURL })
+	fillBool("sponsors_h1b", &winner.SponsorsH1B, func(c adminCompanyMergeRow) sql.NullBool { return c.SponsorsH1B })
+	fillBool("sponsors_uk_skilled_worker_visa", &winner.SponsorsUKSkilledWorkerVisa, func(c adminCompanyMergeRow) sql.NullBool { return c.SponsorsUKSkilledWorkerVisa })
+	fillString("employee_range", &winner.EmployeeRange, func(c adminCompanyMergeRow) sql.NullString { return c.EmployeeRange })
+	fillInt("number_of_employees_on_linkedin", &winner.NumberOfEmployeesOnLinkedIn, func(c adminCompanyMergeRow) sql.NullInt64 {
+		return c.NumberOfEmployeesOnLinkedIn
+	})
+	fillInt("total_funding_amount", &winner.TotalFundingAmount, func(c adminCompanyMergeRow) sql.NullInt64 { return c.TotalFundingAmount })
+	fillJSON("industries", &winner.Industries, func(c adminCompanyMergeRow) sql.NullString { return c.Industries })
+	fillString("hq_location", &winner.HQLocation, func(c adminCompanyMergeRow) sql.NullString { return c.HQLocation })
+	fillString("tagline_brazil", &winner.TaglineBrazil, func(c adminCompanyMergeRow) sql.NullString { return c.TaglineBrazil })
+	fillString("tagline_france", &winner.TaglineFrance, func(c adminCompanyMergeRow) sql.NullString { return c.TaglineFrance })
+	fillString("tagline_germany", &winner.TaglineGermany, func(c adminCompanyMergeRow) sql.NullString { return c.TaglineGermany })
+	fillString("chatgpt_description", &winner.ChatGPTDescription, func(c adminCompanyMergeRow) sql.NullString { return c.ChatGPTDescription })
+	fillString("linkedin_description", &winner.LinkedInDescription, func(c adminCompanyMergeRow) sql.NullString { return c.LinkedInDescription })
+	fillString("chatgpt_description_brazil", &winner.ChatGPTDescriptionBrazil, func(c adminCompanyMergeRow) sql.NullString {
+		return c.ChatGPTDescriptionBrazil
+	})
+	fillString("chatgpt_description_france", &winner.ChatGPTDescriptionFrance, func(c adminCompanyMergeRow) sql.NullString {
+		return c.ChatGPTDescriptionFrance
+	})
+	fillString("chatgpt_description_germany", &winner.ChatGPTDescriptionGermany, func(c adminCompanyMergeRow) sql.NullString {
+		return c.ChatGPTDescriptionGermany
+	})
+	fillString("linkedin_description_brazil", &winner.LinkedInDescriptionBrazil, func(c adminCompanyMergeRow) sql.NullString {
+		return c.LinkedInDescriptionBrazil
+	})
+	fillString("linkedin_description_france", &winner.LinkedInDescriptionFrance, func(c adminCompanyMergeRow) sql.NullString {
+		return c.LinkedInDescriptionFrance
+	})
+	fillString("linkedin_description_germany", &winner.LinkedInDescriptionGermany, func(c adminCompanyMergeRow) sql.NullString {
+		return c.LinkedInDescriptionGermany
+	})
+	fillJSON("funding_data", &winner.FundingData, func(c adminCompanyMergeRow) sql.NullString { return c.FundingData })
+	fillJSON("chatgpt_industries", &winner.ChatGPTIndustries, func(c adminCompanyMergeRow) sql.NullString { return c.ChatGPTIndustries })
+	fillJSON("industry_specialities", &winner.IndustrySpecialities, func(c adminCompanyMergeRow) sql.NullString {
+		return c.IndustrySpecialities
+	})
+	fillJSON("industry_specialities_brazil", &winner.IndustrySpecialitiesBrazil, func(c adminCompanyMergeRow) sql.NullString {
+		return c.IndustrySpecialitiesBrazil
+	})
+	fillJSON("industry_specialities_france", &winner.IndustrySpecialitiesFrance, func(c adminCompanyMergeRow) sql.NullString {
+		return c.IndustrySpecialitiesFrance
+	})
+	fillJSON("industry_specialities_germany", &winner.IndustrySpecialitiesGermany, func(c adminCompanyMergeRow) sql.NullString {
+		return c.IndustrySpecialitiesGermany
+	})
+
+	return merged
+}
+
+func mergeAdminExternalCompanyIDs(current sql.NullString, losers []adminCompanyMergeRow) sql.NullString {
+	ordered := make([]string, 0, len(losers)+1)
+	seen := map[string]struct{}{}
+	appendParts := func(raw string) {
+		for _, part := range strings.Split(raw, ",") {
+			normalized := strings.TrimSpace(part)
+			if normalized == "" {
+				continue
+			}
+			if _, ok := seen[normalized]; ok {
+				continue
+			}
+			seen[normalized] = struct{}{}
+			ordered = append(ordered, normalized)
+		}
+	}
+
+	appendParts(current.String)
+	for _, loser := range losers {
+		appendParts(loser.ExternalCompanyID.String)
+	}
+	if len(ordered) == 0 {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: strings.Join(ordered, ","), Valid: true}
+}
+
+func populatedString(value sql.NullString) bool {
+	return strings.TrimSpace(value.String) != ""
+}
+
+func populatedJSONText(value sql.NullString) bool {
+	if !value.Valid {
+		return false
+	}
+	trimmed := strings.TrimSpace(value.String)
+	if trimmed == "" || trimmed == "null" || trimmed == "{}" || trimmed == "[]" {
+		return false
+	}
+	var anyValue any
+	if err := json.Unmarshal([]byte(trimmed), &anyValue); err == nil {
+		switch typed := anyValue.(type) {
+		case []any:
+			return len(typed) > 0
+		case map[string]any:
+			return len(typed) > 0
+		}
+	}
+	return true
+}
+
+func nullStringValue(value sql.NullString) any {
+	if !populatedString(value) {
+		return nil
+	}
+	return strings.TrimSpace(value.String)
+}
+
+func nullBoolValue(value sql.NullBool) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.Bool
+}
+
+func nullIntValue(value sql.NullInt64) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.Int64
+}
+
+func nullJSONTextValue(value sql.NullString) any {
+	if !populatedJSONText(value) {
+		return nil
+	}
+	return strings.TrimSpace(value.String)
+}
+
+func cleanAdminCompanySlugNumericSuffix(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	match := adminCompanySlugSuffixPattern.FindStringSubmatch(trimmed)
+	if len(match) == 0 {
+		return trimmed
+	}
+	baseIndex := adminCompanySlugSuffixPattern.SubexpIndex("base")
+	if baseIndex <= 0 || baseIndex >= len(match) {
+		return trimmed
+	}
+	base := strings.Trim(strings.TrimSpace(match[baseIndex]), "- ")
+	if base == "" {
+		return trimmed
+	}
+	return base
+}
+
+func containsString(items []string, needle string) bool {
+	for _, item := range items {
+		if item == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) deleteParsedCompany(c *gin.Context) {
